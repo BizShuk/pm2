@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	leftColW   = 34
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
 	detailRows = 11 // rows in detail section (excluding header)
@@ -190,10 +189,11 @@ func (m Model) View() string {
 	}
 
 	contentH := m.height - 2 // subtract title + footer rows
-	rw := m.width - leftColW - 1
+	leftW := m.getLeftColW()
+	rw := m.width - leftW - 1
 
-	left := lipgloss.NewStyle().Width(leftColW).Height(contentH).
-		Render(m.buildLeft(leftColW, contentH))
+	left := lipgloss.NewStyle().Width(leftW).Height(contentH).
+		Render(m.buildLeft(leftW, contentH))
 
 	div := lipgloss.NewStyle().Width(1).Height(contentH).Foreground(clBorder).
 		Render(strings.Repeat("│\n", contentH-1) + "│")
@@ -224,14 +224,27 @@ func (m Model) buildLeft(w, h int) string {
 	hdr := secHeader("processes", w)
 	blank := strings.Repeat(" ", w)
 
+	// Calculate max uptime length for alignment
+	maxUpLen := 1
+	for _, p := range m.procs {
+		upLen := len(shortUptime(p))
+		if upLen > maxUpLen {
+			maxUpLen = upLen
+		}
+	}
+	nameW := w - 5 - maxUpLen
+	if nameW < 5 {
+		nameW = 5
+	}
+
 	var rows []string
 	for i, p := range m.procs {
 		dot := dotFor(p.Status)
-		name := crop(p.Name, w-16)
+		name := crop(p.Name, nameW)
 		up := shortUptime(p)
 
 		line := fmt.Sprintf("%s %-*s %s",
-			dot, w-16, name,
+			dot, nameW, name,
 			lipgloss.NewStyle().Foreground(clMuted).Render(up),
 		)
 		st := lipgloss.NewStyle().Width(w).Padding(0, 1)
@@ -341,6 +354,55 @@ func buildFooter(w int) string {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+func (m Model) getLeftColW() int {
+	w := 34
+
+	if len(m.procs) > 0 {
+		maxNameLen := 0
+		maxUpLen := 0
+		for _, p := range m.procs {
+			if len(p.Name) > maxNameLen {
+				maxNameLen = len(p.Name)
+			}
+			upLen := len(shortUptime(p))
+			if upLen > maxUpLen {
+				maxUpLen = upLen
+			}
+		}
+		// Calculate ideal width: dot(1) + space(1) + name + space(1) + uptime + padding(2) = name + uptime + 5
+		idealW := maxNameLen + maxUpLen + 5
+		if idealW > w {
+			w = idealW
+		}
+	}
+
+	// Cap the width to ensure the right panel has at least 40 columns
+	minRightW := 40
+	maxAllowedW := m.width - minRightW - 1 // 1 for the divider
+	if maxAllowedW < 34 {
+		maxAllowedW = 34
+	}
+
+	// Also put a reasonable absolute maximum cap (50) so it doesn't look too sparse
+	if maxAllowedW > 50 {
+		maxAllowedW = 50
+	}
+
+	if w > maxAllowedW {
+		w = maxAllowedW
+	}
+
+	// Ultimate guard: left column cannot be wider than m.width - 10
+	if w > m.width-10 {
+		w = m.width - 10
+	}
+	if w < 10 {
+		w = 10
+	}
+
+	return w
+}
 
 func secHeader(label string, w int) string {
 	return lipgloss.NewStyle().Background(clHdrBg).Foreground(clMuted).

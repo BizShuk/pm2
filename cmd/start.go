@@ -76,6 +76,7 @@ func newStartCmd() *cobra.Command {
 						Instances:   app.Instances,
 						MaxRestarts: app.MaxRestarts,
 						LogFile:     app.LogFile,
+						OutFile:     app.OutFile,
 						ErrorFile:   app.ErrorFile,
 					},
 				}

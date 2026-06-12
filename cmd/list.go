@@ -15,7 +15,7 @@ import (
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
-		Aliases: []string{"ls", "status"},
+		Aliases: []string{"l", "ls", "status"},
 		Short:   "List all managed processes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resp, err := daemon.SendRequest(socketPath(), daemon.Request{
