@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bizshuk/gosdk/metric"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,11 @@ func init() {
 		newDaemonCmd(),
 		newMonitCmd(),
 	)
+
+	// EnableTraverseRunHooks ensures the root PersistentPreRunE fires for
+	// every subcommand, even those that define their own PersistentPreRunE.
+	cobra.EnableTraverseRunHooks = true
+	metric.CobraCMDHook(rootCmd)
 }
 
 func socketPath() string {
