@@ -166,6 +166,9 @@ func readLogs(path string) tea.Cmd {
 		for sc.Scan() {
 			lines = append(lines, sc.Text())
 		}
+		if err := sc.Err(); err != nil {
+			// Ignore or log error
+		}
 		if len(lines) > maxLogTail {
 			lines = lines[len(lines)-maxLogTail:]
 		}

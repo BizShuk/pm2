@@ -117,6 +117,9 @@ func tailFile(path string, n int) error {
 	for scanner.Scan() {
 		allLines = append(allLines, scanner.Text())
 	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 	start := len(allLines) - n
 	if start < 0 {
 		start = 0
@@ -138,5 +141,8 @@ func followFile(path string) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		fmt.Println(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		// Ignore or log error for followFile since it doesn't return an error
 	}
 }
