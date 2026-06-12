@@ -41,10 +41,12 @@ type AppStartReq struct {
 	CronRestart string            `json:"cron_restart"`
 	Instances   int               `json:"instances"`
 	MaxRestarts int               `json:"max_restarts"`
+	Version     string            `json:"version"`
 	LogFile     string            `json:"log_file"`
 	OutFile     string            `json:"out_file"`
 	ErrorFile   string            `json:"error_file"`
 	ConfigDir   string            `json:"config_dir"`
+	Watch       bool              `json:"watch"`
 }
 
 // Response is a daemon → CLI message

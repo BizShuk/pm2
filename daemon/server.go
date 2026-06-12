@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/shuk/pm2/cron"
 	"github.com/shuk/pm2/process"
 )
@@ -33,6 +34,7 @@ type ManagedProcess struct {
 	Cmd      *exec.Cmd
 	done     chan struct{}
 	stopping bool // true when deliberately stopped, suppresses auto-restart
+	Watcher  *fsnotify.Watcher
 }
 
 func NewServer(homeDir string) *Server {
@@ -45,6 +47,7 @@ func NewServer(homeDir string) *Server {
 
 // Listen starts the Unix socket server
 func (s *Server) Listen(socketPath string) error {
+	s.StartMetricsCollector()
 	_ = os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -262,6 +265,54 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		ns = "default"
 	}
 
+	var watcher *fsnotify.Watcher
+	if req.Watch {
+		var err error
+		watcher, err = fsnotify.NewWatcher()
+		if err == nil {
+			err = watcher.Add(req.Script)
+			if err != nil {
+				_ = watcher.Close()
+				watcher = nil
+				log.Printf("watch error for %s: %v", name, err)
+			} else {
+				go func(pName string, w *fsnotify.Watcher) {
+					var timer *time.Timer
+					const debounceDuration = 500 * time.Millisecond
+					for {
+						select {
+						case event, ok := <-w.Events:
+							if !ok {
+								return
+							}
+							if event.Has(fsnotify.Write) || event.Has(fsnotify.Rename) {
+								if timer != nil {
+									timer.Stop()
+								}
+								timer = time.AfterFunc(debounceDuration, func() {
+									log.Printf("File changed: %s, restarting %s", event.Name, pName)
+									_ = s.restartByName(pName)
+								})
+							}
+						case err, ok := <-w.Errors:
+							if !ok {
+								return
+							}
+							log.Printf("watcher error for %s: %v", pName, err)
+						}
+					}
+				}(name, watcher)
+			}
+		} else {
+			log.Printf("create watcher error for %s: %v", name, err)
+		}
+	}
+
+	version := req.Version
+	if version == "" {
+		version = getAppVersion(req.Script)
+	}
+
 	s.mu.Lock()
 	id := s.nextID
 	s.nextID++
@@ -281,9 +332,13 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			ErrorFile:   errFile,
 			MaxRestarts: req.MaxRestarts,
 			ConfigDir:   req.ConfigDir,
+			Version:     version,
+			User:        getCurrentUser(),
+			Watch:       req.Watch,
 		},
-		Cmd:  cmd,
-		done: make(chan struct{}),
+		Cmd:     cmd,
+		done:    make(chan struct{}),
+		Watcher: watcher,
 	}
 	s.processes[ns+":"+name] = mp
 	s.mu.Unlock()
@@ -345,6 +400,7 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 				Args:        mp.Info.Args,
 				Env:         mp.Info.Env,
 				CronRestart: mp.Info.CronRestart,
+				Watch:       mp.Info.Watch,
 				MaxRestarts: mp.Info.MaxRestarts,
 				LogFile:     mp.Info.LogFile,
 				ErrorFile:   mp.Info.ErrorFile,
@@ -363,6 +419,11 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 
 	// Cancel cron before stopping
 	s.scheduler.Remove(mp.Info.Name)
+
+	if mp.Watcher != nil {
+		_ = mp.Watcher.Close()
+		mp.Watcher = nil
+	}
 
 	if mp.Cmd.Process != nil {
 		if err := mp.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -410,10 +471,12 @@ func (s *Server) restartByName(name string) error {
 			Args:        mp.Info.Args,
 			Env:         mp.Info.Env,
 			CronRestart: mp.Info.CronRestart,
+			Watch:       mp.Info.Watch,
 			MaxRestarts: mp.Info.MaxRestarts,
 			LogFile:     mp.Info.LogFile,
 			ErrorFile:   mp.Info.ErrorFile,
 			Instances:   1,
+			Version:     mp.Info.Version,
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
@@ -464,6 +527,8 @@ func (s *Server) save() error {
 			OutFile:     mp.Info.LogFile,
 			ErrorFile:   mp.Info.ErrorFile,
 			ConfigDir:   mp.Info.ConfigDir,
+			Watch:       mp.Info.Watch,
+			Version:     mp.Info.Version,
 		})
 	}
 
@@ -493,12 +558,14 @@ func (s *Server) resurrect() error {
 			Args:        e.Args,
 			Env:         e.Env,
 			CronRestart: e.CronRestart,
+			Watch:       e.Watch,
 			Instances:   e.Instances,
 			MaxRestarts: e.MaxRestarts,
 			LogFile:     e.LogFile,
 			OutFile:     e.OutFile,
 			ErrorFile:   e.ErrorFile,
 			ConfigDir:   e.ConfigDir,
+			Version:     e.Version,
 		}
 		if _, err := s.startApp(req); err != nil {
 			log.Printf("resurrect %s: %v", e.Name, err)
@@ -567,3 +634,80 @@ func expandHome(path string) string {
 	}
 	return path
 }
+
+func getCurrentUser() string {
+	u, err := user.Current()
+	if err != nil {
+		return "unknown"
+	}
+	return u.Username
+}
+
+func getAppVersion(scriptPath string) string {
+	dir := filepath.Dir(scriptPath)
+	for i := 0; i < 5; i++ {
+		pkgPath := filepath.Join(dir, "package.json")
+		if _, err := os.Stat(pkgPath); err == nil {
+			data, err := os.ReadFile(pkgPath)
+			if err == nil {
+				var pkg struct {
+					Version string `json:"version"`
+				}
+				if err := json.Unmarshal(data, &pkg); err == nil && pkg.Version != "" {
+					return pkg.Version
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "-"
+}
+
+func getProcessMetrics(pid int) (float64, uint64) {
+	if pid <= 0 {
+		return 0, 0
+	}
+	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "%cpu,rss").Output()
+	if err != nil {
+		return 0, 0
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return 0, 0
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 2 {
+		return 0, 0
+	}
+	var cpu float64
+	var rss uint64
+	_, _ = fmt.Sscanf(fields[0], "%f", &cpu)
+	_, _ = fmt.Sscanf(fields[1], "%d", &rss)
+	return cpu, rss * 1024
+}
+
+func (s *Server) StartMetricsCollector() {
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.mu.Lock()
+			for _, mp := range s.processes {
+				if mp.Info.PID > 0 && mp.Info.Status == process.StatusOnline {
+					cpu, mem := getProcessMetrics(mp.Info.PID)
+					mp.Info.CPU = cpu
+					mp.Info.Memory = mem
+				} else {
+					mp.Info.CPU = 0
+					mp.Info.Memory = 0
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
+}
+

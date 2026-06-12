@@ -29,9 +29,8 @@ pm2/
 │   ├── root.go               pm2Home, socketPath(), Execute()
 │   ├── start.go              pm2 start  — builds AppStartReq, sends to daemon
 │   ├── stop.go               pm2 stop / restart / delete
-│   ├── list.go               pm2 list / save / resurrect
+│   ├── monitor.go            pm2 monit (live process dashboard) / save / resurrect
 │   ├── logs.go               pm2 logs  — reads log files directly
-│   ├── monit.go              pm2 monit — launches bubbletea TUI
 │   └── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
 ├── config/
 │   └── ecosystem.go          Load() — parses .json and .js (goja) ecosystem files

@@ -21,6 +21,7 @@ type AppConfig struct {
 	CronRestart string            `json:"cron_restart"`
 	Watch       bool              `json:"watch"`
 	MaxRestarts int               `json:"max_restarts"`
+	Version     string            `json:"version"`
 	LogFile     string            `json:"log_file"`
 	OutFile     string            `json:"out_file"`
 	ErrorFile   string            `json:"error_file"`

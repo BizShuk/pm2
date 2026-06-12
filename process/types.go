@@ -32,6 +32,9 @@ type ProcessInfo struct {
 	LastCronStatus string    `json:"last_cron_status"` // "ok" | "failed" | ""
 	LogFile        string    `json:"log_file"`
 	ErrorFile      string    `json:"error_file"`
+	Version     string    `json:"version"`
+	User        string    `json:"user"`
+	Watch       bool      `json:"watch"`
 	MaxRestarts    int       `json:"max_restarts"`
 	ConfigDir      string    `json:"config_dir"`
 }
@@ -50,4 +53,6 @@ type DumpEntry struct {
 	OutFile     string            `json:"out_file"`
 	ErrorFile   string            `json:"error_file"`
 	ConfigDir   string            `json:"config_dir"`
+	Watch       bool              `json:"watch"`
+	Version     string            `json:"version"`
 }

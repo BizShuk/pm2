@@ -175,33 +175,6 @@ pm2 start /usr/local/bin/myapp --name myapp --cron-restart "0 0 * * *"
 pm2 start ./worker -i 3 --name worker --env QUEUE=jobs --env DB_URL=postgres://...
 ```
 
-### `pm2 list` / `pm2 ls` / `pm2 status`
-
-```bash
-pm2 list
-```
-
-Output:
-
-```
-  ID │    NAME     │  PID  │ STATUS  │ RESTARTS │     CRON
------+-------------+-------+---------+----------+---------------
-   0 │ api-server  │ 12345 │ online  │        0 │ 0 * * * *
-   1 │ api-server-0│ 12346 │ online  │        0 │
-   2 │ worker      │     - │ stopped │        3 │
-   3 │ worker-cron │ 12350 │ online  │        0 │ */5 * * * *
-```
-
-Status values:
-
-| Status | Meaning |
-|---|---|
-| `online` | Running normally |
-| `launching` | Starting up or waiting to auto-restart |
-| `stopping` | SIGTERM sent, waiting for clean exit |
-| `stopped` | Exited with code 0 (no auto-restart) |
-| `errored` | Exited with non-zero code, auto-restart exhausted |
-
 ### `pm2 stop`
 
 ```bash
@@ -230,7 +203,7 @@ pm2 delete all
 ```
 
 Stops the process and removes it from the in-memory list. It will not appear
-in `pm2 list` until started again. Does not affect `dump.json`.
+in the dashboard until started again. Does not affect `dump.json`.
 
 ### `pm2 logs`
 

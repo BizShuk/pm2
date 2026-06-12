@@ -20,6 +20,7 @@ func newStartCmd() *cobra.Command {
 		instances   int
 		cronRestart string
 		envVars     []string
+		watch       bool
 	)
 
 	cmd := &cobra.Command{
@@ -51,6 +52,9 @@ func newStartCmd() *cobra.Command {
 				if namespace != "" {
 					app.Namespace = namespace
 				}
+				if watch {
+					app.Watch = true
+				}
 				for _, e := range envVars {
 					parts := strings.SplitN(e, "=", 2)
 					if len(parts) == 2 {
@@ -79,6 +83,8 @@ func newStartCmd() *cobra.Command {
 						OutFile:     app.OutFile,
 						ErrorFile:   app.ErrorFile,
 						ConfigDir:   app.ConfigDir,
+						Watch:       app.Watch,
+						Version:     app.Version,
 					},
 				}
 
@@ -118,5 +124,6 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&instances, "instances", "i", 0, "number of instances")
 	cmd.Flags().StringVar(&cronRestart, "cron-restart", "", "cron schedule for auto-restart")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "environment variables KEY=VAL")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch file changes to restart")
 	return cmd
 }

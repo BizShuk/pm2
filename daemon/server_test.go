@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/shuk/pm2/process"
@@ -45,3 +47,80 @@ func TestFindProcesses(t *testing.T) {
 		t.Errorf("All matching failed, got %d", len(res))
 	}
 }
+
+func TestWatchStateInheritance(t *testing.T) {
+	testDir := "/tmp/pm2-test-watch"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	s.processes["default:watch-app"] = &ManagedProcess{
+		Info: process.ProcessInfo{
+			ID:        1,
+			Name:      "watch-app",
+			Namespace: "default",
+			Watch:     true,
+			Script:    "test.js",
+		},
+	}
+
+	err := s.save()
+	if err != nil {
+		t.Fatalf("Failed to save: %v", err)
+	}
+
+	dumpPath := testDir + "/dump.json"
+	data, err := os.ReadFile(dumpPath)
+	if err != nil {
+		t.Fatalf("Failed to read dump file: %v", err)
+	}
+
+	var entries []process.DumpEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("Failed to unmarshal dump entries: %v", err)
+	}
+
+	if len(entries) != 1 || !entries[0].Watch {
+		t.Errorf("DumpEntry did not preserve Watch attribute: %+v", entries)
+	}
+}
+
+func TestVersionStateInheritance(t *testing.T) {
+	testDir := "/tmp/pm2-test-version"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	s.processes["default:version-app"] = &ManagedProcess{
+		Info: process.ProcessInfo{
+			ID:        1,
+			Name:      "version-app",
+			Namespace: "default",
+			Version:   "1.2.3",
+			Script:    "test.js",
+		},
+	}
+
+	err := s.save()
+	if err != nil {
+		t.Fatalf("Failed to save: %v", err)
+	}
+
+	dumpPath := testDir + "/dump.json"
+	data, err := os.ReadFile(dumpPath)
+	if err != nil {
+		t.Fatalf("Failed to read dump file: %v", err)
+	}
+
+	var entries []process.DumpEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("Failed to unmarshal dump entries: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Version != "1.2.3" {
+		t.Errorf("DumpEntry did not preserve Version attribute: %+v", entries)
+	}
+}
+

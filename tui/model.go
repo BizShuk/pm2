@@ -20,7 +20,7 @@ import (
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 11 // rows in detail section (excluding header)
+	detailRows = 15 // rows in detail section (excluding header)
 )
 
 // ─── colors ──────────────────────────────────────────────────────────────────
@@ -293,13 +293,17 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 	rows := []row{
 		{"script", crop(p.Script, w-13), "path"},
 		{"namespace", p.Namespace, ""},
+		{"user", p.User, ""},
 		{"status", string(p.Status), "status"},
+		{"cpu", fmt.Sprintf("%.1f%%", p.CPU), "cpu"},
+		{"mem", formatBytes(p.Memory), "mem"},
 		{"uptime", fullUptime(p), ""},
 		{"started", fmtTime(p.StartedAt), ""},
 		{"restarts", fmt.Sprintf("%d / %d max", p.Restarts, p.MaxRestarts), ""},
 		{"cron", cronExpr(p.CronRestart), "cron"},
 		{"cron next", cronNext(p.CronRestart), "cron"},
 		{"last run", cronLastRun(p.LastCronAt, p.LastCronStatus), "last"},
+		{"watching", formatWatching(p.Watch), "watching"},
 		{"stdout", crop(p.LogFile, w-13), "path"},
 		{"stderr", crop(p.ErrorFile, w-13), "path"},
 	}
@@ -315,6 +319,24 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 			val = cronLastRunStyled(p.LastCronAt, p.LastCronStatus)
 		case "status":
 			val = statusLabel(p.Status)
+		case "watching":
+			if p.Watch {
+				val = lipgloss.NewStyle().Foreground(clOnline).Render(r.v)
+			} else {
+				val = lipgloss.NewStyle().Foreground(clMuted).Render(r.v)
+			}
+		case "cpu":
+			if p.Status == process.StatusOnline {
+				val = lipgloss.NewStyle().Foreground(clOnline).Render(r.v)
+			} else {
+				val = lipgloss.NewStyle().Foreground(clMuted).Render(r.v)
+			}
+		case "mem":
+			if p.Status == process.StatusOnline {
+				val = lipgloss.NewStyle().Foreground(clText).Render(r.v)
+			} else {
+				val = lipgloss.NewStyle().Foreground(clMuted).Render(r.v)
+			}
 		default:
 			val = lipgloss.NewStyle().Foreground(clText).Render(r.v)
 		}
@@ -526,3 +548,28 @@ func crop(s string, maxLen int) string {
 	}
 	return "…" + s[len(s)-(maxLen-1):]
 }
+
+func formatWatching(watch bool) string {
+	if watch {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func formatBytes(b uint64) string {
+	if b == 0 {
+		return "0b"
+	}
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%db", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"kb", "mb", "gb", "tb"}
+	return fmt.Sprintf("%.1f%s", float64(b)/float64(div), units[exp])
+}
+

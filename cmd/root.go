@@ -17,6 +17,13 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		if arg == "version" || arg == "-v" || arg == "--v" || arg == "--version" || arg == "-version" {
+			fmt.Println("1.0.0")
+			os.Exit(0)
+		}
+	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -36,7 +43,6 @@ func init() {
 		newStopCmd(),
 		newRestartCmd(),
 		newDeleteCmd(),
-		newListCmd(),
 		newLogsCmd(),
 		newSaveCmd(),
 		newResurrectCmd(),

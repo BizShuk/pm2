@@ -57,24 +57,6 @@ Process identity is `name + script path`. Re-starting with the same name and scr
 
 ---
 
-### `pm2 list` / `pm2 ls` / `pm2 status`
-
-List all managed processes.
-
-```bash
-pm2 list
-```
-
-| ID  | NAME     |  PID  |  STATUS   | RESTARTS | CRON        |
-| :-: | :------- | :---: | :-------: | :------: | :---------- |
-|  0  | api      | 12345 | `online`  |    0     | `0 * * * *` |
-|  1  | worker-0 | 12346 | `online`  |    0     |             |
-|  2  | worker-1 | 12350 | `online`  |    0     |             |
-|  3  | nightly  |   -   | `stopped` |    0     | `0 0 * * *` |
-
-Status values: `online` `launching` `stopping` `stopped` `errored`
-
----
 
 ### `pm2 stop`
 
