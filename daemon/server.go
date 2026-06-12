@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,7 +29,7 @@ type Server struct {
 
 // ManagedProcess pairs runtime state with the OS process handle
 type ManagedProcess struct {
-	Info process.ProcessInfo
+	Info     process.ProcessInfo
 	Cmd      *exec.Cmd
 	done     chan struct{}
 	stopping bool // true when deliberately stopped, suppresses auto-restart
@@ -141,6 +143,11 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 		instances = 1
 	}
 
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
 	for i := 0; i < instances; i++ {
 		name := req.Name
 		if instances > 1 {
@@ -149,7 +156,8 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 
 		// Identity = name + script path (both must match to allow override)
 		s.mu.Lock()
-		if existing, ok := s.processes[name]; ok {
+		key := ns + ":" + name
+		if existing, ok := s.processes[key]; ok {
 			if existing.Info.Script != req.Script {
 				s.mu.Unlock()
 				return infos, fmt.Errorf(
@@ -174,22 +182,49 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 
 func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessInfo, error) {
 	logDir := filepath.Join(s.homeDir, "logs")
-	_ = os.MkdirAll(logDir, 0755)
+	_ = os.MkdirAll(logDir, 0o755)
 
 	logFile := req.LogFile
 	if logFile == "" {
-		logFile = filepath.Join(logDir, name+"-out.log")
+		logFile = filepath.Join(logDir, name)
+	} else {
+		logFile = expandHome(logFile)
 	}
 	errFile := req.ErrorFile
 	if errFile == "" {
-		errFile = filepath.Join(logDir, name+"-err.log")
+		errFile = filepath.Join(logDir, name)
+	} else {
+		errFile = expandHome(errFile)
 	}
 
-	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+		return process.ProcessInfo{}, fmt.Errorf("create log directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(errFile), 0o755); err != nil {
+		return process.ProcessInfo{}, fmt.Errorf("create error log directory: %w", err)
+	}
+
+	// Ensure log files exist
+	if _, err := os.Stat(logFile); os.IsNotExist(err) {
+		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return process.ProcessInfo{}, fmt.Errorf("create log file: %w", err)
+		}
+		f.Close()
+	}
+	if _, err := os.Stat(errFile); os.IsNotExist(err) {
+		f, err := os.OpenFile(errFile, os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return process.ProcessInfo{}, fmt.Errorf("create error log file: %w", err)
+		}
+		f.Close()
+	}
+
+	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return process.ProcessInfo{}, err
 	}
-	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		outF.Close()
 		return process.ProcessInfo{}, err
@@ -213,12 +248,18 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		return process.ProcessInfo{}, fmt.Errorf("start process: %w", err)
 	}
 
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
 	s.mu.Lock()
 	id := s.nextID
 	s.nextID++
 	mp := &ManagedProcess{
 		Info: process.ProcessInfo{
 			ID:          id,
+			Namespace:   ns,
 			Name:        name,
 			PID:         cmd.Process.Pid,
 			Status:      process.StatusOnline,
@@ -234,7 +275,7 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		Cmd:  cmd,
 		done: make(chan struct{}),
 	}
-	s.processes[name] = mp
+	s.processes[ns+":"+name] = mp
 	s.mu.Unlock()
 
 	// Watch for process exit in background
@@ -247,7 +288,8 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			restartErr := s.restartByName(name)
 			// Write last-run info onto the newly launched process (map was replaced by restartByName)
 			s.mu.Lock()
-			if p, ok := s.processes[name]; ok {
+			key := ns + ":" + name
+			if p, ok := s.processes[key]; ok {
 				p.Info.LastCronAt = firedAt
 				if restartErr != nil {
 					p.Info.LastCronStatus = "failed"
@@ -287,6 +329,7 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 		go func() {
 			time.Sleep(1 * time.Second)
 			req := &AppStartReq{
+				Namespace:   mp.Info.Namespace,
 				Name:        mp.Info.Name,
 				Script:      mp.Info.Script,
 				Args:        mp.Info.Args,
@@ -334,90 +377,51 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 }
 
 func (s *Server) stopByName(name string) error {
-	if name == "all" {
-		s.mu.RLock()
-		names := make([]string, 0, len(s.processes))
-		for n := range s.processes {
-			names = append(names, n)
-		}
-		s.mu.RUnlock()
-		for _, n := range names {
-			s.mu.RLock()
-			mp := s.processes[n]
-			s.mu.RUnlock()
-			_ = s.stopProcess(mp)
-		}
-		return nil
+	targets := s.findProcesses(name)
+	if len(targets) == 0 {
+		return fmt.Errorf("process or namespace not found: %s", name)
 	}
-	s.mu.RLock()
-	mp, ok := s.processes[name]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("process not found: %s", name)
+	for _, mp := range targets {
+		_ = s.stopProcess(mp)
 	}
-	return s.stopProcess(mp)
+	return nil
 }
 
 func (s *Server) restartByName(name string) error {
-	if name == "all" {
-		s.mu.RLock()
-		names := make([]string, 0, len(s.processes))
-		for n := range s.processes {
-			names = append(names, n)
+	targets := s.findProcesses(name)
+	if len(targets) == 0 {
+		return fmt.Errorf("process or namespace not found: %s", name)
+	}
+	for _, mp := range targets {
+		req := &AppStartReq{
+			Namespace:   mp.Info.Namespace,
+			Name:        mp.Info.Name,
+			Script:      mp.Info.Script,
+			Args:        mp.Info.Args,
+			Env:         mp.Info.Env,
+			CronRestart: mp.Info.CronRestart,
+			MaxRestarts: mp.Info.MaxRestarts,
+			LogFile:     mp.Info.LogFile,
+			ErrorFile:   mp.Info.ErrorFile,
+			Instances:   1,
 		}
-		s.mu.RUnlock()
-		for _, n := range names {
-			_ = s.restartByName(n)
-		}
-		return nil
+		_ = s.stopProcess(mp)
+		_, _ = s.launchProcess(mp.Info.Name, req)
 	}
-	s.mu.RLock()
-	mp, ok := s.processes[name]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("process not found: %s", name)
-	}
-
-	req := &AppStartReq{
-		Name:        mp.Info.Name,
-		Script:      mp.Info.Script,
-		Args:        mp.Info.Args,
-		Env:         mp.Info.Env,
-		CronRestart: mp.Info.CronRestart,
-		MaxRestarts: mp.Info.MaxRestarts,
-		LogFile:     mp.Info.LogFile,
-		ErrorFile:   mp.Info.ErrorFile,
-		Instances:   1,
-	}
-
-	_ = s.stopProcess(mp)
-	_, err := s.launchProcess(mp.Info.Name, req)
-	return err
+	return nil
 }
 
 func (s *Server) deleteByName(name string) error {
-	if name == "all" {
-		s.mu.RLock()
-		names := make([]string, 0, len(s.processes))
-		for n := range s.processes {
-			names = append(names, n)
-		}
-		s.mu.RUnlock()
-		for _, n := range names {
-			_ = s.deleteByName(n)
-		}
-		return nil
+	targets := s.findProcesses(name)
+	if len(targets) == 0 {
+		return fmt.Errorf("process or namespace not found: %s", name)
 	}
-	s.mu.RLock()
-	mp, ok := s.processes[name]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("process not found: %s", name)
+	for _, mp := range targets {
+		_ = s.stopProcess(mp)
+		s.mu.Lock()
+		delete(s.processes, mp.Info.Namespace+":"+mp.Info.Name)
+		s.mu.Unlock()
 	}
-	_ = s.stopProcess(mp)
-	s.mu.Lock()
-	delete(s.processes, name)
-	s.mu.Unlock()
 	return nil
 }
 
@@ -438,6 +442,7 @@ func (s *Server) save() error {
 	var entries []process.DumpEntry
 	for _, mp := range s.processes {
 		entries = append(entries, process.DumpEntry{
+			Namespace:   mp.Info.Namespace,
 			Name:        mp.Info.Name,
 			Script:      mp.Info.Script,
 			Args:        mp.Info.Args,
@@ -455,7 +460,7 @@ func (s *Server) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dumpPath, data, 0644)
+	return os.WriteFile(dumpPath, data, 0o644)
 }
 
 func (s *Server) resurrect() error {
@@ -470,6 +475,7 @@ func (s *Server) resurrect() error {
 	}
 	for _, e := range entries {
 		req := &AppStartReq{
+			Namespace:   e.Namespace,
 			Name:        e.Name,
 			Script:      e.Script,
 			Args:        e.Args,
@@ -485,4 +491,65 @@ func (s *Server) resurrect() error {
 		}
 	}
 	return nil
+}
+
+func (s *Server) findProcesses(target string) []*ManagedProcess {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if target == "all" {
+		var list []*ManagedProcess
+		for _, mp := range s.processes {
+			list = append(list, mp)
+		}
+		return list
+	}
+
+	// 1. ID 匹配
+	var idVal int
+	if _, err := fmt.Sscan(target, &idVal); err == nil {
+		for _, mp := range s.processes {
+			if mp.Info.ID == idVal {
+				return []*ManagedProcess{mp}
+			}
+		}
+	}
+
+	// 2. Name 匹配
+	var matchedByName []*ManagedProcess
+	for _, mp := range s.processes {
+		if mp.Info.Name == target {
+			matchedByName = append(matchedByName, mp)
+		}
+	}
+	if len(matchedByName) > 0 {
+		return matchedByName
+	}
+
+	// 3. Namespace 匹配
+	var matchedByNS []*ManagedProcess
+	for _, mp := range s.processes {
+		if mp.Info.Namespace == target {
+			matchedByNS = append(matchedByNS, mp)
+		}
+	}
+	return matchedByNS
+}
+
+func expandHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			if u, err := user.Current(); err == nil {
+				home = u.HomeDir
+			}
+		}
+		if home != "" {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }

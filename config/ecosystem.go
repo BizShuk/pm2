@@ -12,6 +12,7 @@ import (
 
 // AppConfig mirrors PM2's app entry in ecosystem.config.js
 type AppConfig struct {
+	Namespace   string            `json:"namespace"`
 	Name        string            `json:"name"`
 	Script      string            `json:"script"`
 	Args        []string          `json:"args"`
@@ -36,6 +37,9 @@ func (a *AppConfig) Normalize() {
 	}
 	if a.MaxRestarts <= 0 {
 		a.MaxRestarts = 15
+	}
+	if a.Namespace == "" {
+		a.Namespace = "default"
 	}
 	if a.Name == "" && a.Script != "" {
 		base := filepath.Base(a.Script)

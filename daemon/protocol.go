@@ -33,6 +33,7 @@ type Request struct {
 
 // AppStartReq carries the config for a new process
 type AppStartReq struct {
+	Namespace   string            `json:"namespace"`
 	Name        string            `json:"name"`
 	Script      string            `json:"script"`
 	Args        []string          `json:"args"`

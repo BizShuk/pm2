@@ -26,7 +26,7 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 
 			var infos []process.ProcessInfo
@@ -39,7 +39,7 @@ func newListCmd() *cobra.Command {
 			})
 
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"ID", "Name", "PID", "Status", "Restarts", "Cron"})
+			table.SetHeader([]string{"ID", "Namespace", "Name", "PID", "Status", "Restarts", "Cron"})
 			table.SetBorder(false)
 			table.SetColumnSeparator("│")
 
@@ -50,6 +50,7 @@ func newListCmd() *cobra.Command {
 				}
 				table.Append([]string{
 					fmt.Sprintf("%d", p.ID),
+					p.Namespace,
 					p.Name,
 					pid,
 					string(p.Status),
@@ -74,7 +75,7 @@ func newSaveCmd() *cobra.Command {
 				return err
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 			fmt.Println("Process list saved.")
 			return nil
@@ -92,7 +93,7 @@ func newResurrectCmd() *cobra.Command {
 				return err
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 			fmt.Println("Processes resurrected.")
 			return nil

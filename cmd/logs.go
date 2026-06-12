@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/shuk/pm2/daemon"
 	"github.com/shuk/pm2/process"
@@ -33,11 +34,43 @@ func newLogsCmd() *cobra.Command {
 				filterName = args[0]
 			}
 
-			var logFiles []string
-			for _, p := range infos {
-				if filterName != "" && p.Name != filterName {
-					continue
+			var matchedProcs []process.ProcessInfo
+			if filterName == "" {
+				matchedProcs = infos
+			} else {
+				// 1. 嘗試 ID 匹配
+				var idVal int
+				isID := false
+				if _, err := fmt.Sscan(filterName, &idVal); err == nil {
+					isID = true
 				}
+				if isID {
+					for _, p := range infos {
+						if p.ID == idVal {
+							matchedProcs = append(matchedProcs, p)
+						}
+					}
+				}
+				// 2. 若非 ID，嘗試 Name 匹配
+				if len(matchedProcs) == 0 {
+					for _, p := range infos {
+						if p.Name == filterName {
+							matchedProcs = append(matchedProcs, p)
+						}
+					}
+				}
+				// 3. 若非 Name，嘗試 Namespace 匹配
+				if len(matchedProcs) == 0 {
+					for _, p := range infos {
+						if p.Namespace == filterName {
+							matchedProcs = append(matchedProcs, p)
+						}
+					}
+				}
+			}
+
+			var logFiles []string
+			for _, p := range matchedProcs {
 				if p.LogFile != "" {
 					logFiles = append(logFiles, p.LogFile)
 				}
@@ -72,7 +105,8 @@ func newLogsCmd() *cobra.Command {
 }
 
 func tailFile(path string, n int) error {
-	f, err := os.Open(path)
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -94,7 +128,8 @@ func tailFile(path string, n int) error {
 }
 
 func followFile(path string) {
-	f, err := os.Open(path)
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return
 	}

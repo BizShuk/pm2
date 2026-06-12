@@ -21,7 +21,7 @@ const (
 	leftColW   = 34
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 10 // rows in detail section (excluding header)
+	detailRows = 11 // rows in detail section (excluding header)
 )
 
 // ─── colors ──────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(m.procs) == 0 {
 		return m, nil
 	}
-	name := m.procs[m.selected].Name
+	targetID := fmt.Sprintf("%d", m.procs[m.selected].ID)
 	switch msg.String() {
 	case "up", "k":
 		if m.selected > 0 {
@@ -129,11 +129,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, readLogs(m.procs[m.selected].LogFile)
 		}
 	case "r":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdRestart, Name: name})
+		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdRestart, Name: targetID})
 	case "s":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdStop, Name: name})
+		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdStop, Name: targetID})
 	case "d":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdDelete, Name: name})
+		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdDelete, Name: targetID})
 	}
 	return m, nil
 }
@@ -276,6 +276,7 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 	type row struct{ k, v, sty string }
 	rows := []row{
 		{"script", crop(p.Script, w-13), "path"},
+		{"namespace", p.Namespace, ""},
 		{"status", string(p.Status), "status"},
 		{"uptime", fullUptime(p), ""},
 		{"started", fmtTime(p.StartedAt), ""},

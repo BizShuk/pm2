@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/shuk/pm2/daemon"
@@ -70,8 +69,8 @@ func generateLaunchd(exe string) error {
 </plist>
 `, label, exe, pm2Home, pm2Home)
 
-	_ = os.MkdirAll(filepath.Dir(plistPath), 0755)
-	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+	_ = os.MkdirAll(filepath.Dir(plistPath), 0o755)
+	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("Created: %s\n", plistPath)
@@ -94,8 +93,8 @@ WantedBy=default.target
 `, exe)
 
 	unitPath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "pm2.service")
-	_ = os.MkdirAll(filepath.Dir(unitPath), 0755)
-	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
+	_ = os.MkdirAll(filepath.Dir(unitPath), 0o755)
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("Created: %s\n", unitPath)
@@ -130,11 +129,4 @@ func autoStartDaemon() error {
 		}
 	}
 	return fmt.Errorf("daemon did not start in time")
-}
-
-// resolveTarget checks if a user argument is a name or numeric ID and returns the name
-// (For simplicity, ID-based lookup is a TODO; name is used directly here)
-func resolveTarget(s string) string {
-	// Strip leading/trailing whitespace
-	return strings.TrimSpace(s)
 }

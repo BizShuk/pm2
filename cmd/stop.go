@@ -21,7 +21,7 @@ func newStopCmd() *cobra.Command {
 				return err
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 			fmt.Printf("stopped: %s\n", args[0])
 			return nil
@@ -43,7 +43,7 @@ func newRestartCmd() *cobra.Command {
 				return err
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 			fmt.Printf("restarted: %s\n", args[0])
 			return nil
@@ -66,7 +66,7 @@ func newDeleteCmd() *cobra.Command {
 				return err
 			}
 			if !resp.OK {
-				return fmt.Errorf(resp.Error)
+				return fmt.Errorf("%s", resp.Error)
 			}
 			fmt.Printf("deleted: %s\n", args[0])
 			return nil

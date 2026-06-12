@@ -16,6 +16,7 @@ import (
 func newStartCmd() *cobra.Command {
 	var (
 		name        string
+		namespace   string
 		instances   int
 		cronRestart string
 		envVars     []string
@@ -47,6 +48,9 @@ func newStartCmd() *cobra.Command {
 				if cronRestart != "" {
 					app.CronRestart = cronRestart
 				}
+				if namespace != "" {
+					app.Namespace = namespace
+				}
 				for _, e := range envVars {
 					parts := strings.SplitN(e, "=", 2)
 					if len(parts) == 2 {
@@ -63,6 +67,7 @@ func newStartCmd() *cobra.Command {
 				req := daemon.Request{
 					Command: daemon.CmdStart,
 					App: &daemon.AppStartReq{
+						Namespace:   app.Namespace,
 						Name:        app.Name,
 						Script:      app.Script,
 						Args:        app.Args,
@@ -106,6 +111,8 @@ func newStartCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "process name")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "process namespace")
+	cmd.Flags().StringVar(&namespace, "ns", "", "process namespace (shortcut)")
 	cmd.Flags().IntVarP(&instances, "instances", "i", 0, "number of instances")
 	cmd.Flags().StringVar(&cronRestart, "cron-restart", "", "cron schedule for auto-restart")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "environment variables KEY=VAL")

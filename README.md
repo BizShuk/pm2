@@ -20,7 +20,7 @@ State directory: `~/.pm2/` (created automatically on first run)
 
 Start a process from a script path or an ecosystem config file.
 
-```
+```bash
 pm2 start <script|ecosystem.config.js|ecosystem.config.json> [flags]
 
 Flags:
@@ -65,14 +65,12 @@ List all managed processes.
 pm2 list
 ```
 
-```
-  ID │    NAME     │  PID  │ STATUS  │ RESTARTS │     CRON
------+-------------+-------+---------+----------+---------------
-   0 │ api         │ 12345 │ online  │        0 │ 0 * * * *
-   1 │ worker-0    │ 12346 │ online  │        0 │
-   2 │ worker-1    │ 12350 │ online  │        0 │
-   3 │ nightly     │     - │ stopped │        0 │ 0 0 * * *
-```
+| ID  | NAME     |  PID  |  STATUS   | RESTARTS | CRON        |
+| :-: | :------- | :---: | :-------: | :------: | :---------- |
+|  0  | api      | 12345 | `online`  |    0     | `0 * * * *` |
+|  1  | worker-0 | 12346 | `online`  |    0     |             |
+|  2  | worker-1 | 12350 | `online`  |    0     |             |
+|  3  | nightly  |   -   | `stopped` |    0     | `0 0 * * *` |
 
 Status values: `online` `launching` `stopping` `stopped` `errored`
 
@@ -119,7 +117,7 @@ Does not affect `~/.pm2/dump.json`.
 
 Tail stdout and stderr log files for a process.
 
-```
+```bash
 pm2 logs [name] [flags]
 
 Flags:
@@ -144,7 +142,7 @@ Open the interactive live TUI dashboard. Refreshes every 2 seconds.
 pm2 monit
 ```
 
-```
+```text
 pm2 monit  4 processes · 10:24:51
 ──────────────────────┬────────────────────────────────────────
  PROCESSES            │ DETAIL — api
@@ -215,22 +213,22 @@ Two formats are supported. Relative `script` paths resolve relative to the confi
 
 ```json
 {
-  "apps": [
-    {
-      "name": "api",
-      "script": "./bin/server",
-      "args": ["--port", "8080"],
-      "instances": 2,
-      "env": {
-        "NODE_ENV": "production",
-        "PORT": "8080"
-      },
-      "cron_restart": "0 3 * * *",
-      "max_restarts": 10,
-      "log_file": "/var/log/api-out.log",
-      "error_file": "/var/log/api-err.log"
-    }
-  ]
+    "apps": [
+        {
+            "name": "api",
+            "script": "./bin/server",
+            "args": ["--port", "8080"],
+            "instances": 2,
+            "env": {
+                "NODE_ENV": "production",
+                "PORT": "8080"
+            },
+            "cron_restart": "0 3 * * *",
+            "max_restarts": 10,
+            "log_file": "/var/log/api-out.log",
+            "error_file": "/var/log/api-err.log"
+        }
+    ]
 }
 ```
 
@@ -240,48 +238,48 @@ Parsed via an embedded JS runtime (ES2015+). No `require()` or Node.js built-ins
 
 ```js
 module.exports = {
-  apps: [
-    {
-      name: "api",
-      script: "./bin/server",
-      instances: 2,
-      env: { NODE_ENV: "production", PORT: "8080" },
-      cron_restart: "0 3 * * *"
-    }
-  ]
-}
+    apps: [
+        {
+            name: "api",
+            script: "./bin/server",
+            instances: 2,
+            env: { NODE_ENV: "production", PORT: "8080" },
+            cron_restart: "0 3 * * *"
+        }
+    ]
+};
 ```
 
 ### Config fields
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | string | script filename | Process identifier — must be unique |
-| `script` | string | required | Executable path |
-| `args` | []string | `[]` | Arguments forwarded to the process |
-| `instances` | int | `1` | Parallel copies (`<name>-0`, `<name>-1`, …) |
-| `env` | map | `{}` | Env vars merged with the inherited environment |
-| `cron_restart` | string | `""` | 5-field cron expression for scheduled restart |
-| `max_restarts` | int | `15` | Crash auto-restart ceiling |
-| `log_file` | string | `~/.pm2/logs/<name>-out.log` | stdout path |
-| `error_file` | string | `~/.pm2/logs/<name>-err.log` | stderr path |
+| Field          | Type     | Default                      | Description                                    |
+| -------------- | -------- | ---------------------------- | ---------------------------------------------- |
+| `name`         | string   | script filename              | Process identifier — must be unique            |
+| `script`       | string   | required                     | Executable path                                |
+| `args`         | []string | `[]`                         | Arguments forwarded to the process             |
+| `instances`    | int      | `1`                          | Parallel copies (`<name>-0`, `<name>-1`, …)    |
+| `env`          | map      | `{}`                         | Env vars merged with the inherited environment |
+| `cron_restart` | string   | `""`                         | 5-field cron expression for scheduled restart  |
+| `max_restarts` | int      | `15`                         | Crash auto-restart ceiling                     |
+| `log_file`     | string   | `~/.pm2/logs/<name>-out.log` | stdout path                                    |
+| `error_file`   | string   | `~/.pm2/logs/<name>-err.log` | stderr path                                    |
 
 ---
 
 ## Auto-restart behaviour
 
-| Exit condition | Result |
-|---|---|
+| Exit condition                 | Result                                       |
+| ------------------------------ | -------------------------------------------- |
 | Non-zero exit code (`errored`) | Auto-restart after 1 s, up to `max_restarts` |
-| Zero exit code (`stopped`) | No restart — treated as intentional |
-| `pm2 stop` (any exit code) | No restart — `stopping` flag suppresses it |
-| `cron_restart` fires | Forced restart regardless of current status |
+| Zero exit code (`stopped`)     | No restart — treated as intentional          |
+| `pm2 stop` (any exit code)     | No restart — `stopping` flag suppresses it   |
+| `cron_restart` fires           | Forced restart regardless of current status  |
 
 ---
 
 ## Cron expression format
 
-```
+```bash
 ┌───── minute    (0–59)
 │ ┌─── hour      (0–23)
 │ │ ┌─ day       (1–31)
@@ -291,12 +289,12 @@ module.exports = {
 * * * * *
 ```
 
-| Expression | Meaning |
-|---|---|
-| `*/5 * * * *` | Every 5 minutes |
-| `0 * * * *` | Every hour |
-| `0 0 * * *` | Daily at midnight |
-| `0 2 * * 0` | Every Sunday at 02:00 |
+| Expression    | Meaning               |
+| ------------- | --------------------- |
+| `*/5 * * * *` | Every 5 minutes       |
+| `0 * * * *`   | Every hour            |
+| `0 0 * * *`   | Daily at midnight     |
+| `0 2 * * 0`   | Every Sunday at 02:00 |
 
 ---
 
@@ -330,7 +328,7 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
 
 ## State files
 
-```
+```tree
 ~/.pm2/
 ├── pm2.sock            Unix socket — CLI ↔ daemon RPC
 ├── dump.json           saved process list (pm2 save / resurrect)

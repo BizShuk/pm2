@@ -16,6 +16,7 @@ const (
 // ProcessInfo is the runtime view of a managed process
 type ProcessInfo struct {
 	ID          int       `json:"id"`
+	Namespace   string    `json:"namespace"`
 	Name        string    `json:"name"`
 	PID         int       `json:"pid"`
 	Status      Status    `json:"status"`
@@ -36,6 +37,7 @@ type ProcessInfo struct {
 
 // DumpEntry is what gets persisted to dump.json for resurrect
 type DumpEntry struct {
+	Namespace   string            `json:"namespace"`
 	Name        string            `json:"name"`
 	Script      string            `json:"script"`
 	Args        []string          `json:"args"`
