@@ -78,6 +78,7 @@ func newStartCmd() *cobra.Command {
 						LogFile:     app.LogFile,
 						OutFile:     app.OutFile,
 						ErrorFile:   app.ErrorFile,
+						ConfigDir:   app.ConfigDir,
 					},
 				}
 

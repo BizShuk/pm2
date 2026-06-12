@@ -186,11 +186,20 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 
 	logFile := req.LogFile
 	if logFile == "" {
+		logFile = req.OutFile
+	}
+	if logFile == "" && req.ConfigDir != "" {
+		logFile = filepath.Join(req.ConfigDir, "logs", "daemon.log")
+	}
+	if logFile == "" {
 		logFile = filepath.Join(logDir, name)
 	} else {
 		logFile = expandHome(logFile)
 	}
 	errFile := req.ErrorFile
+	if errFile == "" && req.ConfigDir != "" {
+		errFile = filepath.Join(req.ConfigDir, "logs", "daemon.err")
+	}
 	if errFile == "" {
 		errFile = filepath.Join(logDir, name)
 	} else {
@@ -271,6 +280,7 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			LogFile:     logFile,
 			ErrorFile:   errFile,
 			MaxRestarts: req.MaxRestarts,
+			ConfigDir:   req.ConfigDir,
 		},
 		Cmd:  cmd,
 		done: make(chan struct{}),
@@ -451,7 +461,9 @@ func (s *Server) save() error {
 			Instances:   1,
 			MaxRestarts: mp.Info.MaxRestarts,
 			LogFile:     mp.Info.LogFile,
+			OutFile:     mp.Info.LogFile,
 			ErrorFile:   mp.Info.ErrorFile,
+			ConfigDir:   mp.Info.ConfigDir,
 		})
 	}
 
@@ -484,7 +496,9 @@ func (s *Server) resurrect() error {
 			Instances:   e.Instances,
 			MaxRestarts: e.MaxRestarts,
 			LogFile:     e.LogFile,
+			OutFile:     e.OutFile,
 			ErrorFile:   e.ErrorFile,
+			ConfigDir:   e.ConfigDir,
 		}
 		if _, err := s.startApp(req); err != nil {
 			log.Printf("resurrect %s: %v", e.Name, err)

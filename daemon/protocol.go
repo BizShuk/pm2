@@ -42,7 +42,9 @@ type AppStartReq struct {
 	Instances   int               `json:"instances"`
 	MaxRestarts int               `json:"max_restarts"`
 	LogFile     string            `json:"log_file"`
+	OutFile     string            `json:"out_file"`
 	ErrorFile   string            `json:"error_file"`
+	ConfigDir   string            `json:"config_dir"`
 }
 
 // Response is a daemon → CLI message

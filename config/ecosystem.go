@@ -22,7 +22,9 @@ type AppConfig struct {
 	Watch       bool              `json:"watch"`
 	MaxRestarts int               `json:"max_restarts"`
 	LogFile     string            `json:"log_file"`
+	OutFile     string            `json:"out_file"`
 	ErrorFile   string            `json:"error_file"`
+	ConfigDir   string            `json:"config_dir"`
 }
 
 // EcosystemConfig is the top-level config structure
@@ -44,6 +46,26 @@ func (a *AppConfig) Normalize() {
 	if a.Name == "" && a.Script != "" {
 		base := filepath.Base(a.Script)
 		a.Name = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	if a.ConfigDir == "" {
+		if a.OutFile != "" {
+			a.ConfigDir = filepath.Dir(a.OutFile)
+		} else if a.LogFile != "" {
+			a.ConfigDir = filepath.Dir(a.LogFile)
+		} else if a.ErrorFile != "" {
+			a.ConfigDir = filepath.Dir(a.ErrorFile)
+		}
+	}
+	if a.ConfigDir != "" {
+		if a.LogFile == "" && a.OutFile == "" {
+			a.LogFile = filepath.Join(a.ConfigDir, "logs", "daemon.log")
+		}
+		if a.ErrorFile == "" {
+			a.ErrorFile = filepath.Join(a.ConfigDir, "logs", "daemon.err")
+		}
+	}
+	if a.LogFile == "" && a.OutFile != "" {
+		a.LogFile = a.OutFile
 	}
 }
 
