@@ -1,0 +1,107 @@
+package cmd
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/shuk/pm2/daemon"
+	"github.com/shuk/pm2/process"
+	"github.com/spf13/cobra"
+)
+
+func newLogsCmd() *cobra.Command {
+	var lines int
+	cmd := &cobra.Command{
+		Use:   "logs [name]",
+		Short: "Tail process logs",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdList})
+			if err != nil {
+				return err
+			}
+			var infos []process.ProcessInfo
+			if err := json.Unmarshal(resp.Payload, &infos); err != nil {
+				return err
+			}
+
+			filterName := ""
+			if len(args) > 0 {
+				filterName = args[0]
+			}
+
+			var logFiles []string
+			for _, p := range infos {
+				if filterName != "" && p.Name != filterName {
+					continue
+				}
+				if p.LogFile != "" {
+					logFiles = append(logFiles, p.LogFile)
+				}
+				if p.ErrorFile != "" {
+					logFiles = append(logFiles, p.ErrorFile)
+				}
+			}
+
+			if len(logFiles) == 0 {
+				fmt.Println("No log files found.")
+				return nil
+			}
+
+			// Tail all matching log files
+			for _, lf := range logFiles {
+				fmt.Printf("==> %s <==\n", lf)
+				if err := tailFile(lf, lines); err != nil {
+					fmt.Fprintf(os.Stderr, "tail %s: %v\n", lf, err)
+				}
+			}
+
+			// Follow the first log file if -f is desired (simple implementation)
+			fmt.Println("\n[Press Ctrl+C to exit]")
+			if len(logFiles) > 0 {
+				followFile(logFiles[0])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVarP(&lines, "lines", "n", 20, "number of lines to show")
+	return cmd
+}
+
+func tailFile(path string, n int) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var allLines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+	start := len(allLines) - n
+	if start < 0 {
+		start = 0
+	}
+	for _, l := range allLines[start:] {
+		fmt.Println(l)
+	}
+	return nil
+}
+
+func followFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Seek(0, io.SeekEnd)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+}
