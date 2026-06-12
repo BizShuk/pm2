@@ -3,7 +3,7 @@ module github.com/shuk/pm2
 go 1.26.0
 
 require (
-	github.com/bizshuk/gosdk v1.0.2
+	github.com/bizshuk/gosdk v0.0.0-20260610190444-c3fc5c40e0c9
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dop251/goja v0.0.0-20240610225006-393f6d42497b
@@ -82,5 +82,3 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/bizshuk/gosdk => ../gosdk

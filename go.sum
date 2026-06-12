@@ -1,5 +1,7 @@
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
+github.com/bizshuk/gosdk v0.0.0-20260610190444-c3fc5c40e0c9 h1:Oh8t4BQ6rMTO3H6R+LL+yuWZwQ2Yb9qv+Q9XEHCEto0=
+github.com/bizshuk/gosdk v0.0.0-20260610190444-c3fc5c40e0c9/go.mod h1:D5ki/sL+H3SWAmVC5/LXnb7rm+UxWTa9ZqbEdEsLO5g=
 github.com/castai/promwrite v0.6.0 h1:QTalDPDAE07fjcPe6HpOU8oQIKI8lfBRibtNr7PpcrU=
 github.com/castai/promwrite v0.6.0/go.mod h1:33Jn4Bx9Q39/c6wKd3zxysxeDr7jcUDeOmlQSnYUohQ=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
