@@ -38,8 +38,10 @@ type AppStartReq struct {
 	Script      string            `json:"script"`
 	Args        []string          `json:"args"`
 	Env         map[string]string `json:"env"`
-	CronRestart string            `json:"cron_restart"`
-	Instances   int               `json:"instances"`
+	CronRestart   string            `json:"cron_restart"`
+	Cron          string            `json:"cron"`
+	CronTriggered bool              `json:"cron_triggered"`
+	Instances     int               `json:"instances"`
 	MaxRestarts int               `json:"max_restarts"`
 	Version     string            `json:"version"`
 	LogFile     string            `json:"log_file"`

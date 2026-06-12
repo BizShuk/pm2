@@ -242,22 +242,37 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		return process.ProcessInfo{}, err
 	}
 
-	cmdArgs := append([]string{req.Script}, req.Args...)
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	cmd.Stdout = outF
-	cmd.Stderr = errF
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var cmd *exec.Cmd
+	var startedAt time.Time
+	var pid int
+	status := process.StatusOnline
 
-	// Apply environment
-	cmd.Env = os.Environ()
-	for k, v := range req.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	isCronTask := req.Cron != "" && !req.CronTriggered
 
-	if err := cmd.Start(); err != nil {
+	if isCronTask {
+		status = process.StatusStopped
 		outF.Close()
 		errF.Close()
-		return process.ProcessInfo{}, fmt.Errorf("start process: %w", err)
+	} else {
+		cmdArgs := append([]string{req.Script}, req.Args...)
+		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		cmd.Stdout = outF
+		cmd.Stderr = errF
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+		// Apply environment
+		cmd.Env = os.Environ()
+		for k, v := range req.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+
+		if err := cmd.Start(); err != nil {
+			outF.Close()
+			errF.Close()
+			return process.ProcessInfo{}, fmt.Errorf("start process: %w", err)
+		}
+		pid = cmd.Process.Pid
+		startedAt = time.Now()
 	}
 
 	ns := req.Namespace
@@ -314,27 +329,45 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 	}
 
 	s.mu.Lock()
-	id := s.nextID
-	s.nextID++
+	var id int
+	var lastCronAt time.Time
+	var lastCronStatus string
+	if existing, ok := s.processes[ns+":"+name]; ok {
+		id = existing.Info.ID
+		lastCronAt = existing.Info.LastCronAt
+		lastCronStatus = existing.Info.LastCronStatus
+	} else {
+		id = s.nextID
+		s.nextID++
+	}
+
+	if (req.Cron != "" || req.CronRestart != "") && !isCronTask {
+		lastCronAt = startedAt
+		lastCronStatus = "ok"
+	}
+
 	mp := &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:          id,
-			Namespace:   ns,
-			Name:        name,
-			PID:         cmd.Process.Pid,
-			Status:      process.StatusOnline,
-			StartedAt:   time.Now(),
-			Script:      req.Script,
-			Args:        req.Args,
-			Env:         req.Env,
-			CronRestart: req.CronRestart,
-			LogFile:     logFile,
-			ErrorFile:   errFile,
-			MaxRestarts: req.MaxRestarts,
-			ConfigDir:   req.ConfigDir,
-			Version:     version,
-			User:        getCurrentUser(),
-			Watch:       req.Watch,
+			ID:             id,
+			Namespace:      ns,
+			Name:           name,
+			PID:            pid,
+			Status:         status,
+			StartedAt:      startedAt,
+			Script:         req.Script,
+			Args:           req.Args,
+			Env:            req.Env,
+			CronRestart:    req.CronRestart,
+			Cron:           req.Cron,
+			LastCronAt:     lastCronAt,
+			LastCronStatus: lastCronStatus,
+			LogFile:        logFile,
+			ErrorFile:      errFile,
+			MaxRestarts:    req.MaxRestarts,
+			ConfigDir:      req.ConfigDir,
+			Version:        version,
+			User:           getCurrentUser(),
+			Watch:          req.Watch,
 		},
 		Cmd:     cmd,
 		done:    make(chan struct{}),
@@ -343,8 +376,10 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 	s.processes[ns+":"+name] = mp
 	s.mu.Unlock()
 
-	// Watch for process exit in background
-	go s.watchProcess(mp, outF, errF)
+	if !isCronTask {
+		// Watch for process exit in background
+		go s.watchProcess(mp, outF, errF)
+	}
 
 	// Register cron restart if configured
 	if req.CronRestart != "" {
@@ -365,6 +400,15 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			s.mu.Unlock()
 		}); err != nil {
 			log.Printf("cron_restart parse error for %s: %v", name, err)
+		}
+	}
+
+	// Register cron schedule if configured
+	if req.Cron != "" {
+		if err := s.scheduler.Register(name, req.Cron, func() {
+			s.triggerCron(ns, name, req)
+		}); err != nil {
+			log.Printf("cron parse error for %s: %v", name, err)
 		}
 	}
 
@@ -425,18 +469,20 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 		mp.Watcher = nil
 	}
 
-	if mp.Cmd.Process != nil {
-		if err := mp.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			_ = mp.Cmd.Process.Kill()
-		}
-	}
-
-	// Wait with timeout
-	select {
-	case <-mp.done:
-	case <-time.After(5 * time.Second):
+	if mp.Cmd != nil {
 		if mp.Cmd.Process != nil {
-			_ = mp.Cmd.Process.Kill()
+			if err := mp.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
+				_ = mp.Cmd.Process.Kill()
+			}
+		}
+
+		// Wait with timeout
+		select {
+		case <-mp.done:
+		case <-time.After(5 * time.Second):
+			if mp.Cmd.Process != nil {
+				_ = mp.Cmd.Process.Kill()
+			}
 		}
 	}
 
@@ -465,23 +511,54 @@ func (s *Server) restartByName(name string) error {
 	}
 	for _, mp := range targets {
 		req := &AppStartReq{
-			Namespace:   mp.Info.Namespace,
-			Name:        mp.Info.Name,
-			Script:      mp.Info.Script,
-			Args:        mp.Info.Args,
-			Env:         mp.Info.Env,
-			CronRestart: mp.Info.CronRestart,
-			Watch:       mp.Info.Watch,
-			MaxRestarts: mp.Info.MaxRestarts,
-			LogFile:     mp.Info.LogFile,
-			ErrorFile:   mp.Info.ErrorFile,
-			Instances:   1,
-			Version:     mp.Info.Version,
+			Namespace:     mp.Info.Namespace,
+			Name:          mp.Info.Name,
+			Script:        mp.Info.Script,
+			Args:          mp.Info.Args,
+			Env:           mp.Info.Env,
+			CronRestart:   mp.Info.CronRestart,
+			Cron:          mp.Info.Cron,
+			CronTriggered: true,
+			Watch:         mp.Info.Watch,
+			MaxRestarts:   mp.Info.MaxRestarts,
+			LogFile:       mp.Info.LogFile,
+			ErrorFile:     mp.Info.ErrorFile,
+			Instances:     1,
+			Version:       mp.Info.Version,
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
 	}
 	return nil
+}
+
+func (s *Server) triggerCron(ns, name string, originalReq *AppStartReq) {
+	s.mu.Lock()
+	key := ns + ":" + name
+	mp, ok := s.processes[key]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	triggerReq := *originalReq
+	triggerReq.CronTriggered = true
+
+	firedAt := time.Now()
+
+	_ = s.stopProcess(mp)
+	_, err := s.launchProcess(name, &triggerReq)
+
+	s.mu.Lock()
+	if p, ok := s.processes[key]; ok {
+		p.Info.LastCronAt = firedAt
+		if err != nil {
+			p.Info.LastCronStatus = "failed"
+		} else {
+			p.Info.LastCronStatus = "ok"
+		}
+	}
+	s.mu.Unlock()
 }
 
 func (s *Server) deleteByName(name string) error {
@@ -521,6 +598,7 @@ func (s *Server) save() error {
 			Args:        mp.Info.Args,
 			Env:         mp.Info.Env,
 			CronRestart: mp.Info.CronRestart,
+			Cron:        mp.Info.Cron,
 			Instances:   1,
 			MaxRestarts: mp.Info.MaxRestarts,
 			LogFile:     mp.Info.LogFile,
@@ -558,6 +636,7 @@ func (s *Server) resurrect() error {
 			Args:        e.Args,
 			Env:         e.Env,
 			CronRestart: e.CronRestart,
+			Cron:        e.Cron,
 			Watch:       e.Watch,
 			Instances:   e.Instances,
 			MaxRestarts: e.MaxRestarts,

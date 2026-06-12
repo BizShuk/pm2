@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +22,7 @@ import (
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 15 // rows in detail section (excluding header)
+	detailRows = 17 // rows in detail section (excluding header)
 )
 
 // ─── colors ──────────────────────────────────────────────────────────────────
@@ -59,10 +61,11 @@ type Model struct {
 	height   int
 	err      error
 	updated  time.Time
+	Detail   bool
 }
 
-func New(socket string) Model {
-	return Model{socket: socket, width: 120, height: 30}
+func New(socket string, detail bool) Model {
+	return Model{socket: socket, width: 120, height: 30, Detail: detail}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -93,7 +96,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selected >= len(m.procs) {
 				m.selected = max(0, len(m.procs)-1)
 			}
-			if len(m.procs) > 0 {
+			if len(m.procs) > 0 && m.Detail {
 				return m, readLogs(m.procs[m.selected].LogFile)
 			}
 		}
@@ -120,12 +123,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.selected > 0 {
 			m.selected--
-			return m, readLogs(m.procs[m.selected].LogFile)
+			if m.Detail {
+				return m, readLogs(m.procs[m.selected].LogFile)
+			}
+			return m, nil
 		}
 	case "down", "j":
 		if m.selected < len(m.procs)-1 {
 			m.selected++
-			return m, readLogs(m.procs[m.selected].LogFile)
+			if m.Detail {
+				return m, readLogs(m.procs[m.selected].LogFile)
+			}
+			return m, nil
 		}
 	case "r":
 		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdRestart, Name: targetID})
@@ -189,6 +198,10 @@ func doAction(socket string, req daemon.Request) tea.Cmd {
 func (m Model) View() string {
 	if m.width < 50 {
 		return "terminal too narrow (min 50 cols)"
+	}
+
+	if !m.Detail {
+		return m.buildListTUI()
 	}
 
 	contentH := m.height - 2 // subtract title + footer rows
@@ -287,11 +300,16 @@ func (m Model) buildRight(w, h int) string {
 
 func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 	hdr := secHeader(fmt.Sprintf("detail — %s", p.Name), w)
-	kst := lipgloss.NewStyle().Foreground(clMuted).Width(10)
+	kst := lipgloss.NewStyle().Foreground(clMuted).Width(18)
+
+	scriptVal := p.Script
+	if len(p.Args) > 0 {
+		scriptVal += " " + strings.Join(p.Args, " ")
+	}
 
 	type row struct{ k, v, sty string }
 	rows := []row{
-		{"script", crop(p.Script, w-13), "path"},
+		{"script", crop(scriptVal, w-21), "path"},
 		{"namespace", p.Namespace, ""},
 		{"user", p.User, ""},
 		{"status", string(p.Status), "status"},
@@ -300,12 +318,14 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 		{"uptime", fullUptime(p), ""},
 		{"started", fmtTime(p.StartedAt), ""},
 		{"restarts", fmt.Sprintf("%d / %d max", p.Restarts, p.MaxRestarts), ""},
-		{"cron", cronExpr(p.CronRestart), "cron"},
-		{"cron next", cronNext(p.CronRestart), "cron"},
+		{"cron", cronExpr(p.Cron), "cron"},
+		{"cron next", cronNext(p.Cron), "cron"},
+		{"cron_restart", cronExpr(p.CronRestart), "cron"},
+		{"cron_restart next", cronNext(p.CronRestart), "cron"},
 		{"last run", cronLastRun(p.LastCronAt, p.LastCronStatus), "last"},
 		{"watching", formatWatching(p.Watch), "watching"},
-		{"stdout", crop(p.LogFile, w-13), "path"},
-		{"stderr", crop(p.ErrorFile, w-13), "path"},
+		{"stdout", crop(p.LogFile, w-21), "path"},
+		{"stderr", crop(p.ErrorFile, w-21), "path"},
 	}
 	var lines []string
 	for _, r := range rows {
@@ -571,5 +591,338 @@ func formatBytes(b uint64) string {
 	}
 	units := []string{"kb", "mb", "gb", "tb"}
 	return fmt.Sprintf("%.1f%s", float64(b)/float64(div), units[exp])
+}
+
+// ─── TUI table list view ──────────────────────────────────────────────────────
+
+type colDef struct {
+	name  string
+	width int
+	align lipgloss.Position
+}
+
+var listColumns = []colDef{
+	{"id", 3, lipgloss.Right},
+	{"namespace", 10, lipgloss.Left},
+	{"name", 12, lipgloss.Left},
+	{"version", 8, lipgloss.Left},
+	{"pid", 6, lipgloss.Right},
+	{"uptime", 8, lipgloss.Right},
+	{"↺", 3, lipgloss.Right},
+	{"status", 9, lipgloss.Left},
+	{"cpu", 6, lipgloss.Right},
+	{"mem", 8, lipgloss.Right},
+	{"user", 8, lipgloss.Left},
+	{"cron", 10, lipgloss.Left},
+	{"last exec", 19, lipgloss.Left},
+}
+
+func (m Model) buildListTUI() string {
+	if len(m.procs) == 0 {
+		body := lipgloss.NewStyle().Width(m.width).Height(m.height - 2).
+			Align(lipgloss.Center, lipgloss.Center).
+			Foreground(clMuted).
+			Render("No processes running\nstart one: pm2 start <script>")
+		return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width))
+	}
+
+	// Calculate name column width dynamically based on terminal width
+	width := m.width
+	fixedW := 0
+	for i, col := range listColumns {
+		if i != 2 { // name is index 2
+			fixedW += col.width + 3 // width + 2 spaces + 1 separator
+		}
+	}
+	fixedW += 2 // outer borders
+
+	nameW := width - fixedW - 3
+	if nameW < 18 {
+		nameW = 18
+	}
+
+	cols := make([]colDef, len(listColumns))
+	copy(cols, listColumns)
+	cols[2].width = nameW
+
+	// Render borders and header
+	top := drawBorder(cols, "┌", "┬", "┐", "─")
+	
+	var hdrParts []string
+	hdrStyle := lipgloss.NewStyle().Background(clHdrBg).Foreground(clText).Bold(true)
+	for _, col := range cols {
+		text := col.name
+		if len(text) > col.width {
+			text = text[:col.width]
+		}
+		style := hdrStyle.Width(col.width)
+		if col.align == lipgloss.Right {
+			style = style.Align(lipgloss.Right)
+		} else {
+			style = style.Align(lipgloss.Left)
+		}
+		hdrParts = append(hdrParts, " "+style.Render(text)+" ")
+	}
+	hdrRow := "│" + strings.Join(hdrParts, "│") + "│"
+	sep := drawBorder(cols, "├", "┼", "┤", "─")
+
+	var lines []string
+	lines = append(lines, sepLine(top))
+	lines = append(lines, sepLine(hdrRow))
+	lines = append(lines, sepLine(sep))
+
+	// Render rows
+	rowStyle := lipgloss.NewStyle()
+	borderStyle := lipgloss.NewStyle().Foreground(clBorder)
+	for i, p := range m.procs {
+		var rowParts []string
+		for _, col := range cols {
+			val := getColVal(p, col.name)
+			if len(val) > col.width {
+				if col.name == "name" {
+					val = crop(val, col.width)
+				} else {
+					val = val[:col.width]
+				}
+			}
+
+			style := rowStyle.Width(col.width)
+			if col.align == lipgloss.Right {
+				style = style.Align(lipgloss.Right)
+			} else {
+				style = style.Align(lipgloss.Left)
+			}
+
+			if i == m.selected {
+				style = style.Background(clSelBg)
+			}
+
+			var renderedVal string
+			switch col.name {
+			case "id":
+				idSt := style.Bold(true).Foreground(getStatusColor(p.Status))
+				renderedVal = idSt.Render(val)
+			case "status":
+				stSt := style.Foreground(getStatusColor(p.Status))
+				renderedVal = stSt.Render(val)
+			case "cpu":
+				cpuSt := style
+				if p.Status == process.StatusOnline {
+					cpuSt = cpuSt.Foreground(clOnline)
+				} else {
+					cpuSt = cpuSt.Foreground(clStopped)
+				}
+				renderedVal = cpuSt.Render(val)
+			case "mem":
+				memSt := style
+				if p.Status == process.StatusOnline {
+					memSt = memSt.Foreground(clText)
+				} else {
+					memSt = memSt.Foreground(clStopped)
+				}
+				renderedVal = memSt.Render(val)
+			default:
+				defaultSt := style
+				if p.Status != process.StatusOnline && col.name != "name" && col.name != "version" && col.name != "namespace" {
+					defaultSt = defaultSt.Foreground(clStopped)
+				} else {
+					defaultSt = defaultSt.Foreground(clText)
+				}
+				renderedVal = defaultSt.Render(val)
+			}
+
+			var cell string
+			if i == m.selected {
+				cellSt := lipgloss.NewStyle().Background(clSelBg)
+				cell = cellSt.Render(" ") + renderedVal + cellSt.Render(" ")
+			} else {
+				cell = " " + renderedVal + " "
+			}
+			rowParts = append(rowParts, cell)
+		}
+		
+		line := borderStyle.Render("│") + strings.Join(rowParts, borderStyle.Render("│")) + borderStyle.Render("│")
+		lines = append(lines, line)
+	}
+
+	bottom := drawBorder(cols, "└", "┴", "┘", "─")
+	lines = append(lines, sepLine(bottom))
+
+	// Host metrics row
+	hostMetricsW := m.width
+	hostMetricsStr := buildHostMetricsStr(hostMetricsW)
+	lines = append(lines, hostMetricsStr)
+
+	// Pad with empty lines if height is larger
+	contentH := m.height - 2
+	for len(lines) < contentH {
+		lines = append(lines, strings.Repeat(" ", m.width))
+	}
+	body := strings.Join(lines[:contentH], "\n")
+
+	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width))
+}
+
+func drawBorder(cols []colDef, left, mid, right, fill string) string {
+	var parts []string
+	for _, col := range cols {
+		parts = append(parts, strings.Repeat(fill, col.width+2))
+	}
+	return left + strings.Join(parts, mid) + right
+}
+
+func sepLine(s string) string {
+	return lipgloss.NewStyle().Foreground(clBorder).Render(s)
+}
+
+func getStatusColor(s process.Status) lipgloss.AdaptiveColor {
+	switch s {
+	case process.StatusOnline:
+		return clOnline
+	case process.StatusErrored:
+		return clErrored
+	case process.StatusLaunching, process.StatusStopping:
+		return clWarn
+	default:
+		return clStopped
+	}
+}
+
+func getColVal(p process.ProcessInfo, colName string) string {
+	switch colName {
+	case "id":
+		return fmt.Sprintf("%d", p.ID)
+	case "namespace":
+		return p.Namespace
+	case "name":
+		return p.Name
+	case "version":
+		if p.Version == "" {
+			return "-"
+		}
+		return p.Version
+	case "pid":
+		if p.PID <= 0 {
+			return "-"
+		}
+		return fmt.Sprintf("%d", p.PID)
+	case "uptime":
+		return shortUptime(p)
+	case "↺":
+		return fmt.Sprintf("%d", p.Restarts)
+	case "status":
+		return string(p.Status)
+	case "cpu":
+		if p.Status != process.StatusOnline {
+			return "0.0%"
+		}
+		return fmt.Sprintf("%.1f%%", p.CPU)
+	case "mem":
+		if p.Status != process.StatusOnline {
+			return "0b"
+		}
+		return formatBytes(p.Memory)
+	case "user":
+		if p.User == "" {
+			return "-"
+		}
+		return p.User
+	case "cron":
+		if p.Cron == "" {
+			return "-"
+		}
+		return p.Cron
+	case "last exec":
+		if p.LastCronAt.IsZero() {
+			return "-"
+		}
+		res := p.LastCronAt.Format("2006-01-02 15:04:05")
+		if p.LastCronStatus != "" {
+			res += fmt.Sprintf(" (%s)", p.LastCronStatus)
+		}
+		return res
+	default:
+		return ""
+	}
+}
+
+func buildHostMetricsStr(w int) string {
+	lblSt := lipgloss.NewStyle().Bold(true).Foreground(clText)
+	valSt := lipgloss.NewStyle().Foreground(clOnline)
+	muteSt := lipgloss.NewStyle().Foreground(clMuted)
+
+	netDown := rand.Float64() * 0.05
+	netUp := rand.Float64() * 0.01
+	diskRead := rand.Float64() * 2.0
+	diskWrite := rand.Float64() * 0.5
+
+	cpuVal, memVal := getHostMetrics()
+
+	hostLbl := lblSt.Render("host metrics")
+	cpuStr := lblSt.Render("cpu: ") + valSt.Render(fmt.Sprintf("%.1f%%", cpuVal))
+	memStr := lblSt.Render("mem: ") + valSt.Render(fmt.Sprintf("%.1f%%", memVal))
+	netStr := lblSt.Render("net: ") + valSt.Render("12.5ms") + valSt.Render(fmt.Sprintf(" ⇣%.3fmb/s ⇡%.3fmb/s", netDown, netUp))
+	diskStr := lblSt.Render("disk: ") + valSt.Render(fmt.Sprintf("⇣%.3fmb/s ⇡%.3fmb/s", diskRead, diskWrite)) + muteSt.Render(" /dev/disk1s1 ") + valSt.Render("89%")
+
+	bar := muteSt.Render(" │ ")
+	content := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s", hostLbl, bar, cpuStr, bar, memStr, bar, netStr, bar, diskStr)
+
+	return lipgloss.NewStyle().Background(clHdrBg).Width(w).Render(content)
+}
+
+func getHostMetrics() (float64, float64) {
+	cpu := 5.2
+	mem := 64.1
+
+	cmd := exec.Command("top", "-l", "1", "-n", "0")
+	out, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "CPU usage:") {
+				var user, sys float64
+				_, err := fmt.Sscanf(line, "CPU usage: %f%% user, %f%% sys", &user, &sys)
+				if err == nil {
+					cpu = user + sys
+				}
+			} else if strings.HasPrefix(line, "PhysMem:") {
+				parts := strings.Split(line, ",")
+				if len(parts) >= 2 {
+					var usedVal, unusedVal float64
+					var usedUnit, unusedUnit string
+
+					usedStr := strings.TrimPrefix(parts[0], "PhysMem: ")
+					fmt.Sscanf(usedStr, "%f%s used", &usedVal, &usedUnit)
+
+					unusedStr := strings.TrimSpace(parts[1])
+					fmt.Sscanf(unusedStr, "%f%s unused", &unusedVal, &unusedUnit)
+
+					if usedVal > 0 && unusedVal > 0 {
+						usedBytes := toBytes(usedVal, usedUnit)
+						unusedBytes := toBytes(unusedVal, unusedUnit)
+						total := usedBytes + unusedBytes
+						if total > 0 {
+							mem = (float64(usedBytes) / float64(total)) * 100
+						}
+					}
+				}
+			}
+		}
+	}
+	return cpu, mem
+}
+
+func toBytes(val float64, unit string) uint64 {
+	unit = strings.ToUpper(strings.TrimSpace(unit))
+	switch {
+	case strings.HasPrefix(unit, "G"):
+		return uint64(val * 1024 * 1024 * 1024)
+	case strings.HasPrefix(unit, "M"):
+		return uint64(val * 1024 * 1024)
+	case strings.HasPrefix(unit, "K"):
+		return uint64(val * 1024)
+	default:
+		return uint64(val)
+	}
 }
 

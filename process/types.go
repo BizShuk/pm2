@@ -28,6 +28,7 @@ type ProcessInfo struct {
 	Args        []string  `json:"args"`
 	Env         map[string]string `json:"env"`
 	CronRestart    string    `json:"cron_restart"`
+	Cron           string    `json:"cron"`
 	LastCronAt     time.Time `json:"last_cron_at"`
 	LastCronStatus string    `json:"last_cron_status"` // "ok" | "failed" | ""
 	LogFile        string    `json:"log_file"`
@@ -47,6 +48,7 @@ type DumpEntry struct {
 	Args        []string          `json:"args"`
 	Env         map[string]string `json:"env"`
 	CronRestart string            `json:"cron_restart"`
+	Cron        string            `json:"cron"`
 	Instances   int               `json:"instances"`
 	MaxRestarts int               `json:"max_restarts"`
 	LogFile     string            `json:"log_file"`

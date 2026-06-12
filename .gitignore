@@ -2,3 +2,4 @@ pm2
 /pm2-bin
 *.test
 /tmp/
+config/ecosystem_test.go

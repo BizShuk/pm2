@@ -19,6 +19,7 @@ func newStartCmd() *cobra.Command {
 		namespace   string
 		instances   int
 		cronRestart string
+		cron        string
 		envVars     []string
 		watch       bool
 	)
@@ -49,6 +50,9 @@ func newStartCmd() *cobra.Command {
 				if cronRestart != "" {
 					app.CronRestart = cronRestart
 				}
+				if cron != "" {
+					app.Cron = cron
+				}
 				if namespace != "" {
 					app.Namespace = namespace
 				}
@@ -77,6 +81,7 @@ func newStartCmd() *cobra.Command {
 						Args:        app.Args,
 						Env:         app.Env,
 						CronRestart: app.CronRestart,
+						Cron:        app.Cron,
 						Instances:   app.Instances,
 						MaxRestarts: app.MaxRestarts,
 						LogFile:     app.LogFile,
@@ -107,7 +112,14 @@ func newStartCmd() *cobra.Command {
 				var infos []process.ProcessInfo
 				if err := json.Unmarshal(resp.Payload, &infos); err == nil {
 					for _, info := range infos {
-						fmt.Printf("[%d] %s started (pid=%d)\n", info.ID, info.Name, info.PID)
+						if info.PID <= 0 {
+							fmt.Printf("[%d] %s scheduled\n", info.ID, info.Name)
+						} else {
+							fmt.Printf("[%d] %s started (pid=%d)\n", info.ID, info.Name, info.PID)
+						}
+						if info.Cron != "" {
+							fmt.Printf("     cron:         %s\n", info.Cron)
+						}
 						if info.CronRestart != "" {
 							fmt.Printf("     cron_restart: %s\n", info.CronRestart)
 						}
@@ -123,6 +135,7 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&namespace, "ns", "", "process namespace (shortcut)")
 	cmd.Flags().IntVarP(&instances, "instances", "i", 0, "number of instances")
 	cmd.Flags().StringVar(&cronRestart, "cron-restart", "", "cron schedule for auto-restart")
+	cmd.Flags().StringVar(&cron, "cron", "", "cron schedule to trigger execution")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "environment variables KEY=VAL")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch file changes to restart")
 	return cmd
