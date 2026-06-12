@@ -336,3 +336,10 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
     ├── <name>-out.log  stdout
     └── <name>-err.log  stderr
 ```
+
+---
+
+## License
+
+This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.
+
