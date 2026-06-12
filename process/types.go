@@ -26,10 +26,12 @@ type ProcessInfo struct {
 	Script      string    `json:"script"`
 	Args        []string  `json:"args"`
 	Env         map[string]string `json:"env"`
-	CronRestart string    `json:"cron_restart"`
-	LogFile     string    `json:"log_file"`
-	ErrorFile   string    `json:"error_file"`
-	MaxRestarts int       `json:"max_restarts"`
+	CronRestart    string    `json:"cron_restart"`
+	LastCronAt     time.Time `json:"last_cron_at"`
+	LastCronStatus string    `json:"last_cron_status"` // "ok" | "failed" | ""
+	LogFile        string    `json:"log_file"`
+	ErrorFile      string    `json:"error_file"`
+	MaxRestarts    int       `json:"max_restarts"`
 }
 
 // DumpEntry is what gets persisted to dump.json for resurrect

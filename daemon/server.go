@@ -243,7 +243,19 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 	// Register cron restart if configured
 	if req.CronRestart != "" {
 		if err := s.scheduler.Register(name, req.CronRestart, func() {
-			_ = s.restartByName(name)
+			firedAt := time.Now()
+			restartErr := s.restartByName(name)
+			// Write last-run info onto the newly launched process (map was replaced by restartByName)
+			s.mu.Lock()
+			if p, ok := s.processes[name]; ok {
+				p.Info.LastCronAt = firedAt
+				if restartErr != nil {
+					p.Info.LastCronStatus = "failed"
+				} else {
+					p.Info.LastCronStatus = "ok"
+				}
+			}
+			s.mu.Unlock()
 		}); err != nil {
 			log.Printf("cron_restart parse error for %s: %v", name, err)
 		}

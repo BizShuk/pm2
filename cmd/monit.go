@@ -9,7 +9,7 @@ import (
 func newMonitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "monit",
-		Aliases: []string{"monitor", "dashboard"},
+		Aliases: []string{"m", "monitor", "dashboard"},
 		Short:   "Interactive live process dashboard (TUI)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			m := tui.New(socketPath())

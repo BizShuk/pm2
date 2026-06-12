@@ -21,7 +21,7 @@ const (
 	leftColW   = 34
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 8 // rows in detail section (excluding header)
+	detailRows = 10 // rows in detail section (excluding header)
 )
 
 // ─── colors ──────────────────────────────────────────────────────────────────
@@ -280,7 +280,9 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 		{"uptime", fullUptime(p), ""},
 		{"started", fmtTime(p.StartedAt), ""},
 		{"restarts", fmt.Sprintf("%d / %d max", p.Restarts, p.MaxRestarts), ""},
-		{"cron", cronLabel(p.CronRestart), "cron"},
+		{"cron", cronExpr(p.CronRestart), "cron"},
+		{"cron next", cronNext(p.CronRestart), "cron"},
+		{"last run", cronLastRun(p.LastCronAt, p.LastCronStatus), "last"},
 		{"stdout", crop(p.LogFile, w-13), "path"},
 		{"stderr", crop(p.ErrorFile, w-13), "path"},
 	}
@@ -292,6 +294,8 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 			val = lipgloss.NewStyle().Foreground(clPath).Render(r.v)
 		case "cron":
 			val = lipgloss.NewStyle().Foreground(clCron).Render(r.v)
+		case "last":
+			val = cronLastRunStyled(p.LastCronAt, p.LastCronStatus)
 		case "status":
 			val = statusLabel(p.Status)
 		default:
@@ -406,17 +410,48 @@ func fmtTime(t time.Time) string {
 	return t.Format("2006-01-02  15:04:05")
 }
 
-func cronLabel(expr string) string {
+func cronExpr(expr string) string {
+	if expr == "" {
+		return "—"
+	}
+	return expr
+}
+
+func cronNext(expr string) string {
 	if expr == "" {
 		return "—"
 	}
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	sched, err := parser.Parse(expr)
 	if err != nil {
-		return expr + "  (invalid)"
+		return "invalid expression"
 	}
-	next := sched.Next(time.Now())
-	return fmt.Sprintf("%s  →  next %s", expr, next.Format("01-02 15:04"))
+	return sched.Next(time.Now()).Format("2006-01-02  15:04:05")
+}
+
+func cronLastRun(t time.Time, status string) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return fmt.Sprintf("%s  %s", t.Format("2006-01-02  15:04:05"), status)
+}
+
+// cronLastRunStyled returns the last-run line with status coloured.
+func cronLastRunStyled(t time.Time, status string) string {
+	if t.IsZero() {
+		return lipgloss.NewStyle().Foreground(clMuted).Render("—")
+	}
+	ts := lipgloss.NewStyle().Foreground(clText).Render(t.Format("2006-01-02  15:04:05"))
+	var badge string
+	switch status {
+	case "ok":
+		badge = lipgloss.NewStyle().Foreground(clOnline).Render("  ok")
+	case "failed":
+		badge = lipgloss.NewStyle().Foreground(clErrored).Render("  failed")
+	default:
+		badge = lipgloss.NewStyle().Foreground(clMuted).Render("  " + status)
+	}
+	return ts + badge
 }
 
 func crop(s string, maxLen int) string {
