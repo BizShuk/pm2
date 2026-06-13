@@ -49,6 +49,11 @@ type refreshMsg struct {
 	err   error
 }
 type logsMsg struct{ lines []string }
+type hostMetricsMsg struct {
+	cpu float64
+	mem float64
+}
+type triggerHostMetricsMsg struct{}
 
 // ─── model ───────────────────────────────────────────────────────────────────
 
@@ -62,16 +67,26 @@ type Model struct {
 	err      error
 	updated  time.Time
 	Detail   bool
+	hostCPU  float64
+	hostMem  float64
 }
 
 func New(socket string, detail bool) Model {
-	return Model{socket: socket, width: 120, height: 30, Detail: detail}
+	return Model{
+		socket:  socket,
+		width:   120,
+		height:  30,
+		Detail:  detail,
+		hostCPU: 5.2,
+		hostMem: 64.1,
+	}
 }
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		doRefresh(m.socket),
 		tea.Tick(refreshDur, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		updateHostMetricsCmd(),
 	)
 }
 
@@ -103,6 +118,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logsMsg:
 		m.logs = msg.lines
+
+	case hostMetricsMsg:
+		m.hostCPU = msg.cpu
+		m.hostMem = msg.mem
+		return m, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
+			return triggerHostMetricsMsg{}
+		})
+
+	case triggerHostMetricsMsg:
+		return m, updateHostMetricsCmd()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -147,6 +172,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────
+
+func updateHostMetricsCmd() tea.Cmd {
+	return func() tea.Msg {
+		cpu, mem := getHostMetrics()
+		return hostMetricsMsg{cpu: cpu, mem: mem}
+	}
+}
 
 func doRefresh(socket string) tea.Cmd {
 	return func() tea.Msg {
@@ -748,10 +780,10 @@ func (m Model) buildListTUI() string {
 	bottom := drawBorder(cols, "└", "┴", "┘", "─")
 	lines = append(lines, sepLine(bottom))
 
-	// Host metrics row
+	// Host metrics rows
 	hostMetricsW := m.width
-	hostMetricsStr := buildHostMetricsStr(hostMetricsW)
-	lines = append(lines, hostMetricsStr)
+	cpuMemLine, diskNetLine := m.buildHostMetricsLines(hostMetricsW)
+	lines = append(lines, cpuMemLine, diskNetLine)
 
 	// Pad with empty lines if height is larger
 	contentH := m.height - 2
@@ -846,7 +878,7 @@ func getColVal(p process.ProcessInfo, colName string) string {
 	}
 }
 
-func buildHostMetricsStr(w int) string {
+func (m Model) buildHostMetricsLines(w int) (string, string) {
 	lblSt := lipgloss.NewStyle().Bold(true).Foreground(clText)
 	valSt := lipgloss.NewStyle().Foreground(clOnline)
 	muteSt := lipgloss.NewStyle().Foreground(clMuted)
@@ -856,18 +888,20 @@ func buildHostMetricsStr(w int) string {
 	diskRead := rand.Float64() * 2.0
 	diskWrite := rand.Float64() * 0.5
 
-	cpuVal, memVal := getHostMetrics()
+	cpuVal, memVal := m.hostCPU, m.hostMem
 
-	hostLbl := lblSt.Render("host metrics")
 	cpuStr := lblSt.Render("cpu: ") + valSt.Render(fmt.Sprintf("%.1f%%", cpuVal))
 	memStr := lblSt.Render("mem: ") + valSt.Render(fmt.Sprintf("%.1f%%", memVal))
 	netStr := lblSt.Render("net: ") + valSt.Render("12.5ms") + valSt.Render(fmt.Sprintf(" ⇣%.3fmb/s ⇡%.3fmb/s", netDown, netUp))
 	diskStr := lblSt.Render("disk: ") + valSt.Render(fmt.Sprintf("⇣%.3fmb/s ⇡%.3fmb/s", diskRead, diskWrite)) + muteSt.Render(" /dev/disk1s1 ") + valSt.Render("89%")
 
 	bar := muteSt.Render(" │ ")
-	content := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s", hostLbl, bar, cpuStr, bar, memStr, bar, netStr, bar, diskStr)
 
-	return lipgloss.NewStyle().Background(clHdrBg).Width(w).Render(content)
+	line1Content := fmt.Sprintf(" %s %s %s", cpuStr, bar, memStr)
+	line2Content := fmt.Sprintf(" %s %s %s", diskStr, bar, netStr)
+
+	bgSt := lipgloss.NewStyle().Background(clHdrBg).Width(w)
+	return bgSt.Render(line1Content), bgSt.Render(line2Content)
 }
 
 func getHostMetrics() (float64, float64) {

@@ -3,3 +3,5 @@ pm2
 *.test
 /tmp/
 config/ecosystem_test.go
+plans/implementation_plan.md
+plans/walkthrough.md
