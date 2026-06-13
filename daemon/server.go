@@ -157,10 +157,11 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 			name = fmt.Sprintf("%s-%d", req.Name, i)
 		}
 
-		// Identity = name + script path (both must match to allow override)
 		s.mu.Lock()
 		key := ns + ":" + name
-		if existing, ok := s.processes[key]; ok {
+		var existing *ManagedProcess
+		var ok bool
+		if existing, ok = s.processes[key]; ok {
 			if existing.Info.Script != req.Script {
 				s.mu.Unlock()
 				return infos, fmt.Errorf(
@@ -171,7 +172,29 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 			s.mu.Unlock()
 			_ = s.stopProcess(existing)
 		} else {
-			s.mu.Unlock()
+			if req.ConfigFile != "" {
+				for _, mp := range s.processes {
+					if mp.Info.Name == name && mp.Info.ConfigFile == req.ConfigFile {
+						existing = mp
+						break
+					}
+				}
+				if existing != nil {
+					if existing.Info.Script != req.Script {
+						s.mu.Unlock()
+						return infos, fmt.Errorf(
+							"process %q already exists with script %q; use 'pm2 delete %s' first or use a different name",
+							name, existing.Info.Script, name,
+						)
+					}
+					s.mu.Unlock()
+					_ = s.stopProcess(existing)
+				} else {
+					s.mu.Unlock()
+				}
+			} else {
+				s.mu.Unlock()
+			}
 		}
 
 		info, err := s.launchProcess(name, req)
@@ -332,7 +355,20 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 	var id int
 	var lastCronAt time.Time
 	var lastCronStatus string
-	if existing, ok := s.processes[ns+":"+name]; ok {
+	var oldKey string
+	existing, ok := s.processes[ns+":"+name]
+	if !ok && req.ConfigFile != "" {
+		for k, mp := range s.processes {
+			if mp.Info.Name == name && mp.Info.ConfigFile == req.ConfigFile {
+				existing = mp
+				ok = true
+				oldKey = k
+				break
+			}
+		}
+	}
+
+	if ok {
 		id = existing.Info.ID
 		lastCronAt = existing.Info.LastCronAt
 		lastCronStatus = existing.Info.LastCronStatus
@@ -368,12 +404,16 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			Version:        version,
 			User:           getCurrentUser(),
 			Watch:          req.Watch,
+			ConfigFile:     req.ConfigFile,
 		},
 		Cmd:     cmd,
 		done:    make(chan struct{}),
 		Watcher: watcher,
 	}
 	s.processes[ns+":"+name] = mp
+	if oldKey != "" && oldKey != ns+":"+name {
+		delete(s.processes, oldKey)
+	}
 	s.mu.Unlock()
 
 	if !isCronTask {
@@ -449,6 +489,7 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 				LogFile:     mp.Info.LogFile,
 				ErrorFile:   mp.Info.ErrorFile,
 				Instances:   1,
+				ConfigFile:  mp.Info.ConfigFile,
 			}
 			_, _ = s.launchProcess(mp.Info.Name, req)
 		}()
@@ -525,6 +566,7 @@ func (s *Server) restartByName(name string) error {
 			ErrorFile:     mp.Info.ErrorFile,
 			Instances:     1,
 			Version:       mp.Info.Version,
+			ConfigFile:    mp.Info.ConfigFile,
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
@@ -607,6 +649,7 @@ func (s *Server) save() error {
 			ConfigDir:   mp.Info.ConfigDir,
 			Watch:       mp.Info.Watch,
 			Version:     mp.Info.Version,
+			ConfigFile:  mp.Info.ConfigFile,
 		})
 	}
 
@@ -645,6 +688,7 @@ func (s *Server) resurrect() error {
 			ErrorFile:   e.ErrorFile,
 			ConfigDir:   e.ConfigDir,
 			Version:     e.Version,
+			ConfigFile:  e.ConfigFile,
 		}
 		if _, err := s.startApp(req); err != nil {
 			log.Printf("resurrect %s: %v", e.Name, err)

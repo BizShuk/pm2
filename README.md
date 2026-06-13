@@ -57,7 +57,6 @@ Process identity is `name + script path`. Re-starting with the same name and scr
 
 ---
 
-
 ### `pm2 stop`
 
 Stop a process by name or stop all.
@@ -234,17 +233,23 @@ module.exports = {
 
 ### Config fields
 
-| Field          | Type     | Default                      | Description                                    |
-| -------------- | -------- | ---------------------------- | ---------------------------------------------- |
-| `name`         | string   | script filename              | Process identifier — must be unique            |
-| `script`       | string   | required                     | Executable path                                |
-| `args`         | []string | `[]`                         | Arguments forwarded to the process             |
-| `instances`    | int      | `1`                          | Parallel copies (`<name>-0`, `<name>-1`, …)    |
-| `env`          | map      | `{}`                         | Env vars merged with the inherited environment |
-| `cron_restart` | string   | `""`                         | 5-field cron expression for scheduled restart  |
-| `max_restarts` | int      | `15`                         | Crash auto-restart ceiling                     |
-| `log_file`     | string   | `~/.pm2/logs/<name>-out.log` | stdout path                                    |
-| `error_file`   | string   | `~/.pm2/logs/<name>-err.log` | stderr path                                    |
+| Field          | Type     | Default                       | Description                                    |
+| -------------- | -------- | ----------------------------- | ---------------------------------------------- |
+| `namespace`    | string   | `"default"`                   | Process namespace                              |
+| `name`         | string   | script filename               | Process identifier — must be unique            |
+| `script`       | string   | required                      | Executable path                                |
+| `args`         | []string | `[]`                          | Arguments forwarded to the process             |
+| `instances`    | int      | `1`                           | Parallel copies (`<name>-0`, `<name>-1`, …)    |
+| `env`          | map      | `{}`                          | Env vars merged with the inherited environment |
+| `cron_restart` | string   | `""`                          | 5-field cron expression for scheduled restart  |
+| `cron`         | string   | `""`                          | 5-field cron expression to trigger execution   |
+| `watch`        | bool     | `false`                       | Watch file changes to restart                  |
+| `max_restarts` | int      | `15`                          | Crash auto-restart ceiling                     |
+| `log_file`     | string   | `~/.pm2/logs/<name>-out.log`  | stdout path                                    |
+| `out_file`     | string   | `""`                          | Alias for stdout path                          |
+| `error_file`   | string   | `~/.pm2/logs/<name>-err.log`  | stderr path                                    |
+| `config_dir`   | string   | `"~/.config/<name>/"`         | Base directory for log files                   |
+| `config_file`  | string   | `"<cwd>/ecosystem.config.js"` | Path to ecosystem config file (auto-set)       |
 
 ---
 
@@ -324,4 +329,3 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
 ## License
 
 This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.
-

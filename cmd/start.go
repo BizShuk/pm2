@@ -96,6 +96,7 @@ func newStartCmd() *cobra.Command {
 						ConfigDir:   app.ConfigDir,
 						Watch:       app.Watch,
 						Version:     app.Version,
+						ConfigFile:  app.ConfigFile,
 					},
 				}
 

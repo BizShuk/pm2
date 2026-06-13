@@ -12,21 +12,22 @@ import (
 
 // AppConfig mirrors PM2's app entry in ecosystem.config.js
 type AppConfig struct {
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	Script      string            `json:"script"`
-	Args        []string          `json:"args"`
-	Instances   int               `json:"instances"`
-	Env         map[string]string `json:"env"`
-	CronRestart string            `json:"cron_restart"`
-	Cron        string            `json:"cron"`
-	Watch       bool              `json:"watch"`
-	MaxRestarts int               `json:"max_restarts"`
-	Version     string            `json:"version"`
-	LogFile     string            `json:"log_file"`
-	OutFile     string            `json:"out_file"`
-	ErrorFile   string            `json:"error_file"`
-	ConfigDir   string            `json:"config_dir"`
+	Namespace   string            `json:"namespace"`    // Default: "default"
+	Name        string            `json:"name"`         // Default: script filename
+	Script      string            `json:"script"`       // Required
+	Args        []string          `json:"args"`         // Default: []
+	Instances   int               `json:"instances"`    // Default: 1
+	Env         map[string]string `json:"env"`          // Default: {}
+	CronRestart string            `json:"cron_restart"` // Default: ""
+	Cron        string            `json:"cron"`         // Default: ""
+	Watch       bool              `json:"watch"`        // Default: false
+	MaxRestarts int               `json:"max_restarts"` // Default: 15
+	Version     string            `json:"version"`      // Default: "-"
+	LogFile     string            `json:"log_file"`     // Default: "~/.pm2/logs/<name>-out.log"
+	OutFile     string            `json:"out_file"`     // Default: ""
+	ErrorFile   string            `json:"error_file"`   // Default: "~/.pm2/logs/<name>-err.log"
+	ConfigDir   string            `json:"config_dir"`   // Default: "~/.config/<name>/"
+	ConfigFile  string            `json:"config_file"`  // Default: "<cwd>/ecosystem.config.js"
 }
 
 // EcosystemConfig is the top-level config structure
@@ -56,6 +57,8 @@ func (a *AppConfig) Normalize() {
 			a.ConfigDir = filepath.Dir(a.LogFile)
 		} else if a.ErrorFile != "" {
 			a.ConfigDir = filepath.Dir(a.ErrorFile)
+		} else {
+			a.ConfigDir = "~/.config/" + a.Name
 		}
 	}
 	if a.ConfigDir != "" {
@@ -68,6 +71,14 @@ func (a *AppConfig) Normalize() {
 	}
 	if a.LogFile == "" && a.OutFile != "" {
 		a.LogFile = a.OutFile
+	}
+	if a.ConfigFile == "" {
+		cwd, err := os.Getwd()
+		if err == nil {
+			a.ConfigFile = filepath.Join(cwd, "ecosystem.config.js")
+		} else {
+			a.ConfigFile = "ecosystem.config.js"
+		}
 	}
 }
 
@@ -101,6 +112,7 @@ func loadJSON(path string) (*EcosystemConfig, error) {
 	for i := range cfg.Apps {
 		cfg.Apps[i].Normalize()
 		cfg.Apps[i].Script = resolveScriptPath(configDir, cfg.Apps[i].Script)
+		cfg.Apps[i].ConfigFile = path
 	}
 	return &cfg, nil
 }
@@ -140,6 +152,7 @@ func loadJS(path string) (*EcosystemConfig, error) {
 	for i := range cfg.Apps {
 		cfg.Apps[i].Normalize()
 		cfg.Apps[i].Script = resolveScriptPath(configDir, cfg.Apps[i].Script)
+		cfg.Apps[i].ConfigFile = path
 	}
 	return &cfg, nil
 }

@@ -124,3 +124,56 @@ func TestVersionStateInheritance(t *testing.T) {
 	}
 }
 
+func TestConfigFileReplacement(t *testing.T) {
+	testDir := "/tmp/pm2-test-configfile"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	scriptFile := "/bin/echo"
+
+	s.processes["default:agentmemory"] = &ManagedProcess{
+		Info: process.ProcessInfo{
+			ID:         42,
+			Name:       "agentmemory",
+			Namespace:  "default",
+			Script:     scriptFile,
+			ConfigFile: "/path/to/ecosystem.config.js",
+		},
+		done: make(chan struct{}),
+	}
+
+	req := &AppStartReq{
+		Namespace:  "Agent",
+		Name:       "agentmemory",
+		Script:     scriptFile,
+		ConfigFile: "/path/to/ecosystem.config.js",
+		Instances:  1,
+	}
+
+	_, err := s.startApp(req)
+	if err != nil {
+		t.Fatalf("startApp failed: %v", err)
+	}
+
+	// 檢查舊的 key 是否被刪除，且新的 key 存在，且 ID 繼承為 42
+	if _, ok := s.processes["default:agentmemory"]; ok {
+		t.Errorf("Old process 'default:agentmemory' should have been deleted")
+	}
+
+	mp, ok := s.processes["Agent:agentmemory"]
+	if !ok {
+		t.Fatalf("New process 'Agent:agentmemory' was not found")
+	}
+
+	if mp.Info.ID != 42 {
+		t.Errorf("Expected ID 42 to be inherited, got %d", mp.Info.ID)
+	}
+
+	if mp.Info.ConfigFile != "/path/to/ecosystem.config.js" {
+		t.Errorf("Expected ConfigFile to be propagated, got %s", mp.Info.ConfigFile)
+	}
+}
+
+

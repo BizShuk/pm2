@@ -49,6 +49,7 @@ type AppStartReq struct {
 	ErrorFile   string            `json:"error_file"`
 	ConfigDir   string            `json:"config_dir"`
 	Watch       bool              `json:"watch"`
+	ConfigFile  string            `json:"config_file"`
 }
 
 // Response is a daemon → CLI message
