@@ -8,21 +8,31 @@
 
 Daemon + CLI over a Unix socket. The CLI is a thin RPC client; all process state lives in the daemon.
 
-```
-CLI process                    Daemon process
-   cmd/                    →   daemon/server.go
-   (cobra commands)            (Unix socket listener)
-        │                             │
-        │  JSON over ~/.pm2/pm2.sock  │
-        └────────────────────────────►│
-                                      ├── process lifecycle (os/exec)
-                                      ├── cron/scheduler.go (robfig/cron)
-                                      └── ~/.pm2/dump.json (persist)
+```mermaid
+flowchart TD
+    subgraph CLI ["CLI Process (cmd/)"]
+        direction TB
+        C["Cobra Commands"]
+    end
+
+    subgraph Daemon ["Daemon Process (daemon/server.go)"]
+        direction TB
+        S["Unix Socket Listener"]
+        L["Process Lifecycle (os/exec)"]
+        CR["cron/scheduler.go (robfig/cron)"]
+        D["~/.pm2/dump.json (persist)"]
+
+        S --> L
+        S --> CR
+        S --> D
+    end
+
+    C -- "JSON over ~/.pm2/pm2.sock" --> S
 ```
 
 ## Package map
 
-```
+```tree
 pm2/
 ├── main.go                   entry point — calls cmd.Execute()
 ├── cmd/                      cobra commands (CLI layer)
@@ -103,7 +113,7 @@ list updates without waiting for the next tick.
 
 ## State directory (`~/.pm2/`)
 
-```
+```tree
 ~/.pm2/
 ├── pm2.sock        Unix socket
 ├── dump.json       serialised []process.DumpEntry (pm2 save / resurrect)
