@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -45,6 +46,42 @@ func NewServer(homeDir string) *Server {
 	}
 }
 
+func (s *Server) startAutoResurrect() {
+	if err := s.resurrect(); err != nil {
+		if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "no such file or directory") {
+			log.Printf("auto-resurrect: no saved processes found (dump.json does not exist)")
+		} else {
+			log.Printf("auto-resurrect failed: %v", err)
+		}
+	} else {
+		log.Printf("auto-resurrect completed successfully")
+	}
+}
+
+func (s *Server) startAutoSave() {
+	intervalStr := os.Getenv("PM2_AUTO_SAVE_INTERVAL")
+	interval := 10 * time.Minute
+	if intervalStr != "" {
+		if d, err := time.ParseDuration(intervalStr); err == nil {
+			interval = d
+		} else {
+			log.Printf("invalid PM2_AUTO_SAVE_INTERVAL %q, fallback to 10m: %v", intervalStr, err)
+		}
+	}
+
+	log.Printf("auto-save enabled with interval %v (first run in %v)", interval, interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := s.save(); err != nil {
+			log.Printf("auto-save failed: %v", err)
+		} else {
+			log.Printf("auto-save: processes persisted successfully")
+		}
+	}
+}
+
 // Listen starts the Unix socket server
 func (s *Server) Listen(socketPath string) error {
 	s.StartMetricsCollector()
@@ -54,6 +91,10 @@ func (s *Server) Listen(socketPath string) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	log.Printf("daemon listening on %s", socketPath)
+
+	go s.startAutoResurrect()
+	go s.startAutoSave()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

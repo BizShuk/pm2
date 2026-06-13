@@ -5,3 +5,5 @@ pm2
 config/ecosystem_test.go
 plans/implementation_plan.md
 plans/walkthrough.md
+pm2-test
+plans/task.md

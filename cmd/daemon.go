@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/shuk/pm2/daemon"
@@ -13,16 +14,59 @@ import (
 )
 
 func newDaemonCmd() *cobra.Command {
+	var foreground bool
 	cmd := &cobra.Command{
 		Use:    "daemon",
 		Short:  "Start the PM2 daemon (internal use)",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			srv := daemon.NewServer(pm2Home)
-			return srv.Listen(socketPath())
+			if foreground {
+				srv := daemon.NewServer(pm2Home)
+				return srv.Listen(socketPath())
+			}
+			return startDaemonAsBackground()
 		},
 	}
+	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "Run the daemon in the foreground")
 	return cmd
+}
+
+func startDaemonAsBackground() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	logDir := pm2Home
+	_ = os.MkdirAll(logDir, 0o755)
+	logFile := filepath.Join(logDir, "daemon.log")
+	errFile := filepath.Join(logDir, "daemon-err.log")
+
+	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer outF.Close()
+
+	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer errF.Close()
+
+	cmd := exec.Command(exe, "daemon", "--foreground")
+	cmd.Stdout = outF
+	cmd.Stderr = errF
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("spawn daemon background: %w", err)
+	}
+	_ = cmd.Process.Release()
+
+	fmt.Println("PM2 daemon started in the background.")
+	return nil
 }
 
 func newStartupCmd() *cobra.Command {
@@ -60,6 +104,7 @@ func generateLaunchd(exe string) error {
   <array>
     <string>%s</string>
     <string>daemon</string>
+    <string>--foreground</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -85,7 +130,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s daemon
+ExecStart=%s daemon --foreground
 Restart=always
 
 [Install]
@@ -109,7 +154,7 @@ func autoStartDaemon() error {
 		return err
 	}
 
-	cmd := exec.Command(exe, "daemon")
+	cmd := exec.Command(exe, "daemon", "--foreground")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
