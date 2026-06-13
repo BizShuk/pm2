@@ -97,7 +97,7 @@ No persistent connection — each CLI invocation is a fresh dial.
 
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
-`doAction()` (r/s/d) calls RPC then immediately calls `doRefresh()()` inline so the
+`doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
 list updates without waiting for the next tick.
 
 ## Dependencies

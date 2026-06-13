@@ -41,6 +41,16 @@ var (
 	clText    = lipgloss.AdaptiveColor{Light: "#0f172a", Dark: "#e6edf3"}
 )
 
+type SortField string
+
+const (
+	SortByName      SortField = "name"
+	SortByNamespace SortField = "namespace"
+	SortByCPU       SortField = "cpu"
+	SortByMem       SortField = "memory"
+	SortByStatus    SortField = "status"
+)
+
 // ─── messages ────────────────────────────────────────────────────────────────
 
 type tickMsg time.Time
@@ -69,6 +79,7 @@ type Model struct {
 	Detail   bool
 	hostCPU  float64
 	hostMem  float64
+	SortBy   SortField
 }
 
 func New(socket string, detail bool) Model {
@@ -79,6 +90,7 @@ func New(socket string, detail bool) Model {
 		Detail:  detail,
 		hostCPU: 5.2,
 		hostMem: 64.1,
+		SortBy:  SortByName,
 	}
 }
 
@@ -107,6 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		if msg.err == nil {
 			m.procs = msg.procs
+			m.sortProcs()
 			m.updated = time.Now()
 			if m.selected >= len(m.procs) {
 				m.selected = max(0, len(m.procs)-1)
@@ -140,6 +153,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
+	if msg.String() == "s" {
+		m.cycleSort()
+		m.sortProcs()
+		return m, nil
+	}
 	if len(m.procs) == 0 {
 		return m, nil
 	}
@@ -163,12 +181,87 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdRestart, Name: targetID})
-	case "s":
+	case "p":
 		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdStop, Name: targetID})
 	case "d":
 		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdDelete, Name: targetID})
 	}
 	return m, nil
+}
+
+func (m *Model) sortProcs() {
+	if len(m.procs) == 0 {
+		return
+	}
+	var selectedID int = -1
+	if m.selected >= 0 && m.selected < len(m.procs) {
+		selectedID = m.procs[m.selected].ID
+	}
+
+	sort.Slice(m.procs, func(i, j int) bool {
+		pi, pj := m.procs[i], m.procs[j]
+		switch m.SortBy {
+		case SortByName:
+			if pi.Name != pj.Name {
+				return pi.Name < pj.Name
+			}
+			return pi.ID < pj.ID
+		case SortByNamespace:
+			if pi.Namespace != pj.Namespace {
+				return pi.Namespace < pj.Namespace
+			}
+			if pi.Name != pj.Name {
+				return pi.Name < pj.Name
+			}
+			return pi.ID < pj.ID
+		case SortByCPU:
+			if pi.CPU != pj.CPU {
+				return pi.CPU > pj.CPU
+			}
+			return pi.Name < pj.Name
+		case SortByMem:
+			if pi.Memory != pj.Memory {
+				return pi.Memory > pj.Memory
+			}
+			return pi.Name < pj.Name
+		case SortByStatus:
+			if pi.Status != pj.Status {
+				return pi.Status < pj.Status
+			}
+			return pi.Name < pj.Name
+		default:
+			if pi.Name != pj.Name {
+				return pi.Name < pj.Name
+			}
+			return pi.ID < pj.ID
+		}
+	})
+
+	if selectedID != -1 {
+		for idx, p := range m.procs {
+			if p.ID == selectedID {
+				m.selected = idx
+				break
+			}
+		}
+	}
+}
+
+func (m *Model) cycleSort() {
+	switch m.SortBy {
+	case SortByName:
+		m.SortBy = SortByNamespace
+	case SortByNamespace:
+		m.SortBy = SortByCPU
+	case SortByCPU:
+		m.SortBy = SortByMem
+	case SortByMem:
+		m.SortBy = SortByStatus
+	case SortByStatus:
+		m.SortBy = SortByName
+	default:
+		m.SortBy = SortByName
+	}
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────
@@ -250,7 +343,7 @@ func (m Model) View() string {
 		Render(m.buildRight(rw, contentH))
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, div, right)
-	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width))
+	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width, m.SortBy))
 }
 
 func (m Model) buildTitle() string {
@@ -418,8 +511,15 @@ func (m Model) buildLogs(name string, w, h int) string {
 	return hdr + "\n" + strings.Join(visible, "\n")
 }
 
-func buildFooter(w int) string {
-	keys := [][2]string{{"↑↓ / jk", "navigate"}, {"r", "restart"}, {"s", "stop"}, {"d", "delete"}, {"q", "quit"}}
+func buildFooter(w int, sortBy SortField) string {
+	keys := [][2]string{
+		{"↑↓ / jk", "navigate"},
+		{"r", "restart"},
+		{"p", "pause"},
+		{"d", "delete"},
+		{"s", "sort: " + string(sortBy)},
+		{"q", "quit"},
+	}
 	ks := lipgloss.NewStyle().Foreground(clText)
 	ds := lipgloss.NewStyle().Foreground(clMuted)
 	var parts []string
@@ -655,7 +755,7 @@ func (m Model) buildListTUI() string {
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(clMuted).
 			Render("No processes running\nstart one: pm2 start <script>")
-		return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width))
+		return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width, m.SortBy))
 	}
 
 	// Calculate name column width dynamically based on terminal width
@@ -792,7 +892,7 @@ func (m Model) buildListTUI() string {
 	}
 	body := strings.Join(lines[:contentH], "\n")
 
-	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width))
+	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width, m.SortBy))
 }
 
 func drawBorder(cols []colDef, left, mid, right, fill string) string {
