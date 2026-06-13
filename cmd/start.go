@@ -25,12 +25,18 @@ func newStartCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start <script|ecosystem.config.js|ecosystem.config.json>",
+		Use:   "start [script|ecosystem.config.js|ecosystem.config.json]",
 		Short: "Start a process or ecosystem file",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := args[0]
-			scriptArgs := args[1:] // args after the script path are passed through
+			var target string
+			var scriptArgs []string
+			if len(args) == 0 {
+				target = "ecosystem.config.js"
+			} else {
+				target = args[0]
+				scriptArgs = args[1:]
+			}
 			ext := strings.ToLower(filepath.Ext(target))
 
 			var apps []config.AppConfig
