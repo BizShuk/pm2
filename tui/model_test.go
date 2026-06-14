@@ -130,3 +130,51 @@ func TestProcessSorting(t *testing.T) {
 			m.procs[0].Name, m.procs[1].Name, m.procs[2].Name)
 	}
 }
+
+func TestRefreshPreservesSelection(t *testing.T) {
+	m := New("mock_socket", false)
+	m.SortBy = SortByName
+
+	// Setup initial processes (sorted by Name: a-app [ID: 2], b-app [ID: 1])
+	m.procs = []process.ProcessInfo{
+		{ID: 2, Name: "a-app"},
+		{ID: 1, Name: "b-app"},
+	}
+	m.selected = 0 // points to "a-app" (ID 2)
+
+	// Simulate refreshMsg, which receives a list sorted by ID (b-app [ID: 1], a-app [ID: 2])
+	refreshedProcs := []process.ProcessInfo{
+		{ID: 1, Name: "b-app"},
+		{ID: 2, Name: "a-app"},
+	}
+
+	msg := refreshMsg{procs: refreshedProcs}
+	updatedModel, _ := m.Update(msg)
+	newModel := updatedModel.(Model)
+
+	// In the sorted-by-name list:
+	// Index 0 should be "a-app" (ID: 2)
+	// Index 1 should be "b-app" (ID: 1)
+	// Since we selected "a-app" (ID: 2) before, after refresh/sort, the selected index should be 0.
+	if newModel.selected != 0 {
+		t.Errorf("Expected selected index to be 0 (pointing to a-app, ID: 2), but got %d", newModel.selected)
+	}
+	if newModel.procs[newModel.selected].ID != 2 {
+		t.Errorf("Expected selected process ID to be 2, but got %d", newModel.procs[newModel.selected].ID)
+	}
+
+	// Now try another case where we select the second process: "b-app" (ID: 1)
+	m.selected = 1 // points to "b-app" (ID 1)
+	updatedModel2, _ := m.Update(msg)
+	newModel2 := updatedModel2.(Model)
+
+	// After refresh and sorting by Name, "b-app" is at Index 1.
+	// So selected index should be 1.
+	if newModel2.selected != 1 {
+		t.Errorf("Expected selected index to be 1 (pointing to b-app, ID: 1), but got %d", newModel2.selected)
+	}
+	if newModel2.procs[newModel2.selected].ID != 1 {
+		t.Errorf("Expected selected process ID to be 1, but got %d", newModel2.procs[newModel2.selected].ID)
+	}
+}
+

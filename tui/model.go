@@ -118,8 +118,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m.err = msg.err
 		if msg.err == nil {
+			var selectedID int = -1
+			if m.selected >= 0 && m.selected < len(m.procs) {
+				selectedID = m.procs[m.selected].ID
+			}
 			m.procs = msg.procs
-			m.sortProcs()
+			m.sortProcs(selectedID)
 			m.updated = time.Now()
 			if m.selected >= len(m.procs) {
 				m.selected = max(0, len(m.procs)-1)
@@ -189,12 +193,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) sortProcs() {
+func (m *Model) sortProcs(prevSelectedID ...int) {
 	if len(m.procs) == 0 {
 		return
 	}
-	var selectedID int = -1
-	if m.selected >= 0 && m.selected < len(m.procs) {
+	selectedID := -1
+	if len(prevSelectedID) > 0 {
+		selectedID = prevSelectedID[0]
+	}
+	if selectedID == -1 && m.selected >= 0 && m.selected < len(m.procs) {
 		selectedID = m.procs[m.selected].ID
 	}
 
