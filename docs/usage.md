@@ -339,14 +339,14 @@ Each launched process has a dedicated `watchProcess` goroutine that calls
                               exit code ≠0? ──→ Status: errored
                                               └─ stopping==true? → no restart
                                               └─ restarts < max_restarts?
-                                                   ├── YES → sleep 1s → re-launch
+                                                   ├── YES → sleep 30s → re-launch
                                                    └── NO  → Status: errored (final)
 ```
 
 Key rules:
 
 - Zero exit code → `stopped` — treated as intentional, never auto-restarted
-- Non-zero exit code → `errored` → auto-restarted with 1 second delay
+- Non-zero exit code → `errored` → auto-restarted with 30 seconds delay
 - `pm2 stop` sets a `stopping` flag before sending SIGTERM — even though the
   process exits non-zero (killed), the flag suppresses auto-restart
 - Counter `restarts` accumulates across the life of the entry (not reset on

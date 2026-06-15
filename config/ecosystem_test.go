@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -42,10 +43,23 @@ func TestResolveScriptPath(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expectedAbs2, res)
 	}
 
-	// Test 4: Bare filename that does not exist in baseDir should be left as-is (e.g. system command on PATH)
-	cmdName := "python3"
-	res = resolveScriptPath(tempDir, cmdName)
-	if res != cmdName {
-		t.Errorf("Expected %q, got %q", cmdName, res)
+	// Test 4: Bare filename that does not exist in baseDir but exists in PATH should be resolved to absolute path
+	cmdName := "sh"
+	expectedPath, err := exec.LookPath(cmdName)
+	if err == nil {
+		if abs, err := filepath.Abs(expectedPath); err == nil {
+			expectedPath = abs
+		}
+		res = resolveScriptPath(tempDir, cmdName)
+		if res != expectedPath {
+			t.Errorf("Expected %q, got %q", expectedPath, res)
+		}
+	}
+
+	// Test 5: Bare filename that does not exist in baseDir nor in PATH should be left as-is
+	nonExistentCmd := "nonexistentcommand12345"
+	res = resolveScriptPath(tempDir, nonExistentCmd)
+	if res != nonExistentCmd {
+		t.Errorf("Expected %q, got %q", nonExistentCmd, res)
 	}
 }

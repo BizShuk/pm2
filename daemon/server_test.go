@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/shuk/pm2/process"
 )
@@ -175,5 +176,104 @@ func TestConfigFileReplacement(t *testing.T) {
 		t.Errorf("Expected ConfigFile to be propagated, got %s", mp.Info.ConfigFile)
 	}
 }
+
+func TestDeleteDuringRestartSleep(t *testing.T) {
+	testDir := "/tmp/pm2-test-deleterestart"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	s.RestartDelay = 500 * time.Millisecond
+	defer os.RemoveAll(testDir)
+
+	req := &AppStartReq{
+		Namespace:   "default",
+		Name:        "fail-app",
+		Script:      "/usr/bin/false",
+		MaxRestarts: 5,
+		Instances:   1,
+	}
+
+	_, err := s.startApp(req)
+	if err != nil {
+		t.Fatalf("Failed to start app: %v", err)
+	}
+
+	// Wait a bit for the process to exit and enter the restart sleep
+	time.Sleep(200 * time.Millisecond)
+
+	s.mu.Lock()
+	mp, exists := s.processes["default:fail-app"]
+	s.mu.Unlock()
+	if !exists {
+		t.Fatalf("Process fail-app was not registered")
+	}
+
+	// Verify it's in StatusLaunching or StatusErrored
+	s.mu.Lock()
+	status := mp.Info.Status
+	s.mu.Unlock()
+	if status != process.StatusLaunching && status != process.StatusErrored {
+		t.Logf("Process status: %s", status)
+	}
+
+	// Delete it while it's sleeping (or about to restart)
+	err = s.deleteByName("fail-app")
+	if err != nil {
+		t.Fatalf("Failed to delete process: %v", err)
+	}
+
+	// Wait for the restart interval (500ms) plus some buffer (600ms total)
+	time.Sleep(600 * time.Millisecond)
+
+	// Check if it got back
+	s.mu.Lock()
+	_, exists = s.processes["default:fail-app"]
+	s.mu.Unlock()
+	if exists {
+		t.Errorf("Deleted process got back after restart sleep!")
+	}
+}
+
+func TestRestartsInheritance(t *testing.T) {
+	testDir := "/tmp/pm2-test-restartsinherit"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	s.processes["default:appA"] = &ManagedProcess{
+		Info: process.ProcessInfo{
+			ID:        1,
+			Name:      "appA",
+			Namespace: "default",
+			Restarts:  5,
+			Script:    "/bin/echo",
+		},
+	}
+
+	req := &AppStartReq{
+		Namespace: "default",
+		Name:      "appA",
+		Script:    "/bin/echo",
+		Instances: 1,
+	}
+
+	_, err := s.startApp(req)
+	if err != nil {
+		t.Fatalf("Failed to start app: %v", err)
+	}
+
+	s.mu.Lock()
+	mp, exists := s.processes["default:appA"]
+	s.mu.Unlock()
+	if !exists {
+		t.Fatalf("Process appA was not registered")
+	}
+
+	if mp.Info.Restarts != 5 {
+		t.Errorf("Expected restarts counter to be inherited as 5, got %d", mp.Info.Restarts)
+	}
+}
+
 
 

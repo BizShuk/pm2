@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -183,6 +184,12 @@ func resolveScriptPath(baseDir, script string) string {
 	targetPath := filepath.Join(baseDir, script)
 	if _, err := os.Stat(targetPath); err == nil {
 		return targetPath
+	}
+	if lookPath, err := exec.LookPath(script); err == nil {
+		if absPath, err := filepath.Abs(lookPath); err == nil {
+			return absPath
+		}
+		return lookPath
 	}
 	return script
 }

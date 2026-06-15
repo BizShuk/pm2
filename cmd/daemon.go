@@ -106,13 +106,18 @@ func generateLaunchd(exe string) error {
     <string>daemon</string>
     <string>--foreground</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>%s</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>%s/daemon.log</string>
   <key>StandardErrorPath</key><string>%s/daemon-err.log</string>
 </dict>
 </plist>
-`, label, exe, pm2Home, pm2Home)
+`, label, exe, os.Getenv("PATH"), pm2Home, pm2Home)
 
 	_ = os.MkdirAll(filepath.Dir(plistPath), 0o755)
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
@@ -131,11 +136,12 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=%s daemon --foreground
+Environment="PATH=%s"
 Restart=always
 
 [Install]
 WantedBy=default.target
-`, exe)
+`, exe, os.Getenv("PATH"))
 
 	unitPath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "pm2.service")
 	_ = os.MkdirAll(filepath.Dir(unitPath), 0o755)

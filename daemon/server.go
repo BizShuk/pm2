@@ -22,11 +22,12 @@ import (
 
 // Server is the PM2 daemon
 type Server struct {
-	mu        sync.RWMutex
-	processes map[string]*ManagedProcess
-	nextID    int
-	homeDir   string
-	scheduler *cron.Scheduler
+	mu           sync.RWMutex
+	processes    map[string]*ManagedProcess
+	nextID       int
+	homeDir      string
+	scheduler    *cron.Scheduler
+	RestartDelay time.Duration
 }
 
 // ManagedProcess pairs runtime state with the OS process handle
@@ -40,9 +41,10 @@ type ManagedProcess struct {
 
 func NewServer(homeDir string) *Server {
 	return &Server{
-		processes: make(map[string]*ManagedProcess),
-		homeDir:   homeDir,
-		scheduler: cron.New(),
+		processes:    make(map[string]*ManagedProcess),
+		homeDir:      homeDir,
+		scheduler:    cron.New(),
+		RestartDelay: 30 * time.Second,
 	}
 }
 
@@ -409,10 +411,12 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		}
 	}
 
+	var restarts int
 	if ok {
 		id = existing.Info.ID
 		lastCronAt = existing.Info.LastCronAt
 		lastCronStatus = existing.Info.LastCronStatus
+		restarts = existing.Info.Restarts
 	} else {
 		id = s.nextID
 		s.nextID++
@@ -446,6 +450,7 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			User:           getCurrentUser(),
 			Watch:          req.Watch,
 			ConfigFile:     req.ConfigFile,
+			Restarts:       restarts,
 		},
 		Cmd:     cmd,
 		done:    make(chan struct{}),
@@ -517,7 +522,17 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 		mp.Info.Restarts++
 		mp.Info.Status = process.StatusLaunching
 		go func() {
-			time.Sleep(1 * time.Second)
+			time.Sleep(s.RestartDelay)
+			s.mu.Lock()
+			// Check if the process still exists in our map and is the same instance, and is not stopping
+			key := mp.Info.Namespace + ":" + mp.Info.Name
+			current, exists := s.processes[key]
+			if !exists || current != mp || mp.stopping {
+				s.mu.Unlock()
+				return
+			}
+			s.mu.Unlock()
+
 			req := &AppStartReq{
 				Namespace:   mp.Info.Namespace,
 				Name:        mp.Info.Name,
