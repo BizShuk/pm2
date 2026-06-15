@@ -19,7 +19,7 @@ pm2 daemon   # runs in foreground; use pm2 startup to daemonize on boot
 
 State directory: `~/.pm2/`
 
-```
+```tree
 ~/.pm2/
 ├── pm2.sock        # Unix socket for CLI ↔ daemon RPC
 ├── dump.json       # saved process list (pm2 save)
@@ -61,30 +61,30 @@ paths are resolved relative to the config file location (not CWD).
 
 ```json
 {
-  "apps": [
-    {
-      "name": "api-server",
-      "script": "./bin/server",
-      "args": ["--port", "8080"],
-      "instances": 2,
-      "env": {
-        "NODE_ENV": "production",
-        "PORT": "8080"
-      },
-      "cron_restart": "0 * * * *",
-      "max_restarts": 10,
-      "log_file": "/var/log/api-out.log",
-      "error_file": "/var/log/api-err.log"
-    },
-    {
-      "name": "worker",
-      "script": "./bin/worker",
-      "instances": 4,
-      "env": {
-        "QUEUE": "default"
-      }
-    }
-  ]
+    "apps": [
+        {
+            "name": "api-server",
+            "script": "./bin/server",
+            "args": ["--port", "8080"],
+            "instances": 2,
+            "env": {
+                "NODE_ENV": "production",
+                "PORT": "8080"
+            },
+            "cron_restart": "0 * * * *",
+            "max_restarts": 10,
+            "log_file": "/var/log/api-out.log",
+            "error_file": "/var/log/api-err.log"
+        },
+        {
+            "name": "worker",
+            "script": "./bin/worker",
+            "instances": 4,
+            "env": {
+                "QUEUE": "default"
+            }
+        }
+    ]
 }
 ```
 
@@ -104,21 +104,21 @@ pure ES2015+ syntax. Limitations:
 ```js
 // ecosystem.config.js
 module.exports = {
-  apps: [
-    {
-      name: "api-server",
-      script: "./bin/server",    // relative to this config file
-      args: ["--port", "8080"],
-      instances: 2,
-      env: {
-        NODE_ENV: "production",
-        PORT: "8080"
-      },
-      cron_restart: "0 * * * *",
-      max_restarts: 10
-    }
-  ]
-}
+    apps: [
+        {
+            name: "api-server",
+            script: "./bin/server", // relative to this config file
+            args: ["--port", "8080"],
+            instances: 2,
+            env: {
+                NODE_ENV: "production",
+                PORT: "8080"
+            },
+            cron_restart: "0 * * * *",
+            max_restarts: 10
+        }
+    ]
+};
 ```
 
 ```bash
@@ -127,17 +127,17 @@ pm2 start /path/to/ecosystem.config.js
 
 ### All `AppConfig` fields
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | string | derived from script filename | Process identifier (must be unique) |
-| `script` | string | required | Executable path (absolute or relative to config file) |
-| `args` | []string | `[]` | Arguments forwarded to the process |
-| `instances` | int | `1` | How many copies to launch (named `<name>-0`, `<name>-1`, …) |
-| `env` | map[string]string | `{}` | Environment variables merged with inherited env |
-| `cron_restart` | string | `""` | 5-field cron expression for scheduled restart |
-| `max_restarts` | int | `15` | Auto-restart limit before giving up |
-| `log_file` | string | `~/.pm2/logs/<name>-out.log` | stdout log path |
-| `error_file` | string | `~/.pm2/logs/<name>-err.log` | stderr log path |
+| Field          | Type              | Default                      | Description                                                 |
+| -------------- | ----------------- | ---------------------------- | ----------------------------------------------------------- |
+| `name`         | string            | derived from script filename | Process identifier (must be unique)                         |
+| `script`       | string            | required                     | Executable path (absolute or relative to config file)       |
+| `args`         | []string          | `[]`                         | Arguments forwarded to the process                          |
+| `instances`    | int               | `1`                          | How many copies to launch (named `<name>-0`, `<name>-1`, …) |
+| `env`          | map[string]string | `{}`                         | Environment variables merged with inherited env             |
+| `cron_restart` | string            | `""`                         | 5-field cron expression for scheduled restart               |
+| `max_restarts` | int               | `15`                         | Auto-restart limit before giving up                         |
+| `log_file`     | string            | `~/.pm2/logs/<name>-out.log` | stdout log path                                             |
+| `error_file`   | string            | `~/.pm2/logs/<name>-err.log` | stderr log path                                             |
 
 ---
 
@@ -303,7 +303,7 @@ will stop-and-replace each entry by name.
 Relative `script` paths are resolved relative to the config file's directory,
 not the shell's current working directory:
 
-```
+```tree
 /home/user/myapp/
 ├── ecosystem.config.json   ← script: "./bin/server"
 └── bin/
@@ -326,7 +326,7 @@ cd /tmp && pm2 start /home/user/myapp/ecosystem.config.json  # same result
 Each launched process has a dedicated `watchProcess` goroutine that calls
 `cmd.Wait()` — this blocks until the OS process exits. No polling is used.
 
-```
+```tree
   daemon
     └── launchProcess()
           ├── cmd.Start()                  ← OS process spawned
@@ -359,7 +359,7 @@ Key rules:
 `cron_restart` schedules a forced restart at a given time, independent of
 whether the process is healthy or crashed.
 
-```
+```tree
   ecosystem.config.json
     └── cron_restart: "0 * * * *"
                               │
@@ -379,7 +379,7 @@ whether the process is healthy or crashed.
 
 Cron expression format (5 fields, standard Unix cron):
 
-```
+```tree
 ┌───── minute (0–59)
 │ ┌─── hour (0–23)
 │ │ ┌─ day of month (1–31)
@@ -391,13 +391,13 @@ Cron expression format (5 fields, standard Unix cron):
 
 Common examples:
 
-| Expression | Meaning |
-|---|---|
-| `*/5 * * * *` | Every 5 minutes |
-| `0 * * * *` | Every hour on the hour |
-| `0 0 * * *` | Every day at midnight |
-| `0 2 * * 0` | Every Sunday at 02:00 |
-| `30 6 1 * *` | 1st of every month at 06:30 |
+| Expression    | Meaning                     |
+| ------------- | --------------------------- |
+| `*/5 * * * *` | Every 5 minutes             |
+| `0 * * * *`   | Every hour on the hour      |
+| `0 0 * * *`   | Every day at midnight       |
+| `0 2 * * 0`   | Every Sunday at 02:00       |
+| `30 6 1 * *`  | 1st of every month at 06:30 |
 
 > The cron entry is removed when the process is stopped or deleted, and
 > re-registered when it is restarted. So `pm2 stop` cancels the schedule

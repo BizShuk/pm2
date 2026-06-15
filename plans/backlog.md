@@ -41,8 +41,9 @@ exec /path/to/your/actual_program --arguments
 ```
 
 > 關鍵機制解析：
-> * `path_helper`：這是 macOS 內建的工具，它會去讀取 `/etc/paths` 和 `/etc/paths.d/` 資料夾，把系統目前註冊的所有公用路徑動態組裝起來。
-> * `exec`：用新進程直接取代目前的腳本進程，這樣主程式就能完美繼承前面剛算好的動態 `PATH`，且不會留下多餘的背景執行緒。
+>
+> - `path_helper`：這是 macOS 內建的工具，它會去讀取 `/etc/paths` 和 `/etc/paths.d/` 資料夾，把系統目前註冊的所有公用路徑動態組裝起來。
+> - `exec`：用新進程直接取代目前的腳本進程，這樣主程式就能完美繼承前面剛算好的動態 `PATH`，且不會留下多餘的背景執行緒。
 
 #### 2. 賦予腳本執行權限 (Execution Permission)
 
