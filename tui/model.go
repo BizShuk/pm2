@@ -35,7 +35,9 @@ var (
 	clCron    = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#d2a8ff"}
 	clPath    = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#388bfd"}
 	clMuted   = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#8b949e"}
-	clSelBg   = lipgloss.AdaptiveColor{Light: "#dbeafe", Dark: "#1c2333"}
+	clSelBg   = lipgloss.AdaptiveColor{Light: "#e0e7ff", Dark: "#2e3440"}
+	clSelName = lipgloss.AdaptiveColor{Light: "#0891b2", Dark: "#06b6d4"}
+	clSelText = lipgloss.AdaptiveColor{Light: "#0f172a", Dark: "#ffffff"}
 	clHdrBg   = lipgloss.AdaptiveColor{Light: "#f1f5f9", Dark: "#161b22"}
 	clBorder  = lipgloss.AdaptiveColor{Light: "#cbd5e1", Dark: "#30363d"}
 	clText    = lipgloss.AdaptiveColor{Light: "#0f172a", Dark: "#e6edf3"}
@@ -391,10 +393,21 @@ func (m Model) buildLeft(w, h int) string {
 		name := crop(p.Name, nameW)
 		up := shortUptime(p)
 
-		line := fmt.Sprintf("%s %-*s %s",
-			dot, nameW, name,
-			lipgloss.NewStyle().Foreground(clMuted).Render(up),
-		)
+		var line string
+		if i == m.selected {
+			nameSt := lipgloss.NewStyle().Bold(true).Foreground(clSelName)
+			upSt := lipgloss.NewStyle().Foreground(clSelText)
+			line = fmt.Sprintf("%s %s %s",
+				dot,
+				nameSt.Width(nameW).Render(name),
+				upSt.Render(up),
+			)
+		} else {
+			line = fmt.Sprintf("%s %-*s %s",
+				dot, nameW, name,
+				lipgloss.NewStyle().Foreground(clMuted).Render(up),
+			)
+		}
 		st := lipgloss.NewStyle().Width(w).Padding(0, 1)
 		if i == m.selected {
 			st = st.Background(clSelBg)
@@ -837,37 +850,64 @@ func (m Model) buildListTUI() string {
 			}
 
 			var renderedVal string
-			switch col.name {
-			case "id":
-				idSt := style.Bold(true).Foreground(getStatusColor(p.Status))
-				renderedVal = idSt.Render(val)
-			case "status":
-				stSt := style.Foreground(getStatusColor(p.Status))
-				renderedVal = stSt.Render(val)
-			case "cpu":
-				cpuSt := style
-				if p.Status == process.StatusOnline {
-					cpuSt = cpuSt.Foreground(clOnline)
-				} else {
-					cpuSt = cpuSt.Foreground(clStopped)
+			if i == m.selected {
+				switch col.name {
+				case "name":
+					renderedVal = style.Bold(true).Foreground(clSelName).Render(val)
+				case "id", "status":
+					renderedVal = style.Bold(true).Foreground(getStatusColor(p.Status)).Render(val)
+				case "cpu":
+					cpuSt := style.Bold(true)
+					if p.Status == process.StatusOnline {
+						cpuSt = cpuSt.Foreground(clOnline)
+					} else {
+						cpuSt = cpuSt.Foreground(clSelText)
+					}
+					renderedVal = cpuSt.Render(val)
+				case "mem":
+					memSt := style.Bold(true)
+					if p.Status == process.StatusOnline {
+						memSt = memSt.Foreground(clSelText)
+					} else {
+						memSt = memSt.Foreground(clSelText)
+					}
+					renderedVal = memSt.Render(val)
+				default:
+					renderedVal = style.Bold(true).Foreground(clSelText).Render(val)
 				}
-				renderedVal = cpuSt.Render(val)
-			case "mem":
-				memSt := style
-				if p.Status == process.StatusOnline {
-					memSt = memSt.Foreground(clText)
-				} else {
-					memSt = memSt.Foreground(clStopped)
+			} else {
+				switch col.name {
+				case "id":
+					idSt := style.Bold(true).Foreground(getStatusColor(p.Status))
+					renderedVal = idSt.Render(val)
+				case "status":
+					stSt := style.Foreground(getStatusColor(p.Status))
+					renderedVal = stSt.Render(val)
+				case "cpu":
+					cpuSt := style
+					if p.Status == process.StatusOnline {
+						cpuSt = cpuSt.Foreground(clOnline)
+					} else {
+						cpuSt = cpuSt.Foreground(clStopped)
+					}
+					renderedVal = cpuSt.Render(val)
+				case "mem":
+					memSt := style
+					if p.Status == process.StatusOnline {
+						memSt = memSt.Foreground(clText)
+					} else {
+						memSt = memSt.Foreground(clStopped)
+					}
+					renderedVal = memSt.Render(val)
+				default:
+					defaultSt := style
+					if p.Status != process.StatusOnline && col.name != "name" && col.name != "version" && col.name != "namespace" {
+						defaultSt = defaultSt.Foreground(clStopped)
+					} else {
+						defaultSt = defaultSt.Foreground(clText)
+					}
+					renderedVal = defaultSt.Render(val)
 				}
-				renderedVal = memSt.Render(val)
-			default:
-				defaultSt := style
-				if p.Status != process.StatusOnline && col.name != "name" && col.name != "version" && col.name != "namespace" {
-					defaultSt = defaultSt.Foreground(clStopped)
-				} else {
-					defaultSt = defaultSt.Foreground(clText)
-				}
-				renderedVal = defaultSt.Render(val)
 			}
 
 			var cell string
