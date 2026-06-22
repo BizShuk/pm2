@@ -3,7 +3,7 @@ module github.com/shuk/pm2
 go 1.26.0
 
 require (
-	github.com/bizshuk/gosdk v0.0.0-20260610190444-c3fc5c40e0c9
+	github.com/bizshuk/gosdk v1.1.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dop251/goja v0.0.0-20240610225006-393f6d42497b
@@ -69,7 +69,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.1 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
