@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/robfig/cron/v3"
 
 	"github.com/shuk/pm2/daemon"
@@ -60,7 +61,10 @@ type refreshMsg struct {
 	procs []process.ProcessInfo
 	err   error
 }
-type logsMsg struct{ lines []string }
+type logsMsg struct {
+	path  string
+	lines []string
+}
 type hostMetricsMsg struct {
 	cpu float64
 	mem float64
@@ -136,7 +140,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case logsMsg:
-		m.logs = msg.lines
+		if len(m.procs) > 0 && m.selected >= 0 && m.selected < len(m.procs) {
+			if m.procs[m.selected].LogFile == msg.path {
+				if msg.lines == nil {
+					m.logs = []string{}
+				} else {
+					m.logs = msg.lines
+				}
+			}
+		}
 
 	case hostMetricsMsg:
 		m.hostCPU = msg.cpu
@@ -173,6 +185,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selected > 0 {
 			m.selected--
 			if m.Detail {
+				m.logs = nil
 				return m, readLogs(m.procs[m.selected].LogFile)
 			}
 			return m, nil
@@ -181,6 +194,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selected < len(m.procs)-1 {
 			m.selected++
 			if m.Detail {
+				m.logs = nil
 				return m, readLogs(m.procs[m.selected].LogFile)
 			}
 			return m, nil
@@ -301,7 +315,7 @@ func readLogs(path string) tea.Cmd {
 	return func() tea.Msg {
 		f, err := os.Open(path)
 		if err != nil {
-			return logsMsg{}
+			return logsMsg{path: path}
 		}
 		defer f.Close()
 		var lines []string
@@ -315,7 +329,7 @@ func readLogs(path string) tea.Cmd {
 		if len(lines) > maxLogTail {
 			lines = lines[len(lines)-maxLogTail:]
 		}
-		return logsMsg{lines: lines}
+		return logsMsg{path: path, lines: lines}
 	}
 }
 
@@ -390,7 +404,7 @@ func (m Model) buildLeft(w, h int) string {
 	var rows []string
 	for i, p := range m.procs {
 		dot := dotFor(p.Status)
-		name := crop(p.Name, nameW)
+		name := cropRight(p.Name, nameW)
 		up := shortUptime(p)
 
 		var line string
@@ -434,11 +448,11 @@ func (m Model) buildRight(w, h int) string {
 
 	// detail: 1 header + detailRows rows
 	detail := m.buildDetail(p, w)
-	// logs: 1 header + remaining rows
-	logH := h - (1 + detailRows) - 1 // 1 for divider line between sections
-	if logH < 2 {
-		logH = 2
+	if h < 20 {
+		return detail
 	}
+	// logs: 1 header + remaining rows
+	logH := h - detailRows - 3 // detailRows (17) + detail header (1) + divider newline (1) + log header (1) = 20
 	logs := m.buildLogs(p.Name, w, logH)
 	return detail + "\n" + logs
 }
@@ -455,20 +469,20 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 	type row struct{ k, v, sty string }
 	rows := []row{
 		{"script", crop(scriptVal, w-21), "path"},
-		{"namespace", p.Namespace, ""},
-		{"user", p.User, ""},
-		{"status", string(p.Status), "status"},
-		{"cpu", fmt.Sprintf("%.1f%%", p.CPU), "cpu"},
-		{"mem", formatBytes(p.Memory), "mem"},
-		{"uptime", fullUptime(p), ""},
-		{"started", fmtTime(p.StartedAt), ""},
-		{"restarts", fmt.Sprintf("%d / %d max", p.Restarts, p.MaxRestarts), ""},
-		{"cron", cronExpr(p.Cron), "cron"},
-		{"cron next", cronNext(p.Cron), "cron"},
-		{"cron_restart", cronExpr(p.CronRestart), "cron"},
-		{"cron_restart next", cronNext(p.CronRestart), "cron"},
-		{"last run", cronLastRun(p.LastCronAt, p.LastCronStatus), "last"},
-		{"watching", formatWatching(p.Watch), "watching"},
+		{"namespace", cropRight(p.Namespace, w-21), ""},
+		{"user", cropRight(p.User, w-21), ""},
+		{"status", cropRight(string(p.Status), w-21), "status"},
+		{"cpu", crop(fmt.Sprintf("%.1f%%", p.CPU), w-21), "cpu"},
+		{"mem", crop(formatBytes(p.Memory), w-21), "mem"},
+		{"uptime", crop(fullUptime(p), w-21), ""},
+		{"started", crop(fmtTime(p.StartedAt), w-21), ""},
+		{"restarts", crop(fmt.Sprintf("%d / %d max", p.Restarts, p.MaxRestarts), w-21), ""},
+		{"cron", crop(cronExpr(p.Cron), w-21), "cron"},
+		{"cron next", crop(cronNext(p.Cron), w-21), "cron"},
+		{"cron_restart", crop(cronExpr(p.CronRestart), w-21), "cron"},
+		{"cron_restart next", crop(cronNext(p.CronRestart), w-21), "cron"},
+		{"last run", "", "last"},
+		{"watching", cropRight(formatWatching(p.Watch), w-21), "watching"},
 		{"stdout", crop(p.LogFile, w-21), "path"},
 		{"stderr", crop(p.ErrorFile, w-21), "path"},
 	}
@@ -481,7 +495,7 @@ func (m Model) buildDetail(p process.ProcessInfo, w int) string {
 		case "cron":
 			val = lipgloss.NewStyle().Foreground(clCron).Render(r.v)
 		case "last":
-			val = cronLastRunStyled(p.LastCronAt, p.LastCronStatus)
+			val = cronLastRunStyled(p.LastCronAt, p.LastCronStatus, w-43)
 		case "status":
 			val = statusLabel(p.Status)
 		case "watching":
@@ -515,11 +529,15 @@ func (m Model) buildLogs(name string, w, h int) string {
 	blank := strings.Repeat(" ", w)
 
 	var rows []string
-	for _, l := range m.logs {
-		rows = append(rows, lipgloss.NewStyle().Width(w).Padding(0, 1).Foreground(clMuted).Render(crop(l, w-3)))
-	}
-	if len(rows) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Width(w).Padding(0, 1).Foreground(clMuted).Render("(no log entries)"))
+	if m.logs == nil {
+		rows = append(rows, lipgloss.NewStyle().Width(w).Padding(0, 1).Foreground(clMuted).Render("loading..."))
+	} else {
+		for _, l := range m.logs {
+			rows = append(rows, lipgloss.NewStyle().Width(w).Padding(0, 1).Foreground(clMuted).Render(crop(l, w-3)))
+		}
+		if len(rows) == 0 {
+			rows = append(rows, lipgloss.NewStyle().Width(w).Padding(0, 1).Foreground(clMuted).Render("(no log entries)"))
+		}
 	}
 	for len(rows) < h {
 		rows = append(rows, blank)
@@ -602,8 +620,9 @@ func (m Model) getLeftColW() int {
 }
 
 func secHeader(label string, w int) string {
+	cropped := cropRight(label, w-2)
 	return lipgloss.NewStyle().Background(clHdrBg).Foreground(clMuted).
-		Width(w).Padding(0, 1).Render(strings.ToUpper(label))
+		Width(w).Padding(0, 1).Render(strings.ToUpper(cropped))
 }
 
 func dotFor(s process.Status) string {
@@ -697,11 +716,15 @@ func cronLastRun(t time.Time, status string) string {
 }
 
 // cronLastRunStyled returns the last-run line with status coloured.
-func cronLastRunStyled(t time.Time, status string) string {
+func cronLastRunStyled(t time.Time, status string, maxStatusLen int) string {
 	if t.IsZero() {
 		return lipgloss.NewStyle().Foreground(clMuted).Render("—")
 	}
 	ts := lipgloss.NewStyle().Foreground(clText).Render(t.Format("2006-01-02  15:04:05"))
+	if maxStatusLen < 5 {
+		maxStatusLen = 5
+	}
+	status = cropRight(status, maxStatusLen)
 	var badge string
 	switch status {
 	case "ok":
@@ -715,10 +738,49 @@ func cronLastRunStyled(t time.Time, status string) string {
 }
 
 func crop(s string, maxLen int) string {
-	if maxLen <= 4 || len(s) <= maxLen {
+	if maxLen <= 4 {
 		return s
 	}
-	return "…" + s[len(s)-(maxLen-1):]
+	sw := runewidth.StringWidth(s)
+	if sw <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	width := 0
+	targetWidth := maxLen - 1 // 1 for the ellipsis "…"
+	startIndex := len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if width+rw > targetWidth {
+			break
+		}
+		width += rw
+		startIndex = i
+	}
+	return "…" + string(runes[startIndex:])
+}
+
+func cropRight(s string, maxLen int) string {
+	if maxLen <= 4 {
+		return s
+	}
+	sw := runewidth.StringWidth(s)
+	if sw <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	width := 0
+	targetWidth := maxLen - 1 // 1 for the ellipsis "…"
+	var result []rune
+	for _, r := range runes {
+		rw := runewidth.RuneWidth(r)
+		if width+rw > targetWidth {
+			break
+		}
+		width += rw
+		result = append(result, r)
+	}
+	return string(result) + "…"
 }
 
 func formatWatching(watch bool) string {
@@ -830,12 +892,8 @@ func (m Model) buildListTUI() string {
 		var rowParts []string
 		for _, col := range cols {
 			val := getColVal(p, col.name)
-			if len(val) > col.width {
-				if col.name == "name" {
-					val = crop(val, col.width)
-				} else {
-					val = val[:col.width]
-				}
+			if runewidth.StringWidth(val) > col.width {
+				val = cropRight(val, col.width)
 			}
 
 			style := rowStyle.Width(col.width)

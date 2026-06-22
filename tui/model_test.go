@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/shuk/pm2/process"
 )
 
@@ -177,4 +178,104 @@ func TestRefreshPreservesSelection(t *testing.T) {
 		t.Errorf("Expected selected process ID to be 1, but got %d", newModel2.procs[newModel2.selected].ID)
 	}
 }
+
+func TestDetailTuiStability(t *testing.T) {
+	// Setup a model with 2 processes in detail mode
+	m := New("mock_socket", true)
+	m.procs = []process.ProcessInfo{
+		{ID: 1, Name: "proc-1", LogFile: "/path/to/proc1.log"},
+		{ID: 2, Name: "proc-2", LogFile: "/path/to/proc2.log"},
+	}
+	m.selected = 0
+	m.logs = []string{"old log 1", "old log 2"}
+
+	// 1. Verify that logsMsg for a different path is ignored
+	ignoredMsg := logsMsg{
+		path:  "/path/to/proc2.log",
+		lines: []string{"proc-2 log line"},
+	}
+	resModel, _ := m.Update(ignoredMsg)
+	newModel := resModel.(Model)
+	if len(newModel.logs) != 2 || newModel.logs[0] != "old log 1" {
+		t.Errorf("Expected logs to remain unchanged, but got: %v", newModel.logs)
+	}
+
+	// 2. Verify that logsMsg for the current path is accepted
+	correctMsg := logsMsg{
+		path:  "/path/to/proc1.log",
+		lines: []string{"proc-1 log line"},
+	}
+	resModel2, _ := m.Update(correctMsg)
+	newModel2 := resModel2.(Model)
+	if len(newModel2.logs) != 1 || newModel2.logs[0] != "proc-1 log line" {
+		t.Errorf("Expected logs to be updated, but got: %v", newModel2.logs)
+	}
+
+	// 3. Verify that moving the cursor clears the logs immediately
+	// Simulate pressing Down key 'j'
+	resModel3, _ := newModel2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	newModel3 := resModel3.(Model)
+	if newModel3.selected != 1 {
+		t.Errorf("Expected selection to change to 1, got %d", newModel3.selected)
+	}
+	if newModel3.logs != nil {
+		t.Errorf("Expected logs to be cleared on cursor move, but got: %v", newModel3.logs)
+	}
+
+	// 4. Verify buildLogs shows loading... when logs is nil
+	logsOutputNil := newModel3.buildLogs("proc-2", 40, 5)
+	if !strings.Contains(logsOutputNil, "loading...") {
+		t.Errorf("Expected log output to contain 'loading...', but got: %q", logsOutputNil)
+	}
+
+	// 5. Verify buildLogs shows (no log entries) when logs is empty slice
+	emptyMsg := logsMsg{
+		path:  "/path/to/proc2.log",
+		lines: nil, // will trigger []string{} set in Update
+	}
+	resModel4, _ := newModel3.Update(emptyMsg)
+	newModel4 := resModel4.(Model)
+	if newModel4.logs == nil || len(newModel4.logs) != 0 {
+		t.Errorf("Expected logs to be empty slice, got: %v", newModel4.logs)
+	}
+	logsOutputEmpty := newModel4.buildLogs("proc-2", 40, 5)
+	if !strings.Contains(logsOutputEmpty, "(no log entries)") {
+		t.Errorf("Expected log output to contain '(no log entries)', but got: %q", logsOutputEmpty)
+	}
+}
+
+func TestCroppingUTF8AndRunewidth(t *testing.T) {
+	// 1. Test crop (left crop, keep suffix)
+	// ASCII string
+	res1 := crop("abcdefghij", 6) // maxLen 6 -> "…fghij" (width 1 + 5 = 6)
+	if res1 != "…fghij" {
+		t.Errorf("Expected '…fghij', got %q", res1)
+	}
+
+	// Chinese characters (each has width 2)
+	// "一二三四五" (visual width 10)
+	// maxLen 6 -> targetWidth = 5.
+	// suffix "四五" has width 4. Plus "…" (width 1) = 5 <= 6.
+	res2 := crop("一二三四五", 6)
+	if res2 != "…四五" {
+		t.Errorf("Expected '…四五', got %q", res2)
+	}
+
+	// 2. Test cropRight (right crop, keep prefix)
+	// ASCII string
+	res3 := cropRight("abcdefghij", 6) // maxLen 6 -> "abcde…" (width 5 + 1 = 6)
+	if res3 != "abcde…" {
+		t.Errorf("Expected 'abcde…', got %q", res3)
+	}
+
+	// Chinese characters
+	// "一二三四五"
+	// maxLen 6 -> targetWidth = 5.
+	// prefix "一二" has width 4. Plus "…" (width 1) = 5 <= 6.
+	res4 := cropRight("一二三四五", 6)
+	if res4 != "一二…" {
+		t.Errorf("Expected '一二…', got %q", res4)
+	}
+}
+
 
