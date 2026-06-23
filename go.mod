@@ -1,6 +1,6 @@
-module github.com/shuk/pm2
+module github.com/bizshuk/pm2
 
-go 1.26.0
+go 1.26.3
 
 require (
 	github.com/bizshuk/gosdk v1.1.0

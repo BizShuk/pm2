@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/tui"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shuk/pm2/daemon"
-	"github.com/shuk/pm2/tui"
 	"github.com/spf13/cobra"
 )
 

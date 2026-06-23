@@ -16,8 +16,8 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/robfig/cron/v3"
 
-	"github.com/shuk/pm2/daemon"
-	"github.com/shuk/pm2/process"
+	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/process"
 )
 
 const (
@@ -56,11 +56,14 @@ const (
 
 // ─── messages ────────────────────────────────────────────────────────────────
 
-type tickMsg time.Time
-type refreshMsg struct {
-	procs []process.ProcessInfo
-	err   error
-}
+type (
+	tickMsg    time.Time
+	refreshMsg struct {
+		procs []process.ProcessInfo
+		err   error
+	}
+)
+
 type logsMsg struct {
 	path  string
 	lines []string
@@ -833,7 +836,7 @@ var listColumns = []colDef{
 
 func (m Model) buildListTUI() string {
 	if len(m.procs) == 0 {
-		body := lipgloss.NewStyle().Width(m.width).Height(m.height - 2).
+		body := lipgloss.NewStyle().Width(m.width).Height(m.height-2).
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(clMuted).
 			Render("No processes running\nstart one: pm2 start <script>")
@@ -861,7 +864,7 @@ func (m Model) buildListTUI() string {
 
 	// Render borders and header
 	top := drawBorder(cols, "┌", "┬", "┐", "─")
-	
+
 	var hdrParts []string
 	hdrStyle := lipgloss.NewStyle().Background(clHdrBg).Foreground(clText).Bold(true)
 	for _, col := range cols {
@@ -977,7 +980,7 @@ func (m Model) buildListTUI() string {
 			}
 			rowParts = append(rowParts, cell)
 		}
-		
+
 		line := borderStyle.Render("│") + strings.Join(rowParts, borderStyle.Render("│")) + borderStyle.Render("│")
 		lines = append(lines, line)
 	}
@@ -1164,4 +1167,3 @@ func toBytes(val float64, unit string) uint64 {
 		return uint64(val)
 	}
 }
-

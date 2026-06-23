@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/shuk/pm2/process"
+	"github.com/bizshuk/pm2/process"
 )
 
 func TestBuildDetailScriptArgsCombined(t *testing.T) {

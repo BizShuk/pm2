@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/shuk/pm2/daemon"
+	"github.com/bizshuk/pm2/daemon"
 	"github.com/spf13/cobra"
 )
 

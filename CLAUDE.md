@@ -2,7 +2,7 @@
 
 ## Module
 
-`github.com/shuk/pm2` Go 1.24+
+`github.com/bizshuk/pm2` Go 1.24+
 
 ## Architecture
 

@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bizshuk/pm2/cron"
+	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
-	"github.com/shuk/pm2/cron"
-	"github.com/shuk/pm2/process"
 )
 
 // Server is the PM2 daemon
@@ -889,4 +889,3 @@ func (s *Server) StartMetricsCollector() {
 		}
 	}()
 }
-

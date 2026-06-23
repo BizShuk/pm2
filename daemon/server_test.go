@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shuk/pm2/process"
+	"github.com/bizshuk/pm2/process"
 )
 
 func TestFindProcesses(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shuk/pm2/config"
-	"github.com/shuk/pm2/daemon"
-	"github.com/shuk/pm2/process"
+	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
 

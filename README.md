@@ -5,7 +5,7 @@ A PM2-inspired process manager written in Go. Manages long-running processes wit
 ## Install
 
 ```bash
-git clone https://github.com/shuk/pm2
+git clone https://github.com/bizshuk/pm2
 cd pm2
 go build -o /usr/local/bin/pm2 .
 ```

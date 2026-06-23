@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/shuk/pm2/daemon"
-	"github.com/shuk/pm2/process"
+	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
 
@@ -105,8 +105,8 @@ func newLogsCmd() *cobra.Command {
 }
 
 func tailFile(path string, n int) error {
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0644)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -131,8 +131,8 @@ func tailFile(path string, n int) error {
 }
 
 func followFile(path string) {
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0644)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
 	if err != nil {
 		return
 	}
