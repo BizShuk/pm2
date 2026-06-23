@@ -49,6 +49,7 @@ func init() {
 		newStartupCmd(),
 		newDaemonCmd(),
 		newMonitCmd(),
+		newEcoCmd(),
 	)
 
 	// EnableTraverseRunHooks ensures the root PersistentPreRunE fires for
