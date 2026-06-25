@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/bizshuk/pm2/config"
 	"github.com/bizshuk/pm2/daemon"
@@ -14,70 +12,22 @@ import (
 )
 
 func newStartCmd() *cobra.Command {
-	var (
-		name        string
-		namespace   string
-		instances   int
-		cronRestart string
-		cron        string
-		envVars     []string
-		watch       bool
-	)
-
 	cmd := &cobra.Command{
-		Use:   "start [script|ecosystem.config.js|ecosystem.config.json]",
-		Short: "Start a process or ecosystem file",
-		Args:  cobra.ArbitraryArgs,
+		Use:   "start [ecosystem.config.js|ecosystem.config.json]",
+		Short: "Start processes from an ecosystem file",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var target string
-			var scriptArgs []string
-			if len(args) == 0 {
-				target = "ecosystem.config.js"
-			} else {
+			target := "ecosystem.config.js"
+			if len(args) > 0 {
 				target = args[0]
-				scriptArgs = args[1:]
-			}
-			ext := strings.ToLower(filepath.Ext(target))
-
-			var apps []config.AppConfig
-
-			if ext == ".js" || ext == ".json" {
-				cfg, err := config.Load(target)
-				if err != nil {
-					return fmt.Errorf("load config: %w", err)
-				}
-				apps = cfg.Apps
-			} else {
-				// Bare script path
-				app := config.SingleApp(target, name, scriptArgs)
-				if instances > 0 {
-					app.Instances = instances
-				}
-				if cronRestart != "" {
-					app.CronRestart = cronRestart
-				}
-				if cron != "" {
-					app.Cron = cron
-				}
-				if namespace != "" {
-					app.Namespace = namespace
-				}
-				if watch {
-					app.Watch = true
-				}
-				for _, e := range envVars {
-					parts := strings.SplitN(e, "=", 2)
-					if len(parts) == 2 {
-						if app.Env == nil {
-							app.Env = make(map[string]string)
-						}
-						app.Env[parts[0]] = parts[1]
-					}
-				}
-				apps = []config.AppConfig{app}
 			}
 
-			for _, app := range apps {
+			cfg, err := config.Load(target)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			for _, app := range cfg.Apps {
 				req := daemon.Request{
 					Command: daemon.CmdStart,
 					App: &daemon.AppStartReq{
@@ -137,14 +87,5 @@ func newStartCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.Flags().StringVarP(&name, "name", "n", "", "process name")
-	cmd.Flags().StringVar(&namespace, "namespace", "", "process namespace")
-	cmd.Flags().StringVar(&namespace, "ns", "", "process namespace (shortcut)")
-	cmd.Flags().IntVarP(&instances, "instances", "i", 0, "number of instances")
-	cmd.Flags().StringVar(&cronRestart, "cron-restart", "", "cron schedule for auto-restart")
-	cmd.Flags().StringVar(&cron, "cron", "", "cron schedule to trigger execution")
-	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "environment variables KEY=VAL")
-	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch file changes to restart")
 	return cmd
 }

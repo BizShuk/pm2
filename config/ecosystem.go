@@ -159,22 +159,6 @@ func loadJS(path string) (*EcosystemConfig, error) {
 	return &cfg, nil
 }
 
-// SingleApp wraps a bare app invocation (pm2 start script.js --name foo)
-func SingleApp(script string, name string, args []string) AppConfig {
-	cwd, err := os.Getwd()
-	if err == nil {
-		script = resolveScriptPath(cwd, script)
-	}
-	app := AppConfig{
-		Script:    script,
-		Name:      name,
-		Args:      args,
-		Instances: 1,
-	}
-	app.Normalize()
-	return app
-}
-
 func resolveScriptPath(baseDir, script string) string {
 	if script == "" || filepath.IsAbs(script) {
 		return script
