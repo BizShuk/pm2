@@ -39,6 +39,7 @@ type ProcessInfo struct {
 	MaxRestarts    int       `json:"max_restarts"`
 	ConfigDir      string    `json:"config_dir"`
 	ConfigFile     string    `json:"config_file"`
+	CWD            string    `json:"cwd"`
 }
 
 // DumpEntry is what gets persisted to dump.json for resurrect
@@ -59,4 +60,5 @@ type DumpEntry struct {
 	Watch       bool              `json:"watch"`
 	Version     string            `json:"version"`
 	ConfigFile  string            `json:"config_file"`
+	CWD         string            `json:"cwd"`
 }

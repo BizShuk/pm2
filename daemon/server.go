@@ -325,6 +325,9 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		cmd.Stdout = outF
 		cmd.Stderr = errF
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if req.CWD != "" {
+			cmd.Dir = req.CWD
+		}
 
 		// Apply environment
 		cmd.Env = os.Environ()
@@ -451,6 +454,7 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			Watch:          req.Watch,
 			ConfigFile:     req.ConfigFile,
 			Restarts:       restarts,
+			CWD:            req.CWD,
 		},
 		Cmd:     cmd,
 		done:    make(chan struct{}),
@@ -544,9 +548,10 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 				MaxRestarts: mp.Info.MaxRestarts,
 				LogFile:     mp.Info.LogFile,
 				ErrorFile:   mp.Info.ErrorFile,
-				Instances:   1,
-				ConfigFile:  mp.Info.ConfigFile,
-			}
+			Instances:   1,
+			ConfigFile:  mp.Info.ConfigFile,
+			CWD:         mp.Info.CWD,
+		}
 			_, _ = s.launchProcess(mp.Info.Name, req)
 		}()
 	}
@@ -623,6 +628,7 @@ func (s *Server) restartByName(name string) error {
 			Instances:     1,
 			Version:       mp.Info.Version,
 			ConfigFile:    mp.Info.ConfigFile,
+			CWD:           mp.Info.CWD,
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
@@ -706,6 +712,7 @@ func (s *Server) save() error {
 			Watch:       mp.Info.Watch,
 			Version:     mp.Info.Version,
 			ConfigFile:  mp.Info.ConfigFile,
+			CWD:         mp.Info.CWD,
 		})
 	}
 
@@ -745,6 +752,7 @@ func (s *Server) resurrect() error {
 			ConfigDir:   e.ConfigDir,
 			Version:     e.Version,
 			ConfigFile:  e.ConfigFile,
+			CWD:         e.CWD,
 		}
 		if _, err := s.startApp(req); err != nil {
 			log.Printf("resurrect %s: %v", e.Name, err)

@@ -562,6 +562,9 @@ func writeAppJS(b *strings.Builder, a config.AppConfig) {
 	if a.Namespace != "" {
 		fmt.Fprintf(b, "            namespace: %s,\n", strconv.Quote(a.Namespace))
 	}
+	if a.CWD != "" {
+		fmt.Fprintf(b, "            cwd: %s,\n", strconv.Quote(a.CWD))
+	}
 	inst := a.Instances
 	if inst <= 0 {
 		inst = 1

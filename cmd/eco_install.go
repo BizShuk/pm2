@@ -61,7 +61,7 @@ func newEcoInstallCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("getwd: %w", err)
 			}
-			app := buildInstallApp(script, prefix, userPrompt, ecoPlannerNS, filepath.Base(cwd))
+			app := buildInstallApp(script, prefix, userPrompt, ecoPlannerNS, filepath.Base(cwd), cwd)
 
 			out := cmd.OutOrStdout()
 			errOut := cmd.ErrOrStderr()
@@ -95,7 +95,7 @@ func newEcoInstallCmd() *cobra.Command {
 // omitted it. The process name is derived as
 // `<deriveName(script)>-<cwdBasename>` so multiple installs of the
 // same script in different folders don't collide.
-func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename string) config.AppConfig {
+func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) config.AppConfig {
 	name := deriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
@@ -107,6 +107,7 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename string) 
 		Instances: 1,
 		Namespace: namespace,
 		Version:   ecoDefaultVersion,
+		CWD:       cwd,
 	}
 	a.Normalize()
 	return a

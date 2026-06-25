@@ -29,6 +29,7 @@ type AppConfig struct {
 	ErrorFile   string            `json:"error_file"`   // Default: "~/.pm2/logs/<name>-err.log"
 	ConfigDir   string            `json:"config_dir"`   // Default: "~/.config/<name>/"
 	ConfigFile  string            `json:"config_file"`  // Default: "<cwd>/ecosystem.config.js"
+	CWD         string            `json:"cwd"`          // Working directory when the process is spawned
 }
 
 // EcosystemConfig is the top-level config structure

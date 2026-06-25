@@ -715,7 +715,7 @@ func TestPlannerPrefixes(t *testing.T) {
 }
 
 func TestBuildInstallApp(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "analyze repo", ecoPlannerNS, "pm2")
+	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "analyze repo", ecoPlannerNS, "pm2", "/home/user/pm2")
 	if app.Script != "/abs/agy" {
 		t.Errorf("Script = %q, want /abs/agy", app.Script)
 	}
@@ -724,6 +724,9 @@ func TestBuildInstallApp(t *testing.T) {
 	}
 	if app.Namespace != ecoPlannerNS {
 		t.Errorf("Namespace = %q, want %q", app.Namespace, ecoPlannerNS)
+	}
+	if app.CWD != "/home/user/pm2" {
+		t.Errorf("CWD = %q, want /home/user/pm2", app.CWD)
 	}
 	wantArgs := []string{"-p", ecoPlannerSystemPrefix, "analyze repo"}
 	if len(app.Args) != len(wantArgs) {
@@ -740,7 +743,7 @@ func TestBuildInstallApp(t *testing.T) {
 }
 
 func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerBusinessPrefix, "", ecoPlannerNS, "myproj")
+	app := buildInstallApp("/abs/agy", ecoPlannerBusinessPrefix, "", ecoPlannerNS, "myproj", "/home/user/proj")
 	wantArgs := []string{"-p", ecoPlannerBusinessPrefix, ""}
 	if len(app.Args) != 3 {
 		t.Fatalf("len(Args) = %d, want 3", len(app.Args))
@@ -761,7 +764,7 @@ func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
 // buildInstallApp should drop the cwd suffix entirely when cwdBasename
 // is empty (defensive guard for unusual Getwd failures).
 func TestBuildInstallAppEmptyCwdBasename(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "x", ecoPlannerNS, "")
+	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "x", ecoPlannerNS, "", "/abs/cwd")
 	if app.Name != "agy" {
 		t.Errorf("Name = %q, want agy (no suffix when cwdBasename empty)", app.Name)
 	}
@@ -772,7 +775,7 @@ func TestBuildInstallAppEmptyCwdBasename(t *testing.T) {
 // any characters (spaces, quotes, etc.) without a shell parser. The
 // process CWD is changed to dir for the duration of the call so
 // the default --output path lands inside the temp dir.
-func runInstall(t *testing.T, dir string, args []string) (string, error) {
+func runInstall(t *testing.T, dir string, args []string) (string, string, error) {
 	t.Helper()
 	path := filepath.Join(dir, "ecosystem.config.js")
 
@@ -789,6 +792,8 @@ func runInstall(t *testing.T, dir string, args []string) (string, error) {
 	isTerminalFunc = func(fd uintptr) bool { return true }
 	t.Cleanup(func() { isTerminalFunc = prev })
 
+	realDir, _ := os.Getwd()
+
 	root := newRootForTest()
 	root.SetArgs(append([]string{"wizard", "install"}, args...))
 	root.SetIn(strings.NewReader(""))
@@ -798,13 +803,13 @@ func runInstall(t *testing.T, dir string, args []string) (string, error) {
 
 	err := root.Execute()
 	if err != nil {
-		return "", err
+		return "", realDir, err
 	}
 	data, rerr := os.ReadFile(path)
 	if rerr != nil {
-		return "", nil
+		return "", realDir, nil
 	}
-	return string(data), nil
+	return string(data), realDir, nil
 }
 
 // writeDummyScript creates a real file at dir/name and returns its path.
@@ -822,7 +827,7 @@ func writeDummyScript(t *testing.T, dir, name string) string {
 func TestInstallFlagMutex(t *testing.T) {
 	dir := t.TempDir()
 	script := writeDummyScript(t, dir, "agy")
-	_, err := runInstall(t, dir, []string{script, "x", "--system-planner", "--business-planner"})
+	_, _, err := runInstall(t, dir, []string{script, "x", "--system-planner", "--business-planner"})
 	if err == nil {
 		t.Fatal("expected mutex error, got nil")
 	}
@@ -837,7 +842,7 @@ func TestInstallFlagMutex(t *testing.T) {
 // launch time.
 func TestInstallAcceptsMissingScript(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := runInstall(t, dir, []string{"/does/not/exist", "--system-planner"}); err != nil {
+	if _, _, err := runInstall(t, dir, []string{"/does/not/exist", "--system-planner"}); err != nil {
 		t.Fatalf("install should not pre-flight the script, got: %v", err)
 	}
 	cfg, err := config.Load(filepath.Join(dir, "ecosystem.config.js"))
@@ -856,7 +861,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	script := writeDummyScript(t, dir, "agy")
 
-	got, err := runInstall(t, dir, []string{script, "analyze repo", "--system-planner"})
+	got, realDir, err := runInstall(t, dir, []string{script, "analyze repo", "--system-planner"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -869,6 +874,14 @@ func TestInstallEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(got, `args: ["-p", `+strconvQuote(ecoPlannerSystemPrefix)+`, "analyze repo"]`) {
 		t.Errorf("args line not as expected:\n%s", got)
+	}
+	// CWD on macOS may resolve /var → /private/var, so we use
+	// the real cwd after chdir instead of the raw dir argument.
+	if realDir == "" {
+		realDir = dir
+	}
+	if !strings.Contains(got, `cwd: "`+realDir+`"`) {
+		t.Errorf("missing cwd line, want %q:\n%s", realDir, got)
 	}
 	// Round-trip through config.Load to confirm parsability.
 	cfg, err := config.Load(filepath.Join(dir, "ecosystem.config.js"))
@@ -888,13 +901,16 @@ func TestInstallEndToEnd(t *testing.T) {
 	if len(a.Args) != 3 || a.Args[0] != "-p" || a.Args[1] != ecoPlannerSystemPrefix || a.Args[2] != "analyze repo" {
 		t.Errorf("loaded Args = %v", a.Args)
 	}
+	if a.CWD != realDir {
+		t.Errorf("loaded CWD = %q, want %q", a.CWD, realDir)
+	}
 }
 
 func TestInstallNoUserPrompt(t *testing.T) {
 	dir := t.TempDir()
 	script := writeDummyScript(t, dir, "agy")
 
-	if _, err := runInstall(t, dir, []string{script, "--system-planner"}); err != nil {
+	if _, _, err := runInstall(t, dir, []string{script, "--system-planner"}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	cfg, err := config.Load(filepath.Join(dir, "ecosystem.config.js"))
@@ -914,6 +930,13 @@ func TestInstallNoUserPrompt(t *testing.T) {
 	if len(a.Args) != 3 || a.Args[2] != "" {
 		t.Errorf("expected 3-arg slice with empty user_prompt, got %v", a.Args)
 	}
+	realDir, _ := os.Getwd()
+	if realDir == "" {
+		realDir = dir
+	}
+	if a.CWD != realDir {
+		t.Errorf("loaded CWD = %q, want %q", a.CWD, realDir)
+	}
 }
 
 func TestInstallMergesIntoExisting(t *testing.T) {
@@ -924,7 +947,8 @@ func TestInstallMergesIntoExisting(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	script := writeDummyScript(t, dir, "agy")
-	if _, err := runInstall(t, dir, []string{script, "do X", "--system-planner", "--output", path}); err != nil {
+	var err error
+		if _, _, err = runInstall(t, dir, []string{script, "do X", "--system-planner", "--output", path}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	cfg, err := config.Load(path)
