@@ -26,97 +26,267 @@ const (
 	ecoDefaultVersion = "-"
 )
 
+// isTerminalFunc is the terminal-detection function used by the wizard.
+// Overridden in tests to bypass TTY detection when piping stdin from a
+// strings.Reader.
+var isTerminalFunc = isatty.IsTerminal
+
+// interactiveFlags are shared by the interactive wizard (currently the
+// top-level `pm2 wizard` command). Hoisted so subcommands and helpers
+// can read them without re-binding.
+type interactiveFlags struct {
+	output  string
+	force   bool
+	format  string
+	yesAll  bool
+	noMerge bool
+}
+
 func newEcoCmd() *cobra.Command {
-	var (
-		output string
-		force  bool
-		format string
-		yesAll bool
-	)
 	cmd := &cobra.Command{
 		Use:     "wizard",
 		Aliases: []string{"w"},
 		Short:   "Interactively build an ecosystem.config.js (or .json)",
 		Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
-			"in the current directory that `pm2 start` can load directly.",
+			"in the current directory that `pm2 start` can load directly. " +
+			"If the output file already exists, wizard merges the new apps into it " +
+			"by default; pass --force to replace, or --no-merge to abort.",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if format != ecoFormatJS && format != ecoFormatJSON {
-				return fmt.Errorf("invalid --format %q (want js|json)", format)
-			}
-			if output == "" {
-				if format == ecoFormatJSON {
-					output = "ecosystem.config.json"
-				} else {
-					output = ecoDefaultOutput
-				}
-			}
-
-			in := cmd.InOrStdin()
-			out := cmd.OutOrStdout()
-			errOut := cmd.ErrOrStderr()
-
-			tty := isatty.IsTerminal(os.Stdin.Fd())
-			if !tty && !yesAll {
-				fmt.Fprintln(errOut,
-					"pm2 eco requires an interactive terminal. "+
-						"Re-run with --yes to generate a config with all defaults.")
-				return fmt.Errorf("non-interactive mode requires --yes")
-			}
-
-			var apps []config.AppConfig
-			if yesAll {
-				apps = []config.AppConfig{defaultApp()}
-			} else {
-				var err error
-				apps, err = collectAnswers(in, out)
-				if err != nil {
-					return err
-				}
-			}
-
-			var data []byte
-			if format == ecoFormatJSON {
-				s, err := renderEcosystemJSON(apps)
-				if err != nil {
-					return err
-				}
-				data = []byte(s)
-			} else {
-				data = []byte(renderEcosystemJS(apps))
-			}
-
-			fmt.Fprintf(errOut, "\n--- preview of %s ---\n%s\n--- end preview ---\n", output, data)
-
-			if !yesAll {
-				rdr := bufio.NewReader(in)
-				ok, err := promptYesNo(rdr, out, fmt.Sprintf("Write %s?", output), true)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					fmt.Fprintln(out, "Aborted.")
-					return nil
-				}
-			}
-
-			if _, err := os.Stat(output); err == nil && !force {
-				return fmt.Errorf("refusing to overwrite existing %s; use --force to replace", output)
-			}
-
-			if err := os.WriteFile(output, data, 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", output, err)
-			}
-			abs, _ := filepath.Abs(output)
-			fmt.Fprintf(out, "Wrote %s\n", abs)
-			return nil
-		},
+		RunE: runEcoInteractive,
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", "", "output file path (default: ./ecosystem.config.js)")
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing output file")
-	cmd.Flags().StringVar(&format, "format", "js", "output format: js|json")
-	cmd.Flags().BoolVarP(&yesAll, "yes", "y", false, "accept all defaults (non-interactive)")
+	flags := defaultInteractiveFlags()
+	bindInteractiveFlags(cmd, &flags)
+	cmd.AddCommand(newEcoInstallCmd())
 	return cmd
+}
+
+func defaultInteractiveFlags() interactiveFlags {
+	return interactiveFlags{format: ecoFormatJS}
+}
+
+func bindInteractiveFlags(cmd *cobra.Command, f *interactiveFlags) {
+	cmd.Flags().StringVarP(&f.output, "output", "o", "", "output file path (default: ./ecosystem.config.js)")
+	cmd.Flags().BoolVarP(&f.force, "force", "f", false,
+		"replace the entire output file with the newly collected apps, "+
+			"bypassing the merge and bypassing parse errors on the existing file")
+	cmd.Flags().StringVar(&f.format, "format", "js",
+		"output format when creating a new file: js|json "+
+			"(existing file's extension wins on merge)")
+	cmd.Flags().BoolVarP(&f.yesAll, "yes", "y", false, "accept all defaults (non-interactive)")
+	cmd.Flags().BoolVar(&f.noMerge, "no-merge", false,
+		"if the output file exists, abort instead of merging (legacy behavior). "+
+			"Combine with --force to replace.")
+}
+
+func runEcoInteractive(cmd *cobra.Command, _ []string) error {
+	flags := defaultInteractiveFlags()
+	if v, err := cmd.Flags().GetString("output"); err == nil {
+		flags.output = v
+	}
+	if v, err := cmd.Flags().GetBool("force"); err == nil {
+		flags.force = v
+	}
+	if v, err := cmd.Flags().GetString("format"); err == nil {
+		flags.format = v
+	}
+	if v, err := cmd.Flags().GetBool("yes"); err == nil {
+		flags.yesAll = v
+	}
+	if v, err := cmd.Flags().GetBool("no-merge"); err == nil {
+		flags.noMerge = v
+	}
+	return runInteractive(cmd, &flags)
+}
+
+func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
+	if flags.format != ecoFormatJS && flags.format != ecoFormatJSON {
+		return fmt.Errorf("invalid --format %q (want js|json)", flags.format)
+	}
+	if flags.output == "" {
+		if flags.format == ecoFormatJSON {
+			flags.output = "ecosystem.config.json"
+		} else {
+			flags.output = ecoDefaultOutput
+		}
+	}
+
+	in := cmd.InOrStdin()
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+
+	tty := isTerminalFunc(os.Stdin.Fd())
+	if !tty && !flags.yesAll {
+		fmt.Fprintln(errOut,
+			"pm2 eco requires an interactive terminal. "+
+				"Re-run with --yes to generate a config with all defaults.")
+		return fmt.Errorf("non-interactive mode requires --yes")
+	}
+
+	var apps []config.AppConfig
+	if flags.yesAll {
+		apps = []config.AppConfig{defaultApp()}
+	} else {
+		var err error
+		apps, err = collectAnswers(in, out)
+		if err != nil {
+			return err
+		}
+	}
+
+	return writeEcosystemFile(apps, flags.output, flags.force, flags.noMerge, flags.format, in, out, errOut, flags.yesAll)
+}
+
+// writeEcosystemFile is the shared merge-or-replace-then-write step
+// used by both the interactive wizard and the `install` subcommand.
+// `yesAll=true` skips the interactive "Write?" confirm prompt (used
+// by non-interactive callers like `install`). Returns the list of
+// names that were actually written to the file.
+func writeEcosystemFile(apps []config.AppConfig, output string, force, noMerge bool, format string, in io.Reader, out, errOut io.Writer, yesAll bool) error {
+	var (
+		mergedApps []config.AppConfig
+		skipped    int
+		writeFmt   = format
+	)
+	if _, statErr := os.Stat(output); statErr == nil {
+		// File exists.
+		if force {
+			mergedApps = apps
+		} else if noMerge {
+			return fmt.Errorf(
+				"refusing to overwrite existing %s; use --force to replace "+
+					"or remove --no-merge to merge", output)
+		} else {
+			existing, lerr := loadExistingApps(output)
+			if lerr != nil {
+				return fmt.Errorf(
+					"%w (use --force to overwrite a broken file)", lerr)
+			}
+			if f, ok := detectFormatFromExt(output); ok {
+				writeFmt = f
+			}
+			mergedApps, skipped = mergeAppsByName(existing, apps)
+		}
+	} else {
+		mergedApps = apps
+	}
+
+	var data []byte
+	switch writeFmt {
+	case ecoFormatJSON:
+		s, err := renderEcosystemJSON(mergedApps)
+		if err != nil {
+			return err
+		}
+		data = []byte(s)
+	default:
+		data = []byte(renderEcosystemJS(mergedApps))
+	}
+
+	summary := fmt.Sprintf("%d app(s) to write", len(mergedApps))
+	if force {
+		summary = fmt.Sprintf("replace with %d app(s)", len(mergedApps))
+	} else if _, statErr := os.Stat(output); statErr == nil {
+		summary = fmt.Sprintf(
+			"merged %d existing + %d new = %d (skipped %d duplicate name(s))",
+			len(mergedApps)-len(apps)+skipped, len(apps)-skipped,
+			len(mergedApps), skipped)
+	}
+	fmt.Fprintf(errOut, "\n--- preview of %s ---\n%s\n--- end preview (%s) ---\n",
+		output, data, summary)
+
+	if !yesAll {
+		rdr := bufio.NewReader(in)
+		ok, err := promptYesNo(rdr, out, fmt.Sprintf("Write %s?", output), true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(out, "Aborted.")
+			return nil
+		}
+	}
+
+	if err := os.WriteFile(output, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", output, err)
+	}
+	abs, _ := filepath.Abs(output)
+	fmt.Fprintf(out, "Wrote %s\n", abs)
+	return nil
+}
+
+// loadExistingApps reads an existing ecosystem file at path and returns
+// the apps declared in it. Returns:
+//   - (nil, nil)  if the file does not exist
+//   - (nil, err)  if the file exists but is malformed / unreadable
+//   - (apps, nil) on success
+//
+// Used by the wizard's merge path. We deliberately do NOT swallow
+// parse errors: silently treating a broken file as empty would
+// destroy user config on the next save. Callers should surface the
+// error and point the user at --force.
+func loadExistingApps(path string) ([]config.AppConfig, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".json" && ext != ".js" && ext != ".cjs" && ext != ".mjs" {
+		return nil, fmt.Errorf("unsupported existing file format %q (want .js or .json)", ext)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("parse existing %s: %w", path, err)
+	}
+	return cfg.Apps, nil
+}
+
+// mergeAppsByName returns the union of existing + new apps, deduped by
+// the AppConfig.Name field. Existing apps win on name collision
+// (new apps whose name matches an existing one are dropped). Names
+// are compared after Normalize() so "api" and "" both map to the
+// derived form consistently.
+//
+// Returns the merged slice plus a count of how many new apps were
+// skipped as duplicates, for the preview summary.
+func mergeAppsByName(existing, newApps []config.AppConfig) (merged []config.AppConfig, skipped int) {
+	seen := make(map[string]struct{}, len(existing))
+	merged = make([]config.AppConfig, 0, len(existing)+len(newApps))
+	for _, a := range existing {
+		a.Normalize()
+		if a.Name == "" {
+			continue // skip degenerate entries
+		}
+		seen[a.Name] = struct{}{}
+		merged = append(merged, a)
+	}
+	for _, a := range newApps {
+		a.Normalize()
+		if a.Name == "" {
+			continue
+		}
+		if _, dup := seen[a.Name]; dup {
+			skipped++
+			continue
+		}
+		seen[a.Name] = struct{}{}
+		merged = append(merged, a)
+	}
+	return merged, skipped
+}
+
+// detectFormatFromExt returns "js" or "json" based on the file
+// extension. Unrecognized extensions yield ("", false) so the caller
+// can fall back to the user-supplied --format.
+func detectFormatFromExt(path string) (string, bool) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		return ecoFormatJSON, true
+	case ".js", ".cjs", ".mjs":
+		return ecoFormatJS, true
+	}
+	return "", false
 }
 
 // defaultApp returns a single AppConfig pre-filled with safe defaults.
