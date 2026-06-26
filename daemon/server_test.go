@@ -242,6 +242,44 @@ func TestVersionStateInheritance(t *testing.T) {
 	}
 }
 
+// TestCWDInjectedAsPWD verifies $PWD seen by the spawned process matches the
+// configured CWD, even though the BaseEnv snapshot carries a different PWD.
+func TestCWDInjectedAsPWD(t *testing.T) {
+	testDir := "/tmp/pm2-test-pwd"
+	workDir := filepath.Join(testDir, "work")
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(workDir, 0o755)
+	defer os.RemoveAll(testDir)
+
+	s := NewServer(testDir)
+	outPath := filepath.Join(testDir, "pwd.out")
+	req := &AppStartReq{
+		Namespace: "default",
+		Name:      "pwdcheck",
+		Script:    "/bin/sh",
+		Args:      []string{"-c", "printenv PWD > " + outPath},
+		Instances: 1,
+		CWD:       workDir,
+		// Snapshot deliberately carries a stale PWD.
+		BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
+	}
+	if _, err := s.startApp(req); err != nil {
+		t.Fatalf("startApp failed: %v", err)
+	}
+
+	var data []byte
+	for i := 0; i < 50; i++ {
+		if b, err := os.ReadFile(outPath); err == nil && len(b) > 0 {
+			data = b
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(string(data)); got != workDir {
+		t.Fatalf("process saw PWD=%q, want %q", got, workDir)
+	}
+}
+
 // TestKillAllStopsEveryProcess verifies the kill command's core: all managed
 // processes are stopped and their PIDs cleared.
 func TestKillAllStopsEveryProcess(t *testing.T) {

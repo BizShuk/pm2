@@ -353,6 +353,20 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 
+		// Keep $PWD consistent with the actual working directory. Go's exec
+		// changes the process cwd via cmd.Dir but does not update PWD, so a
+		// process reading $PWD would otherwise see the launcher's directory.
+		// Only fill it when the caller did not set PWD explicitly.
+		if _, set := req.Env["PWD"]; !set {
+			workDir := req.CWD
+			if workDir == "" {
+				workDir, _ = os.Getwd()
+			}
+			if workDir != "" {
+				cmd.Env = append(cmd.Env, "PWD="+workDir)
+			}
+		}
+
 		if err := cmd.Start(); err != nil {
 			outF.Close()
 			errF.Close()
