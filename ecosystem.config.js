@@ -1,11 +1,12 @@
 module.exports = {
     apps: [
-        // claudew-pm2 (planner)
+        // agy-pm2 (planner)
         {
-            name: "claudew-pm2",
-            script: "claudew",
-            args: ["-p", "[plan only] run /system-planner and output to ./plans/", "test"],
+            name: "agy-pm2",
+            script: "agy",
+            args: ["-p", "[plan only] run /system-planner and output to ./plans/", ""],
             namespace: "planner",
+            cwd: "/Users/bytedance/projects/pm2",
             instances: 1,
         }
     ],
