@@ -3,11 +3,128 @@ package daemon
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bizshuk/pm2/process"
 )
+
+// TestBaseEnvSnapshotReachesProcess verifies that an env var present only in
+// req.BaseEnv (the CLI snapshot) — and absent from the daemon's own
+// environment — is passed through to the spawned process.
+func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
+	testDir := "/tmp/pm2-test-baseenv"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	const marker = "PM2_BASEENV_MARKER"
+	const want = "from_cli_snapshot"
+	if _, ok := os.LookupEnv(marker); ok {
+		t.Fatalf("%s must not be set in the daemon/test environment", marker)
+	}
+	outPath := filepath.Join(testDir, "env.out")
+
+	req := &AppStartReq{
+		Namespace: "default",
+		Name:      "envcheck",
+		Script:    "/bin/sh",
+		Args:      []string{"-c", "printenv " + marker + " > " + outPath},
+		Instances: 1,
+		// Snapshot does NOT live in the daemon's os.Environ().
+		BaseEnv: append(os.Environ(), marker+"="+want),
+	}
+
+	if _, err := s.startApp(req); err != nil {
+		t.Fatalf("startApp failed: %v", err)
+	}
+
+	// Wait for the short-lived process to write the file.
+	var data []byte
+	for i := 0; i < 50; i++ {
+		if b, err := os.ReadFile(outPath); err == nil && len(b) > 0 {
+			data = b
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got := strings.TrimSpace(string(data))
+	if got != want {
+		t.Fatalf("spawned process saw %s=%q, want %q (BaseEnv snapshot not applied)", marker, got, want)
+	}
+}
+
+// TestBaseEnvSurvivesRestartAndResurrect verifies the snapshot is stored on the
+// process and replayed by restartByName, and that it round-trips through
+// save/resurrect (so a daemon restart does not drop the user's PATH).
+func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
+	testDir := "/tmp/pm2-test-baseenv-persist"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	defer os.RemoveAll(testDir)
+
+	const marker = "PM2_BASEENV_PERSIST"
+	const want = "snapshot_value"
+	snapshot := append(os.Environ(), marker+"="+want)
+
+	s := NewServer(testDir)
+	req := &AppStartReq{
+		Namespace: "default",
+		Name:      "persistcheck",
+		Script:    "/bin/sh",
+		Args:      []string{"-c", "sleep 30"},
+		Instances: 1,
+		BaseEnv:   snapshot,
+	}
+	if _, err := s.startApp(req); err != nil {
+		t.Fatalf("startApp failed: %v", err)
+	}
+
+	// 1. Stored on the running process.
+	s.mu.RLock()
+	mp := s.processes["default:persistcheck"]
+	s.mu.RUnlock()
+	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
+		t.Fatalf("BaseEnv not stored on ProcessInfo")
+	}
+
+	// 2. Replayed by restart.
+	if err := s.restartByName("persistcheck"); err != nil {
+		t.Fatalf("restart failed: %v", err)
+	}
+	s.mu.RLock()
+	mp = s.processes["default:persistcheck"]
+	s.mu.RUnlock()
+	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
+		t.Fatalf("BaseEnv lost after restart")
+	}
+
+	// 3. Round-trips through save/resurrect into a fresh server.
+	if err := s.save(); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+	_ = s.stopByName("persistcheck")
+
+	s2 := NewServer(testDir)
+	if err := s2.resurrect(); err != nil {
+		t.Fatalf("resurrect failed: %v", err)
+	}
+	s2.mu.RLock()
+	mp2 := s2.processes["default:persistcheck"]
+	s2.mu.RUnlock()
+	if mp2 == nil || !envHas(mp2.Info.BaseEnv, marker, want) {
+		t.Fatalf("BaseEnv lost across save/resurrect")
+	}
+	_ = s2.stopByName("persistcheck")
+}
+
+func envHas(env []string, key, val string) bool {
+	return slices.Contains(env, key+"="+val)
+}
 
 func TestFindProcesses(t *testing.T) {
 	s := NewServer("/tmp/pm2-test")
@@ -122,6 +239,42 @@ func TestVersionStateInheritance(t *testing.T) {
 
 	if len(entries) != 1 || entries[0].Version != "1.2.3" {
 		t.Errorf("DumpEntry did not preserve Version attribute: %+v", entries)
+	}
+}
+
+// TestKillAllStopsEveryProcess verifies the kill command's core: all managed
+// processes are stopped and their PIDs cleared.
+func TestKillAllStopsEveryProcess(t *testing.T) {
+	testDir := "/tmp/pm2-test-killall"
+	_ = os.RemoveAll(testDir)
+	_ = os.MkdirAll(testDir, 0o755)
+	s := NewServer(testDir)
+	defer os.RemoveAll(testDir)
+
+	for _, name := range []string{"a", "b", "c"} {
+		req := &AppStartReq{
+			Namespace: "default",
+			Name:      name,
+			Script:    "/bin/sh",
+			Args:      []string{"-c", "sleep 30"},
+			Instances: 1,
+		}
+		if _, err := s.startApp(req); err != nil {
+			t.Fatalf("startApp %s failed: %v", name, err)
+		}
+	}
+
+	s.killAll()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for key, mp := range s.processes {
+		if mp.Info.Status != process.StatusStopped {
+			t.Errorf("%s: status=%s, want stopped", key, mp.Info.Status)
+		}
+		if mp.Info.PID != 0 {
+			t.Errorf("%s: PID=%d, want 0", key, mp.Info.PID)
+		}
 	}
 }
 

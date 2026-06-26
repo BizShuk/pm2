@@ -40,6 +40,7 @@ type ProcessInfo struct {
 	ConfigDir      string    `json:"config_dir"`
 	ConfigFile     string    `json:"config_file"`
 	CWD            string    `json:"cwd"`
+	BaseEnv        []string  `json:"base_env,omitempty"` // CLI environment snapshot (full PATH); reused on restart
 }
 
 // DumpEntry is what gets persisted to dump.json for resurrect
@@ -61,4 +62,5 @@ type DumpEntry struct {
 	Version     string            `json:"version"`
 	ConfigFile  string            `json:"config_file"`
 	CWD         string            `json:"cwd"`
+	BaseEnv     []string          `json:"base_env,omitempty"` // CLI environment snapshot, persisted for resurrect
 }

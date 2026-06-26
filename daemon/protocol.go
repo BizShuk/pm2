@@ -19,6 +19,7 @@ const (
 	CmdLogs     CommandType = "logs"
 	CmdSave     CommandType = "save"
 	CmdResurrect CommandType = "resurrect"
+	CmdKill     CommandType = "kill"
 	CmdPing     CommandType = "ping"
 )
 
@@ -51,6 +52,11 @@ type AppStartReq struct {
 	Watch       bool              `json:"watch"`
 	ConfigFile  string            `json:"config_file"`
 	CWD         string            `json:"cwd"`
+	// BaseEnv is a snapshot of the CLI process environment (os.Environ()).
+	// The CLI runs in the user's interactive shell, so this carries the full
+	// PATH (and anything exported via .bashrc/.profile) through to the daemon,
+	// which would otherwise spawn with its own minimal environment.
+	BaseEnv []string `json:"base_env,omitempty"`
 }
 
 // Response is a daemon → CLI message

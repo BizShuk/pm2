@@ -175,6 +175,18 @@ func (s *Server) handleConn(conn net.Conn) {
 			resp = Response{OK: true}
 		}
 
+	case CmdKill:
+		// Gracefully stop every managed process, reply, then exit the daemon.
+		s.killAll()
+		resp = Response{OK: true}
+		// Exit after the response is flushed below; the small delay lets
+		// WriteJSON at the end of handleConn complete first.
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			log.Printf("daemon shutting down via kill command")
+			os.Exit(0)
+		}()
+
 	default:
 		resp = Response{Error: fmt.Sprintf("unknown command: %s", req.Command)}
 	}
@@ -329,8 +341,14 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			cmd.Dir = req.CWD
 		}
 
-		// Apply environment
-		cmd.Env = os.Environ()
+		// Apply environment. Prefer the CLI's environment snapshot (full PATH
+		// from the user's shell); fall back to the daemon's own environment for
+		// callers that have no snapshot (e.g. resurrect / cron-triggered).
+		base := req.BaseEnv
+		if len(base) == 0 {
+			base = os.Environ()
+		}
+		cmd.Env = append([]string{}, base...)
 		for k, v := range req.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
@@ -455,6 +473,7 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			ConfigFile:     req.ConfigFile,
 			Restarts:       restarts,
 			CWD:            req.CWD,
+			BaseEnv:        req.BaseEnv,
 		},
 		Cmd:     cmd,
 		done:    make(chan struct{}),
@@ -548,10 +567,11 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 				MaxRestarts: mp.Info.MaxRestarts,
 				LogFile:     mp.Info.LogFile,
 				ErrorFile:   mp.Info.ErrorFile,
-			Instances:   1,
-			ConfigFile:  mp.Info.ConfigFile,
-			CWD:         mp.Info.CWD,
-		}
+				Instances:   1,
+				ConfigFile:  mp.Info.ConfigFile,
+				CWD:         mp.Info.CWD,
+				BaseEnv:     mp.Info.BaseEnv,
+			}
 			_, _ = s.launchProcess(mp.Info.Name, req)
 		}()
 	}
@@ -595,6 +615,14 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 	return nil
 }
 
+// killAll gracefully stops every managed process. Used by the kill command
+// before the daemon exits.
+func (s *Server) killAll() {
+	for _, mp := range s.findProcesses("all") {
+		_ = s.stopProcess(mp)
+	}
+}
+
 func (s *Server) stopByName(name string) error {
 	targets := s.findProcesses(name)
 	if len(targets) == 0 {
@@ -629,6 +657,7 @@ func (s *Server) restartByName(name string) error {
 			Version:       mp.Info.Version,
 			ConfigFile:    mp.Info.ConfigFile,
 			CWD:           mp.Info.CWD,
+			BaseEnv:       mp.Info.BaseEnv,
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
@@ -713,6 +742,7 @@ func (s *Server) save() error {
 			Version:     mp.Info.Version,
 			ConfigFile:  mp.Info.ConfigFile,
 			CWD:         mp.Info.CWD,
+			BaseEnv:     mp.Info.BaseEnv,
 		})
 	}
 
@@ -753,6 +783,7 @@ func (s *Server) resurrect() error {
 			Version:     e.Version,
 			ConfigFile:  e.ConfigFile,
 			CWD:         e.CWD,
+			BaseEnv:     e.BaseEnv,
 		}
 		if _, err := s.startApp(req); err != nil {
 			log.Printf("resurrect %s: %v", e.Name, err)

@@ -48,6 +48,7 @@ func newStartCmd() *cobra.Command {
 						Version:     app.Version,
 						ConfigFile:  app.ConfigFile,
 						CWD:         app.CWD,
+						BaseEnv:     os.Environ(),
 					},
 				}
 

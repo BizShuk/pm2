@@ -13,6 +13,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func newKillCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "kill",
+		Short: "Stop all processes and shut down the PM2 daemon",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdKill})
+			if err != nil {
+				// No reachable daemon — nothing to kill.
+				fmt.Println("PM2 daemon is not running.")
+				return nil
+			}
+			if !resp.OK {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			fmt.Println("PM2 daemon stopped, all processes killed.")
+			return nil
+		},
+	}
+}
+
 func newDaemonCmd() *cobra.Command {
 	var foreground bool
 	cmd := &cobra.Command{

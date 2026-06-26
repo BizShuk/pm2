@@ -48,6 +48,7 @@ func init() {
 		newResurrectCmd(),
 		newStartupCmd(),
 		newDaemonCmd(),
+		newKillCmd(),
 		newMonitCmd(),
 		newEcoCmd(),
 	)
