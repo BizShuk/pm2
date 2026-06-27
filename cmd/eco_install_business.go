@@ -4,7 +4,7 @@ import "github.com/spf13/cobra"
 
 // ecoPlannerBusinessPrefix is the prompt prefix injected into the
 // process args when `wizard install --business-planner` is set.
-const ecoPlannerBusinessPrefix = "[plan only] run /business-planner and output to ./plans/"
+const ecoPlannerBusinessPrefix = "run /business-planner for current workspace, and output under <workspace>/plans/"
 
 // bindBusinessPlannerFlag wires the --business-planner flag onto cmd.
 // Mirrors bindSystemPlannerFlag; kept in its own file so the two

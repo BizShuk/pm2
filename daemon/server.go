@@ -332,13 +332,25 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		outF.Close()
 		errF.Close()
 	} else {
-		cmdArgs := append([]string{req.Script}, req.Args...)
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		// Run via a shell so command substitution ($(...)), variable
+		// expansion ($VAR), globs, and pipes in the script/args are
+		// interpreted. script + args are joined into a single command string;
+		// args containing whitespace are re-split by the shell — this is
+		// inherent shell-mode semantics and is the caller's responsibility.
+		shellCmd := strings.Join(append([]string{req.Script}, req.Args...), " ")
+		cmd = exec.Command("/bin/bash", "-c", shellCmd)
 		cmd.Stdout = outF
 		cmd.Stderr = errF
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		if req.CWD != "" {
-			cmd.Dir = req.CWD
+
+		// Working directory: the cwd field wins; otherwise fall back to the
+		// directory of the originating ecosystem.config.js (req.ConfigFile).
+		workDir := req.CWD
+		if workDir == "" {
+			workDir = filepath.Dir(req.ConfigFile)
+		}
+		if workDir != "" {
+			cmd.Dir = workDir
 		}
 
 		// Apply environment. Prefer the CLI's environment snapshot (full PATH
@@ -348,23 +360,31 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		if len(base) == 0 {
 			base = os.Environ()
 		}
-		cmd.Env = append([]string{}, base...)
+		// Drop any inherited PWD: the snapshot carries the launcher's
+		// directory, which would otherwise leak in and disagree with cmd.Dir.
+		cmd.Env = make([]string, 0, len(base)+len(req.Env)+1)
+		for _, kv := range base {
+			if strings.HasPrefix(kv, "PWD=") {
+				continue
+			}
+			cmd.Env = append(cmd.Env, kv)
+		}
 		for k, v := range req.Env {
+			if k == "PWD" {
+				continue
+			}
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 
-		// Keep $PWD consistent with the actual working directory. Go's exec
-		// changes the process cwd via cmd.Dir but does not update PWD, so a
-		// process reading $PWD would otherwise see the launcher's directory.
-		// Only fill it when the caller did not set PWD explicitly.
-		if _, set := req.Env["PWD"]; !set {
-			workDir := req.CWD
-			if workDir == "" {
-				workDir, _ = os.Getwd()
-			}
-			if workDir != "" {
-				cmd.Env = append(cmd.Env, "PWD="+workDir)
-			}
+		// $PWD must always equal the actual working directory (cmd.Dir). Go's
+		// exec sets the cwd but does not touch PWD, so we set it explicitly as
+		// the single source of truth — matching workDir for every process.
+		pwd := workDir
+		if pwd == "" {
+			pwd, _ = os.Getwd()
+		}
+		if pwd != "" {
+			cmd.Env = append(cmd.Env, "PWD="+pwd)
 		}
 
 		if err := cmd.Start(); err != nil {

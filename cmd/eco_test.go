@@ -706,10 +706,10 @@ func TestWizardEndToEndNoMergeWithForce(t *testing.T) {
 // ---------- wizard install ----------
 
 func TestPlannerPrefixes(t *testing.T) {
-	if ecoPlannerSystemPrefix != "[plan only] run /system-planner and output to ./plans/" {
+	if ecoPlannerSystemPrefix != "run /system-planner for current workspace, and output under <workspace>/plans/" {
 		t.Errorf("ecoPlannerSystemPrefix = %q", ecoPlannerSystemPrefix)
 	}
-	if ecoPlannerBusinessPrefix != "[plan only] run /business-planner and output to ./plans/" {
+	if ecoPlannerBusinessPrefix != "run /business-planner for current workspace, and output under <workspace>/plans/" {
 		t.Errorf("ecoPlannerBusinessPrefix = %q", ecoPlannerBusinessPrefix)
 	}
 }
@@ -728,7 +728,12 @@ func TestBuildInstallApp(t *testing.T) {
 	if app.CWD != "/home/user/pm2" {
 		t.Errorf("CWD = %q, want /home/user/pm2", app.CWD)
 	}
-	wantArgs := []string{"-p", ecoPlannerSystemPrefix, "analyze repo"}
+	// agy is a planner agent → --add-dir <cwd> prepended; prefix+prompt
+	// joined into one single-quoted -p arg.
+	wantArgs := []string{
+		"--add-dir", "/home/user/pm2",
+		"-p", "'" + ecoPlannerSystemPrefix + " analyze repo'",
+	}
 	if len(app.Args) != len(wantArgs) {
 		t.Fatalf("len(Args) = %d, want %d", len(app.Args), len(wantArgs))
 	}
@@ -744,9 +749,13 @@ func TestBuildInstallApp(t *testing.T) {
 
 func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
 	app := buildInstallApp("/abs/agy", ecoPlannerBusinessPrefix, "", ecoPlannerNS, "myproj", "/home/user/proj")
-	wantArgs := []string{"-p", ecoPlannerBusinessPrefix, ""}
-	if len(app.Args) != 3 {
-		t.Fatalf("len(Args) = %d, want 3", len(app.Args))
+	// Empty user_prompt → prompt is just the prefix, still single-quoted.
+	wantArgs := []string{
+		"--add-dir", "/home/user/proj",
+		"-p", "'" + ecoPlannerBusinessPrefix + "'",
+	}
+	if len(app.Args) != len(wantArgs) {
+		t.Fatalf("len(Args) = %d, want %d", len(app.Args), len(wantArgs))
 	}
 	for i, a := range wantArgs {
 		if app.Args[i] != a {
@@ -872,13 +881,15 @@ func TestInstallEndToEnd(t *testing.T) {
 	if !strings.Contains(got, `namespace: "planner"`) {
 		t.Errorf("missing planner namespace:\n%s", got)
 	}
-	if !strings.Contains(got, `args: ["-p", `+strconvQuote(ecoPlannerSystemPrefix)+`, "analyze repo"]`) {
-		t.Errorf("args line not as expected:\n%s", got)
-	}
 	// CWD on macOS may resolve /var → /private/var, so we use
 	// the real cwd after chdir instead of the raw dir argument.
 	if realDir == "" {
 		realDir = dir
+	}
+	wantArgsLine := `args: ["--add-dir", ` + strconvQuote(realDir) + `, "-p", ` +
+		strconvQuote("'"+ecoPlannerSystemPrefix+" analyze repo'") + `]`
+	if !strings.Contains(got, wantArgsLine) {
+		t.Errorf("args line not as expected, want %s:\n%s", wantArgsLine, got)
 	}
 	if !strings.Contains(got, `cwd: "`+realDir+`"`) {
 		t.Errorf("missing cwd line, want %q:\n%s", realDir, got)
@@ -898,8 +909,14 @@ func TestInstallEndToEnd(t *testing.T) {
 	if a.Namespace != ecoPlannerNS {
 		t.Errorf("loaded Namespace = %q, want %q", a.Namespace, ecoPlannerNS)
 	}
-	if len(a.Args) != 3 || a.Args[0] != "-p" || a.Args[1] != ecoPlannerSystemPrefix || a.Args[2] != "analyze repo" {
-		t.Errorf("loaded Args = %v", a.Args)
+	wantLoadedArgs := []string{"--add-dir", realDir, "-p", "'" + ecoPlannerSystemPrefix + " analyze repo'"}
+	if len(a.Args) != len(wantLoadedArgs) {
+		t.Fatalf("loaded len(Args) = %d, want %d (%v)", len(a.Args), len(wantLoadedArgs), a.Args)
+	}
+	for i, w := range wantLoadedArgs {
+		if a.Args[i] != w {
+			t.Errorf("loaded Args[%d] = %q, want %q", i, a.Args[i], w)
+		}
 	}
 	if a.CWD != realDir {
 		t.Errorf("loaded CWD = %q, want %q", a.CWD, realDir)
@@ -927,12 +944,19 @@ func TestInstallNoUserPrompt(t *testing.T) {
 	if a.Namespace != ecoPlannerNS {
 		t.Errorf("loaded Namespace = %q, want %q", a.Namespace, ecoPlannerNS)
 	}
-	if len(a.Args) != 3 || a.Args[2] != "" {
-		t.Errorf("expected 3-arg slice with empty user_prompt, got %v", a.Args)
-	}
 	realDir, _ := os.Getwd()
 	if realDir == "" {
 		realDir = dir
+	}
+	// No user_prompt → -p value is the bare single-quoted prefix.
+	wantArgs := []string{"--add-dir", realDir, "-p", "'" + ecoPlannerSystemPrefix + "'"}
+	if len(a.Args) != len(wantArgs) {
+		t.Fatalf("expected %d args, got %d (%v)", len(wantArgs), len(a.Args), a.Args)
+	}
+	for i, w := range wantArgs {
+		if a.Args[i] != w {
+			t.Errorf("Args[%d] = %q, want %q", i, a.Args[i], w)
+		}
 	}
 	if a.CWD != realDir {
 		t.Errorf("loaded CWD = %q, want %q", a.CWD, realDir)
@@ -948,7 +972,7 @@ func TestInstallMergesIntoExisting(t *testing.T) {
 	}
 	script := writeDummyScript(t, dir, "agy")
 	var err error
-		if _, _, err = runInstall(t, dir, []string{script, "do X", "--system-planner", "--output", path}); err != nil {
+	if _, _, err = runInstall(t, dir, []string{script, "do X", "--system-planner", "--output", path}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	cfg, err := config.Load(path)

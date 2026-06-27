@@ -4,7 +4,7 @@ import "github.com/spf13/cobra"
 
 // ecoPlannerSystemPrefix is the prompt prefix injected into the
 // process args when `wizard install --system-planner` is set.
-const ecoPlannerSystemPrefix = "[plan only] run /system-planner and output to ./plans/"
+const ecoPlannerSystemPrefix = "run /system-planner for current workspace, and output under <workspace>/plans/"
 
 // bindSystemPlannerFlag wires the --system-planner flag onto cmd.
 // Lives in its own file so the two planner profiles can evolve

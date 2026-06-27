@@ -89,21 +89,34 @@ func newEcoInstallCmd() *cobra.Command {
 }
 
 // buildInstallApp assembles the AppConfig used by `wizard install`.
-// Args is always the 3-element array ["-p", prefix, userPrompt] so
-// the downstream process can index args[1] / args[2] without
-// checking length; userPrompt is the empty string when the user
-// omitted it. The process name is derived as
-// `<deriveName(script)>-<cwdBasename>` so multiple installs of the
-// same script in different folders don't collide.
+// The pm2-defined prefix and the optional user_prompt are joined into a
+// SINGLE -p argument, wrapped in literal single quotes so the prompt
+// survives as one token: ["-p", "'<prefix> <userPrompt>'"]. When the
+// script is a known planner agent (agy/claude), "--add-dir <cwd>" is
+// prepended so the agent has the workspace on its allow-list by default.
+// The process name is derived as `<deriveName(script)>-<cwdBasename>`
+// so multiple installs of the same script in different folders don't
+// collide.
 func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) config.AppConfig {
 	name := deriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
 	}
+
+	prompt := prefix
+	if userPrompt != "" {
+		prompt = prefix + " " + userPrompt
+	}
+	var args []string
+	if isPlannerAgent(script) {
+		args = append(args, "--add-dir", cwd)
+	}
+	args = append(args, "-p", "'"+prompt+"'")
+
 	a := config.AppConfig{
 		Script:    script,
 		Name:      name,
-		Args:      []string{"-p", prefix, userPrompt},
+		Args:      args,
 		Instances: 1,
 		Namespace: namespace,
 		Version:   ecoDefaultVersion,
@@ -111,4 +124,15 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 	}
 	a.Normalize()
 	return a
+}
+
+// isPlannerAgent reports whether the script is one of the AI planner
+// agents (agy/claude) that should receive a default "--add-dir <cwd>"
+// so the agent can read the current workspace without a prompt.
+func isPlannerAgent(script string) bool {
+	switch filepath.Base(script) {
+	case "agy", "claude":
+		return true
+	}
+	return false
 }
