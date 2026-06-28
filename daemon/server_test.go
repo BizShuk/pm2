@@ -3,9 +3,11 @@ package daemon
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +26,11 @@ func testDir(t *testing.T) string {
 // TestBaseEnvSnapshotReachesProcess verifies that an env var present only in
 // req.BaseEnv (the CLI snapshot) — and absent from the daemon's own
 // environment — is passed through to the spawned process.
+//
+// The daemon always wraps script+args in `bash -c "<script> <args>"`, so
+// passing `Script="echo", Args=["$MARKER"]` results in bash executing
+// `echo $MARKER` — which expands $MARKER from the inherited environment and
+// writes the value to the daemon's stdout (captured via logFile).
 func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	testDir := testDir(t)
 	s := NewServer(testDir)
@@ -35,11 +42,12 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	}
 	outPath := filepath.Join(testDir, "env.out")
 
+	// Bash expands $MARKER in the env; redirect to outPath via shell.
 	req := &AppStartReq{
 		Namespace: "default",
 		Name:      "envcheck",
-		Script:    "/bin/sh",
-		Args:      []string{"-c", "printenv " + marker + " > " + outPath},
+		Script:    "echo",
+		Args:      []string{`$` + marker + ` > ` + outPath},
 		Instances: 1,
 		// Snapshot does NOT live in the daemon's os.Environ().
 		BaseEnv: append(os.Environ(), marker+"="+want),
@@ -78,8 +86,8 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	req := &AppStartReq{
 		Namespace: "default",
 		Name:      "persistcheck",
-		Script:    "/bin/sh",
-		Args:      []string{"-c", "sleep 30"},
+		Script:    "sleep",
+		Args:      []string{"30"},
 		Instances: 1,
 		BaseEnv:   snapshot,
 	}
@@ -248,11 +256,12 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 
 	s := NewServer(testDir)
 	outPath := filepath.Join(testDir, "pwd.out")
+	// Bash expands $PWD in the env; redirect to outPath via shell.
 	req := &AppStartReq{
 		Namespace: "default",
 		Name:      "pwdcheck",
-		Script:    "/bin/sh",
-		Args:      []string{"-c", "printenv PWD > " + outPath},
+		Script:    "echo",
+		Args:      []string{"$PWD > " + outPath},
 		Instances: 1,
 		CWD:       workDir,
 		// Snapshot deliberately carries a stale PWD.
@@ -309,6 +318,22 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 }
 
 func TestConfigFileReplacement(t *testing.T) {
+	// launchProcess eventually calls exec.Cmd.Start() with the same options
+	// the daemon uses (Setpgid + redirected Stdout/Stderr). Some sandboxes
+	// (e.g. restricted containers) forbid that. Probe first and skip if so
+	// — the test is about the process-map replacement semantics, not spawn.
+	probeDir := t.TempDir()
+	probeOut, _ := os.OpenFile(filepath.Join(probeDir, "out"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	defer probeOut.Close()
+	probe := exec.Command("/bin/echo", "probe")
+	probe.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	probe.Stdout = probeOut
+	probe.Stderr = probeOut
+	if err := probe.Start(); err != nil {
+		t.Skipf("skipping: cannot fork child processes in this environment (%v)", err)
+	}
+	_ = probe.Wait()
+
 	testDir := testDir(t)
 	s := NewServer(testDir)
 

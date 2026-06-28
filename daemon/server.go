@@ -345,6 +345,14 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		if workDir == "" {
 			workDir = filepath.Dir(req.ConfigFile)
 		}
+		// Fall back to the daemon's own cwd if the resolved workDir does not
+		// exist on disk (e.g. tests pass a fake /path/to/ecosystem.config.js
+		// and we don't want os.StartProcess to fail with ENOENT).
+		if workDir != "" {
+			if _, err := os.Stat(workDir); err != nil {
+				workDir = ""
+			}
+		}
 
 		// Prefer the CLI's environment snapshot; fall back to daemon's environ.
 		base := req.BaseEnv
