@@ -12,15 +12,21 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
+// testDir creates a sandbox-friendly scratch directory under
+// $TMPDIR/pm2-test-<testName>-<rand>. Falls back to t.TempDir() which Go
+// already cleans up automatically.
+func testDir(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	return d
+}
+
 // TestBaseEnvSnapshotReachesProcess verifies that an env var present only in
 // req.BaseEnv (the CLI snapshot) — and absent from the daemon's own
 // environment — is passed through to the spawned process.
 func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
-	testDir := "/tmp/pm2-test-baseenv"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	const marker = "PM2_BASEENV_MARKER"
 	const want = "from_cli_snapshot"
@@ -62,10 +68,7 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 // process and replayed by restartByName, and that it round-trips through
 // save/resurrect (so a daemon restart does not drop the user's PATH).
 func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
-	testDir := "/tmp/pm2-test-baseenv-persist"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
-	defer os.RemoveAll(testDir)
+	testDir := testDir(t)
 
 	const marker = "PM2_BASEENV_PERSIST"
 	const want = "snapshot_value"
@@ -127,7 +130,7 @@ func envHas(env []string, key, val string) bool {
 }
 
 func TestFindProcesses(t *testing.T) {
-	s := NewServer("/tmp/pm2-test")
+	s := NewServer(testDir(t))
 	s.processes["default:appA"] = &ManagedProcess{
 		Info: process.ProcessInfo{ID: 0, Name: "appA", Namespace: "default"},
 	}
@@ -167,11 +170,8 @@ func TestFindProcesses(t *testing.T) {
 }
 
 func TestWatchStateInheritance(t *testing.T) {
-	testDir := "/tmp/pm2-test-watch"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	s.processes["default:watch-app"] = &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -205,11 +205,8 @@ func TestWatchStateInheritance(t *testing.T) {
 }
 
 func TestVersionStateInheritance(t *testing.T) {
-	testDir := "/tmp/pm2-test-version"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	s.processes["default:version-app"] = &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -245,11 +242,9 @@ func TestVersionStateInheritance(t *testing.T) {
 // TestCWDInjectedAsPWD verifies $PWD seen by the spawned process matches the
 // configured CWD, even though the BaseEnv snapshot carries a different PWD.
 func TestCWDInjectedAsPWD(t *testing.T) {
-	testDir := "/tmp/pm2-test-pwd"
+	testDir := testDir(t)
 	workDir := filepath.Join(testDir, "work")
-	_ = os.RemoveAll(testDir)
 	_ = os.MkdirAll(workDir, 0o755)
-	defer os.RemoveAll(testDir)
 
 	s := NewServer(testDir)
 	outPath := filepath.Join(testDir, "pwd.out")
@@ -283,11 +278,8 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 // TestKillAllStopsEveryProcess verifies the kill command's core: all managed
 // processes are stopped and their PIDs cleared.
 func TestKillAllStopsEveryProcess(t *testing.T) {
-	testDir := "/tmp/pm2-test-killall"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	for _, name := range []string{"a", "b", "c"} {
 		req := &AppStartReq{
@@ -317,11 +309,8 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 }
 
 func TestConfigFileReplacement(t *testing.T) {
-	testDir := "/tmp/pm2-test-configfile"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	scriptFile := "/bin/echo"
 
@@ -369,12 +358,9 @@ func TestConfigFileReplacement(t *testing.T) {
 }
 
 func TestDeleteDuringRestartSleep(t *testing.T) {
-	testDir := "/tmp/pm2-test-deleterestart"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
 	s.RestartDelay = 500 * time.Millisecond
-	defer os.RemoveAll(testDir)
 
 	req := &AppStartReq{
 		Namespace:   "default",
@@ -426,11 +412,8 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 }
 
 func TestRestartsInheritance(t *testing.T) {
-	testDir := "/tmp/pm2-test-restartsinherit"
-	_ = os.RemoveAll(testDir)
-	_ = os.MkdirAll(testDir, 0o755)
+	testDir := testDir(t)
 	s := NewServer(testDir)
-	defer os.RemoveAll(testDir)
 
 	s.processes["default:appA"] = &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -463,6 +446,38 @@ func TestRestartsInheritance(t *testing.T) {
 
 	if mp.Info.Restarts != 5 {
 		t.Errorf("Expected restarts counter to be inherited as 5, got %d", mp.Info.Restarts)
+	}
+}
+
+func TestStartAppOutFileHomeExpansion(t *testing.T) {
+	testDir := testDir(t)
+	s := NewServer(testDir)
+
+	req := &AppStartReq{
+		Namespace: "default",
+		Name:      "homeexpandcheck",
+		Script:    "/bin/sh",
+		Args:      []string{"-c", "sleep 1"},
+		Instances: 1,
+		OutFile:   "~/test-home-expand-out.log",
+		ErrorFile: "~/test-home-expand-err.log",
+	}
+
+	pi, err := s.startApp(req)
+	if err != nil {
+		t.Fatalf("startApp failed: %v", err)
+	}
+	defer s.stopByName("homeexpandcheck")
+
+	if len(pi) == 0 {
+		t.Fatalf("No process info returned")
+	}
+
+	if !strings.HasPrefix(pi[0].LogFile, "/") || strings.Contains(pi[0].LogFile, "~") {
+		t.Errorf("LogFile path was not expanded: got %s", pi[0].LogFile)
+	}
+	if !strings.HasPrefix(pi[0].ErrorFile, "/") || strings.Contains(pi[0].ErrorFile, "~") {
+		t.Errorf("ErrorFile path was not expanded: got %s", pi[0].ErrorFile)
 	}
 }
 
