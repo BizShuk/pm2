@@ -1,0 +1,13 @@
+# pm2 待辦清單 (TODO)
+
+`plans/` 審查後尚未完成或需後續處理的項目。已完成並驗證 (build + `go test ./...` 全綠) 的計畫已移至 `docs/specs/`。
+
+## 未實作的優化選項 (Pending Options)
+
+- [ ] `動態路徑包裝腳本 (Dynamic PATH Wrapper Script)` — 來源 `plans/backlog.md`
+  - 目標：讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
+  - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
+  - 備註：目前 daemon 已透過 `AppStartReq.BaseEnv`（CLI `os.Environ()` 快照）攜帶完整 `PATH`，此選項僅針對「daemon 由 launchd 直接拉起」的場景，屬補強性質。
+
+- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
+  - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。
