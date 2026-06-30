@@ -41,7 +41,14 @@ pm2/
 │   ├── stop.go               pm2 stop / restart / delete
 │   ├── monitor.go            pm2 monit (live process dashboard) / save / resurrect
 │   ├── logs.go               pm2 logs  — reads log files directly
-│   └── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
+│   ├── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
+│   ├── eco.go                pm2 wizard (Cobra command setup)
+│   ├── eco_wizard.go         interactive wizard logic to build ecosystem file
+│   ├── eco_renderer.go       CLI ecosystem file output renderer
+│   ├── eco_install.go        pm2 wizard install <script>
+│   ├── eco_install_system.go helper to install system-planner profile
+│   ├── eco_install_business.go helper to install business-planner profile
+│   └── eco_test.go           wizard and install command tests
 ├── config/
 │   ├── ecosystem.go          Load() — parses .json and .js (goja) ecosystem files
 │   │                         Normalize() fills defaults; resolves relative script paths
@@ -49,16 +56,26 @@ pm2/
 │   └── ecosystem_test.go     Unit tests for script path resolution and configuration loading
 ├── daemon/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
-│   └── server.go             Server — Listen(), startApp(), watchProcess() goroutine,
-│                             stopProcess() (sets stopping=true), cron.Scheduler integration
+│   ├── server.go             Server — Listen(), startApp(), watchProcess() goroutine,
+│   │                         stopProcess() (sets stopping=true), cron.Scheduler integration
+│   ├── persistence.go        save() and resurrect() implementations
+│   ├── metrics.go            StartMetricsCollector() and getProcessMetrics()
+│   ├── builder.go            buildCommand() to assemble *exec.Cmd
+│   ├── manager.go            Server methods for stop/restart/delete/list processes
+│   ├── helpers.go            killAll() and other daemon helpers
+│   ├── watcher.go            watchFile() with fsnotify
+│   └── server_test.go        daemon server unit tests
 ├── process/
 │   └── types.go              ProcessInfo (runtime state), DumpEntry (persisted state)
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
-├── tui/
-│   ├── model.go              Bubbletea Model — two-pane TUI: process list + detail/logs
-│   │                         doRefresh(), readLogs(), doAction() as tea.Cmd
-│   └── model_test.go         Unit tests for TUI layout and logic
+└── tui/
+    ├── model.go              Bubbletea Model — two-pane TUI: process list + detail/logs
+    │                         doRefresh(), readLogs(), doAction() as tea.Cmd
+    ├── formatter.go          string formatting helpers for the TUI
+    ├── metrics.go            CPU and memory metrics display logic
+    ├── renderer.go           Bubbletea view rendering logic
+    └── model_test.go         Unit tests for TUI layout and logic
 ```
 
 ## Key design decisions

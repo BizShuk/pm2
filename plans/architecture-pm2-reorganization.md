@@ -1,26 +1,30 @@
-# 架構演進與優化計畫 — pm2 (Architecture Evolution & Optimization Plan)
+# 架構演進與優化計畫 — pm2-reorganization (Architecture Evolution & Optimization Plan)
 
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
-我們對現有 `pm2` 專案進行了完整的架構審查與技術債診斷，發現了以下關鍵痛點：
+我們對現有 `pm2` 專案進行了架構審查與技術債診斷，發現了以下關鍵痛點：
 
 ### 1.1 核心併發缺陷與競態條件 (Critical Concurrency & Race Conditions)
-在 [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L15) 中，`save` 函數會遍歷整個 `s.processes` 對照表 (Map)。然而，此函數內部並未取得任何互斥鎖 (Mutex) 保護。當命令列介面 (CLI) 發送 `save` 指令（由 `handleConn` 觸發，參見 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L168)）或 `startAutoSave` 背景任務（參見 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L82)）執行時，如果此時有其他協程 (Goroutine) 修改了對照表（例如 `startApp`、`stopProcess` 或 `watchProcess`），將會直接引發 Go 執行期的致命崩潰：`fatal error: concurrent map iteration and map write`。
+在 [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L15) 中，`save` 函數會遍歷整個 `s.processes` 對照表 (Map)。然而，此函數內部並未取得任何互斥鎖 (Mutex)。
+當命令列介面 (CLI) 發送 `save` 指令（由 `handleConn` 觸發，參見 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L168)）或 `startAutoSave` 背景任務執行時，如果此時有其他協程 (Goroutine) 修改了對照表（例如 `startApp`、`stopProcess` 或 `watchProcess`），將會直接引發 Go 執行期的致命崩潰：`fatal error: concurrent map iteration and map write`。
 
 ### 1.2 監控指標收集時的阻塞效能瓶頸 (Lock Contention & Blocking in Metrics Collection)
-在 [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個對照表遍歷期間都持有 `s.mu.Lock` 寫鎖 (Write Lock)。在此寫鎖範圍內，它在迴圈中同步調用 `getProcessMetrics`，該函數會針對每個執行中的行程執行一次外部指令 `exec.Command("ps", ...)`。當受控行程增多時，多個 `ps` 行程的啟動與執行時間會累積。此期間由於整個伺服器 `Server` 寫鎖被鎖定，所有來自命令列介面網路連線的遠端程序呼叫 (RPC) 請求都會被完全阻塞，造成嚴重的效能瓶頸與延遲。
+在 [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個對照表遍歷期間都持有 `s.mu.Lock` 寫鎖 (Write Lock)。
+在此寫鎖範圍內，它在迴圈中同步調用 `getProcessMetrics`，該函數會針對每個執行中的行程執行一次外部指令 `exec.Command("ps", ...)`。
+當受控行程增多時，多個 `ps` 行程的啟動與執行時間會累積。此期間由於整個伺服器 `Server` 寫鎖被鎖定，所有來自命令列介面網路連線的遠端程序呼叫 (RPC) 請求都會被完全阻塞，造成嚴重的效能瓶頸與延遲。
 
 ### 1.3 信號傳播失效與孤兒行程問題 (Signal Propagation & Orphan Processes)
-在 [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go#L18) 中，程式將啟動指令包裝在 `/bin/bash -c` 中，並設置了 `Setpgid: true` 來建立行程組 (Process Group)。但在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L571) 的 `stopProcess` 中，終止行程是調用 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。這只會將信號發送給作為父行程的 `/bin/bash`，而不會傳播給其實際執行的子行程（即用戶真正要啟動的服務）。這會導致父行程終止後，子行程變成孤兒行程 (Orphan Process) 並繼續在系統背景運行，脫離 `pm2` 的管理。
+在 [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go#L18) 中，程式將啟動指令包裝在 `bash -c` 中，並設置了 `Setpgid: true` 來建立行程組 (Process Group)。
+但在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L571) 的 `stopProcess` 中，終止行程是調用 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。
+這只會將信號發送給作為父行程的 `bash`，而不會傳播給其實際執行的子行程（即用戶真正要啟動的服務）。這會導致父行程終止後，子行程變成孤兒行程 (Orphan Process) 並繼續在系統背景運行，脫離 `pm2` 的管理。
 
 ### 1.4 排程器名稱空間衝突 (Namespace Collision in Cron Scheduler)
-在 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go#L28) 中，`Register` 註冊排程任務時，使用行程名稱 `name` 作為對應對照表的鍵 (Key)。這意謂著如果用戶在不同的名稱空間（例如 `default:api` 和 `production:api`）中啟動了同名的行程，它們在定時任務 (Cron) 排程器內部的註冊將會互相覆蓋，造成排程邏輯混亂。
+在 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go#L28) 中，`Register` 註冊排程任務時，使用行程名稱 `name` 作為對應對照表的鍵 (Key)。
+這意謂著如果用戶在不同的名稱空間（例如 `default:api` 和 `production:api`）中啟動了同名的行程，它們在定時任務 (Cron) 排程器內部的註冊將會互相覆蓋，造成排程邏輯混亂。
 
-### 1.5 測試環境依賴過高 (Sandbox Isolation Failures in Tests)
-在 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L477) 中，`TestStartAppOutFileHomeExpansion` 測試使用了真實的家目錄路徑 `~/` 作為輸出日誌檔案。這在隔離的安全沙箱環境中會因為寫入家目錄的權限不足而直接報錯崩潰，且會污染用戶的主機環境。
-
-### 1.6 RPC 傳輸協定耦合 (RPC Protocol Coupling)
-在 [protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go) 中定義了 `Request`、`Response`、`AppStartReq`、`CommandType` 和輔助函數 `SendRequest`。目前 CLI `cmd/` 和 `tui/` 包直接導入整個 `daemon/` 模組以取得這些結構與網路連接方法。這意謂著用戶端的代碼直接依賴於伺服器端的實作，增加了系統的雙向耦合度。
+### 1.5 測試環境依賴與沙箱限制 (Test Dependencies & Sandbox Limitations)
+在 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L477) 中，`TestStartAppOutFileHomeExpansion` 測試使用了真實的家目錄路徑 `~/` 作為輸出日誌檔案。
+這在隔離的安全沙箱環境（例如 Antigravity 標準執行環境）中會因為寫入家目錄的權限不足而直接報錯崩潰，且會污染用戶的主機環境。
 
 ---
 
@@ -30,29 +34,28 @@
 
 ### 2.1 改動頻率分析 (Git Hotspots)
 過去 12 個月改動最頻繁的代碼檔案依序為：
-- `daemon/server.go`：16 次 (核心守護行程控制邏輯)
-- `tui/model.go`：14 次 (Bubbletea 儀表板模型與行為處理)
-- `cmd/start.go`：12 次 (CLI 啟動流程)
-- `process/types.go`：9 次 (資料模型與結構定義)
-- `daemon/server_test.go`：9 次 (單元測試)
-- `config/ecosystem.go`：9 次 (生態配置解析)
-- `daemon/protocol.go`：8 次 (RPC 傳輸協定)
+- [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：16 次 (核心守護行程控制邏輯)
+- [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：14 次 (Bubbletea 儀表板模型與行為處理)
+- [start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)：12 次 (CLI 啟動流程)
+- [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go)：9 次 (資料模型與結構定義)
+- [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go)：9 次 (單元測試)
 
 ### 2.2 代碼行數與高複雜度熱點 (Code Size & Complexity Hotspots)
 專案總代碼行數約為 `5,961` 行。其中規模最大的檔案包括：
-- `cmd/eco_test.go`：988 行 (測試文件)
-- `daemon/server.go`：670 行 (包含高複雜度的 `launchProcess` 與龐大的 RPC 路由判斷區塊)
-- `tui/renderer.go`：512 行 (Bubbletea UI 渲染)
-- `daemon/server_test.go`：510 行 (單元測試)
-- `tui/model.go`：359 行 (Bubbletea 行為處理)
+- [eco_test.go](file:///Users/shuk/projects/tmp/pm2/cmd/eco_test.go)：988 行 (測試文件)
+- [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：670 行 (包含高複雜度的 `launchProcess` 與龐大的 RPC 路由判斷區塊)
+- [renderer.go](file:///Users/shuk/projects/tmp/pm2/tui/renderer.go)：512 行 (Bubbletea UI 渲染)
+- [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go)：510 行 (單元測試)
+- [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：359 行 (Bubbletea 行為處理)
 
-核心重構目標應鎖定 `高改動頻率 × 高複雜度` 的交集：`daemon/server.go` 與 `tui/model.go`。
+核心重構目標應鎖定 `高改動頻率 × 高複雜度` 的交集：[server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 與 [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)。
 
 ---
 
 ## 3. 架構簡化與解耦設計 (Simplification & Decoupling Design)
 
-為了解決上述上帝對象與高耦合問題，我們將對 `daemon` 層進行解耦。透過引進介面分離職責，限制核心 `Server` 持有的互斥鎖時間。
+為了解決上述上帝對象與高耦合問題，我們將對 `daemon` 層進行解耦。
+透過引進介面分離職責，限制核心 `Server` 持有的互斥鎖時間。
 
 ### 3.1 職責拆分
 - `網絡與傳輸層 (Network & Transport Layer)`：僅負責 Unix 套接字的監聽、RPC 請求的反序列化與響應序列化，不介入任何業務邏輯。
@@ -110,11 +113,11 @@ pm2/
 
 | 舊檔案路徑 | 新模組路徑 | 調整要點 |
 | :--- | :--- | :--- |
-| `daemon/server.go` (`launchProcess` 等) | `process/manager.go`, `process/executor.go` | 將行程啟動邏輯與 Server 分離，並修正信號發送為行程組 |
-| `daemon/persistence.go` | `store/json.go` | 實作 `StateStore` 介面，並在其方法內部正確加鎖 |
-| `daemon/metrics.go` | `metrics/collector.go` | 將指標刷新改為非阻塞模式，避免長時間持有 `Server` 的大寫鎖 |
-| `cron/scheduler.go` | `cron/scheduler.go` | 升級 `Register` 鍵格式為 `namespace:name` |
-| `tui/metrics.go` | `metrics/host.go` | 抽出主機指標收集，最佳化 macOS `top` 解析的效率 |
+| [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) (`launchProcess` 等) | `process/manager.go`, `process/executor.go` | 將行程啟動邏輯與 Server 分離，並修正信號發送為行程組 |
+| [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go) | `store/json.go` | 實作 `StateStore` 介面，並在其方法內部正確加鎖 |
+| [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go) | `metrics/collector.go` | 將指標刷新改為非阻塞模式，避免長時間持有 `Server` 的大寫鎖 |
+| [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go) | [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go) | 升級 `Register` 鍵格式為 `namespace:name` |
+| [metrics.go](file:///Users/shuk/projects/tmp/pm2/tui/metrics.go) | `metrics/host.go` | 抽出主機指標收集，最佳化 macOS `top` 解析的效率 |
 
 ---
 
@@ -154,14 +157,14 @@ type MetricsCollector interface {
 
 ```mermaid
 gantt
-    title pm2 重構演進時序圖
+    title "pm2 重構演進時序圖"
     dateFormat  YYYY-MM-DD
-    section 核心缺陷修復
-    Phase 1 : 併發鎖與信號傳遞修復 :active, 2026-07-01, 3d
-    Phase 2 : 測試沙箱隔離優化 : 2026-07-04, 2d
-    section 架構解耦與優化
-    Phase 3 : 介面化與非阻塞指標收集 : 2026-07-06, 4d
-    Phase 4 : 目錄重整與模組化遷移 : 2026-07-10, 4d
+    section "核心缺陷修復"
+    "Phase 1 : 併發鎖與信號傳遞修復" :active, 2026-07-01, 3d
+    "Phase 2 : 測試沙箱隔離優化" : 2026-07-04, 2d
+    section "架構解耦與優化"
+    "Phase 3 : 介面化與非阻塞指標收集" : 2026-07-06, 4d
+    "Phase 4 : 目錄重整與模組化遷移" : 2026-07-10, 4d
 ```
 
 ### Phase 1：併發安全鎖與信號傳遞修復 (3 天)
@@ -172,7 +175,7 @@ gantt
   - 啟動含有子行程的 Shell 指令，隨後停止，運行 `ps -ef` 驗證子行程是否已確實消失，無孤兒行程殘留。
 
 ### Phase 2：測試沙箱隔離優化 (2 天)
-- 步驟 1：修改 `daemon/server_test.go` 中的 `TestStartAppOutFileHomeExpansion` 測試。
+- 步驟 1：修改 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L477) 中的 `TestStartAppOutFileHomeExpansion` 測試。
 - 步驟 2：使用 `t.TempDir()` 或利用 Go 特性重新設定測試環境的 `HOME` 環境變數，使其日誌輸出路徑指向測試專用的暫存目錄。
 - 驗證方法：
   - 在標準沙箱環境中運行 `go test -v ./daemon`，驗證測試綠燈通過，無權限錯誤。
@@ -187,7 +190,7 @@ gantt
 
 ### Phase 4：目錄重整與模組化遷移 (4 天)
 - 步驟 1：建立 `process/`、`store/` 與 `metrics/` 目錄。
-- 步驟 2：依照遷移映射表，安全地將相應 of the Go 檔案拆分至對應新目錄下。
+- 步驟 2：依照遷移映射表，安全地將相應的 Go 檔案拆分至對應新目錄下。
 - 步驟 3：修改 `main.go` 與 `cmd/` 的載入路徑，修復編譯鏈。
 - 驗證方法：
   - 執行整個專案的單元測試與整合測試 `go test ./...`，驗證功能表現一致。
@@ -196,18 +199,10 @@ gantt
 
 ## 7. 風險與回滾策略 (Risks & Rollback)
 
-### 7.1 行程組信號殺傷力過大
-- 風險：如果子行程的行程組識別碼 (PGID) 與其他重要系統行程混淆，使用負 PID 發送 `SIGTERM` 可能會誤殺其他行程。
-- 應對：在發送信號前，必須嚴格檢查 `pid > 1` 且該進程的行程組識別碼是否與其 PID 一致。
+### 7.1 重構大鎖引起死鎖 (Deadlock Risk)
+- 診斷：若在協調器與執行器解耦時，兩者內部各自加鎖並相互呼叫，可能引起 `循環等待` 死鎖。
+- 策略：明訂鎖的方向。僅允許 `Manager` 呼叫 `Registry` 時加鎖；`Executor` 本身不持有狀態鎖，僅負責進程底層的 `Cmd` 互斥。
 
-### 7.2 持久化格式相容性
-- 風險：重構可能改變 `dump.json` 的解析行為。
-- 應對：在第一天重構前備份當前系統家目錄下的 `~/.pm2/dump.json`。若載入失敗，可手動還原至舊版二進位。
-
-### 7.3 版本回滾
-- 回滾路徑：
-  ```bash
-  # 若重構後遭遇異常，可立即透過 git 還原代碼並重新編譯
-  git checkout main
-  go build -o /usr/local/bin/pm2 .
-  ```
+### 7.2 檔案監聽或 Cron 在重構時失效 (Feature Regression Risk)
+- 診斷：因為 fsnotify 與 cron.Scheduler 均依賴特定的生命週期事件，若事件通知機制在重構中遺漏，將導致自動重載或定時任務失效.
+- 策略：實施 E2E 自動化測試。在每次提交時，觸發檔案修改測試與定時觸發測試，確保功能無遺漏。
