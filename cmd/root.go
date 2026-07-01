@@ -42,6 +42,8 @@ func init() {
 		newStartCmd(),
 		newStopCmd(),
 		newRestartCmd(),
+		newPauseCmd(),
+		newResumeCmd(),
 		newDeleteCmd(),
 		newLogsCmd(),
 		newSaveCmd(),

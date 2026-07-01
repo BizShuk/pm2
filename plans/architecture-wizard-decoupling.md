@@ -5,10 +5,10 @@
 我們對現有 `pm2` 專案中有關生態配置精靈 (Ecosystem Wizard) 的程式碼進行了審查，發現了以下關鍵的結構耦合與技術債問題：
 
 * `診斷一`：互動式引導與檔案渲染邏輯同命令列界面強耦合 (Interactive Wizard and Renderer Coupled with CLI Presentation Layer)
-  在 [eco_wizard.go](file:///Users/shuk/projects/tmp/pm2/cmd/eco_wizard.go#L30) 和 [eco_renderer.go](file:///Users/shuk/projects/tmp/pm2/cmd/eco_renderer.go#L21) 中，諸如 `collectAnswers`、`promptLine`、`writeEcosystemFile` 以及 `renderEcosystemJS` 等底層核心邏輯，直接以 package-level 函數形式實作在 `cmd/` 套件下。這使得 `cmd`（命令列界面 Cobra 命令定義）不僅僅充當 CLI 的參數解析器，還直接承擔了互動提示、檔案讀寫、配置合併以及 JS/JSON 代碼生成等多重職責，違反了 `單一職責原則 (Single Responsibility Principle, SRP)`。
+  在 [eco_wizard.go](../cmd/eco_wizard.go#L30) 和 [eco_renderer.go](../cmd/eco_renderer.go#L21) 中，諸如 `collectAnswers`、`promptLine`、`writeEcosystemFile` 以及 `renderEcosystemJS` 等底層核心邏輯，直接以 package-level 函數形式實作在 `cmd/` 套件下。這使得 `cmd`（命令列界面 Cobra 命令定義）不僅僅充當 CLI 的參數解析器，還直接承擔了互動提示、檔案讀寫、配置合併以及 JS/JSON 代碼生成等多重職責，違反了 `單一職責原則 (Single Responsibility Principle, SRP)`。
 
 * `診斷二`：巨型測試檔案導致維護困難 (Monolithic Test File leading to Maintenance Difficulties)
-  在 [eco_test.go](file:///Users/shuk/projects/tmp/pm2/cmd/eco_test.go) 中，測試代碼高達 `988` 行。這些測試既包含了對 interactive prompt 互動回訊的模擬，也包含了對 JS/JSON 輸出的 assertion。由於它直接存放在 `cmd` 包中，導致測試代碼非常臃腫且難以維護，並且無法在不拉起整個 Cobra 命令的情況下單獨對 `wizard` 進行輕量化的單元測試。
+  在 [eco_test.go](../cmd/eco_test.go) 中，測試代碼高達 `988` 行。這些測試既包含了對 interactive prompt 互動回訊的模擬，也包含了對 JS/JSON 輸出的 assertion。由於它直接存放在 `cmd` 包中，導致測試代碼非常臃腫且難以維護，並且無法在不拉起整個 Cobra 命令的情況下單獨對 `wizard` 進行輕量化的單元測試。
 
 * `診斷三`：缺乏可重用性 (Lack of Reusability for Non-CLI Components)
   當前設計中，如果未來要在 `pm2 monit` 終端界面 (TUI) 中新增一個 `interactive config creator`（互動式配置建立器），或者如果守護行程 (Daemon) 需要自動導出或合併配置，我們將被迫導入整個 `cmd` 套件。然而，`cmd` 套件包含大量的 Cobra 命令和 CLI 全局 flag 註冊，這會帶來極為嚴重的依賴污染，甚至在 Go 中引發循環引用問題。

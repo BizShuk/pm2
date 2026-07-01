@@ -3,16 +3,16 @@
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * `診斷一`：守護進程伺服器 (Server) 職責過多 (Monolithic Server Struct Responsibility)
-  在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 中，`Server` 結構體同時維護了網路監聽 (`Listen` 與 `handleConn` 的連線讀寫與協定路由分發)、進程啟動 (`launchProcess`/`startApp`)、生命週期監控 (`watchProcess`) 與停止邏輯 (`stopProcess`)。這不符合單一職責原則 (Single Responsibility Principle)，導致任何一處的修改都可能影響到不相干的邏輯。
+  在 [server.go](../daemon/server.go) 中，`Server` 結構體同時維護了網路監聽 (`Listen` 與 `handleConn` 的連線讀寫與協定路由分發)、進程啟動 (`launchProcess`/`startApp`)、生命週期監控 (`watchProcess`) 與停止邏輯 (`stopProcess`)。這不符合單一職責原則 (Single Responsibility Principle)，導致任何一處的修改都可能影響到不相干的邏輯。
 
 * `診斷二`：裸露的進程 map 與鎖機制 (Unencapsulated Process Map and Manual Locking)
-  在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L30) 中，進程狀態儲存為裸露的 `processes map[string]*ManagedProcess`。所有的讀寫操作（例如在 [manager.go](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go) 中的 `listAll`/`findProcesses`/`deleteByName`）均需顯式調用 `s.mu.RLock()` / `s.mu.RUnlock()`。這種手動鎖機制容易在後續修改中引發漏加鎖或死鎖，且狀態讀寫並未對外封裝。
+  在 [server.go](../daemon/server.go#L30) 中，進程狀態儲存為裸露的 `processes map[string]*ManagedProcess`。所有的讀寫操作（例如在 [manager.go](../daemon/manager.go) 中的 `listAll`/`findProcesses`/`deleteByName`）均需顯式調用 `s.mu.RLock()` / `s.mu.RUnlock()`。這種手動鎖機制容易在後續修改中引發漏加鎖或死鎖，且狀態讀寫並未對外封裝。
 
 * `診斷三`：檔案監聽器與伺服器邏輯強耦合 (Coupled File Watcher and Server Logic)
-  在 [watcher.go](file:///Users/shuk/projects/tmp/pm2/daemon/watcher.go#L19) 中，`startFileWatcher` 作為 `Server` 的成員方法，並在檔案觸發變更後直接呼叫 `s.restartByName(pName)`。這使得檔案監聽與 `Server` 的其他機制強耦合，難以獨立進行單元測試。
+  在 [watcher.go](../daemon/watcher.go#L19) 中，`startFileWatcher` 作為 `Server` 的成員方法，並在檔案觸發變更後直接呼叫 `s.restartByName(pName)`。這使得檔案監聽與 `Server` 的其他機制強耦合，難以獨立進行單元測試。
 
 * `診斷四`：進程生命週期執行邏輯未隔離 (Process Lifecycle Execution Logic Not Isolated)
-  在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L514) 中，`watchProcess` 負責監聽進程退出事件、控制崩潰重啟與次數累加。它是一個運行在背景的 Goroutine，直接讀寫 `Server` 的共享狀態且與 `Server` 強綁定，應當抽離至專屬的執行器 (Executor) 以實現作業系統 IO 與進程管理的隔離。
+  在 [server.go](../daemon/server.go#L514) 中，`watchProcess` 負責監聽進程退出事件、控制崩潰重啟與次數累加。它是一個運行在背景的 Goroutine，直接讀寫 `Server` 的共享狀態且與 `Server` 強綁定，應當抽離至專屬的執行器 (Executor) 以實現作業系統 IO 與進程管理的隔離。
 
 ## 2. 複雜度量測 (Complexity Metrics)
 
@@ -20,18 +20,18 @@
 
 * 代碼規模與高複雜度熱點 (Code Size and High-Complexity Hotspots)
   當前專案總代碼量約為 `7,241` 行。主要 Go 原始碼檔案為：
-  * [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go)：`1431` 行
-  * [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：`700` 行
-  * [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go)：`154` 行
-  * [manager.go](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go)：`87` 行
-  * [watcher.go](file:///Users/shuk/projects/tmp/pm2/daemon/watcher.go)：`58` 行
-  * [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go)：`48` 行
+  * [server_test.go](../daemon/server_test.go)：`1431` 行
+  * [server.go](../daemon/server.go)：`700` 行
+  * [metrics.go](../daemon/metrics.go)：`154` 行
+  * [manager.go](../daemon/manager.go)：`87` 行
+  * [watcher.go](../daemon/watcher.go)：`58` 行
+  * [builder.go](../daemon/builder.go)：`48` 行
 
 * 改動熱點分析 (Change Hotspots)
   在過去 12 個月的提交歷史中，改動頻率最高的檔案為：
-  * [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：改動 `16` 次
-  * [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：改動 `14` 次
-  * [start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)：改動 `12` 次
+  * [server.go](../daemon/server.go)：改動 `16` 次
+  * [model.go](../tui/model.go)：改動 `14` 次
+  * [start.go](../cmd/start.go)：改動 `12` 次
 
 * 依賴與扇入扇出分析 (Dependency and Fan-in/out)
   `daemon/server.go` 引入了 `model/`、`cron/`、`process/`、`fsnotify/` 等，其扇出 (Fan-out) 值最高，為整個守護進程包的核心上帝對象 (God Object)。

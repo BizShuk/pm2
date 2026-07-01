@@ -26,6 +26,8 @@ const (
 	CmdStart    CommandType = "start"
 	CmdStop     CommandType = "stop"
 	CmdRestart  CommandType = "restart"
+	CmdPause    CommandType = "pause"
+	CmdResume   CommandType = "resume"
 	CmdDelete   CommandType = "delete"
 	CmdList     CommandType = "list"
 	CmdLogs     CommandType = "logs"

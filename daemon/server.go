@@ -40,6 +40,7 @@ type ManagedProcess struct {
 	Cmd      *exec.Cmd
 	done     chan struct{}
 	stopping bool // true when deliberately stopped, suppresses auto-restart
+	paused   bool // true when suspended via CmdPause; resume re-registers cron
 	Watcher  *fsnotify.Watcher
 }
 
@@ -146,6 +147,22 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	case model.CmdRestart:
 		err := s.restartByName(req.Name)
+		if err != nil {
+			resp = model.Response{Error: err.Error()}
+		} else {
+			resp = model.Response{OK: true}
+		}
+
+	case model.CmdPause:
+		err := s.pauseByName(req.Name)
+		if err != nil {
+			resp = model.Response{Error: err.Error()}
+		} else {
+			resp = model.Response{OK: true}
+		}
+
+	case model.CmdResume:
+		err := s.resumeByName(req.Name)
 		if err != nil {
 			resp = model.Response{Error: err.Error()}
 		} else {
@@ -672,6 +689,74 @@ func (s *Server) restartByName(name string) error {
 		}
 		_ = s.stopProcess(mp)
 		_, _ = s.launchProcess(mp.Info.Name, req)
+	}
+	return nil
+}
+
+// pauseByName suspends every matching process. A paused process has its
+// cron schedule removed (it will not fire) and any running instance is
+// stopped; its status becomes StatusPaused so callers can distinguish a
+// deliberately-suspended cron task from one merely idle between fires.
+func (s *Server) pauseByName(name string) error {
+	targets := s.findProcesses(name)
+	if len(targets) == 0 {
+		return fmt.Errorf("process or namespace not found: %s", name)
+	}
+	for _, mp := range targets {
+		// stopProcess removes the scheduler entry, sets stopping=true
+		// (so watchProcess won't auto-restart), and stops any running
+		// instance — leaving status at StatusStopped. We then upgrade
+		// that to StatusPaused and mark the process for resume.
+		_ = s.stopProcess(mp)
+		s.mu.Lock()
+		mp.paused = true
+		mp.Info.Status = process.StatusPaused
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+// resumeByName reverses pauseByName for every matching process. It
+// re-launches through launchProcess, which re-registers the cron
+// schedule and returns a cron task to its idle StatusStopped state (or
+// a regular process to StatusOnline). Resuming a process that was not
+// paused is a no-op that still succeeds, keeping the command idempotent.
+func (s *Server) resumeByName(name string) error {
+	targets := s.findProcesses(name)
+	if len(targets) == 0 {
+		return fmt.Errorf("process or namespace not found: %s", name)
+	}
+	for _, mp := range targets {
+		s.mu.RLock()
+		paused := mp.paused
+		s.mu.RUnlock()
+		if !paused {
+			continue
+		}
+		req := &model.AppStartReq{
+			AppConfig: process.AppConfig{
+				Namespace:   mp.Info.Namespace,
+				Name:        mp.Info.Name,
+				Script:      mp.Info.Script,
+				Args:        mp.Info.Args,
+				Env:         mp.Info.Env,
+				CronRestart: mp.Info.CronRestart,
+				Cron:        mp.Info.Cron,
+				Watch:       mp.Info.Watch,
+				MaxRestarts: mp.Info.MaxRestarts,
+				LogFile:     mp.Info.LogFile,
+				ErrorFile:   mp.Info.ErrorFile,
+				Version:     mp.Info.Version,
+				ConfigFile:  mp.Info.ConfigFile,
+				CWD:         mp.Info.CWD,
+				BaseEnv:     mp.Info.BaseEnv,
+			},
+			// CronTriggered stays false: a resumed cron task must go
+			// back to scheduled-and-idle, NOT fire immediately.
+		}
+		if _, err := s.launchProcess(mp.Info.Name, req); err != nil {
+			return fmt.Errorf("resume %s: %w", mp.Info.Name, err)
+		}
 	}
 	return nil
 }

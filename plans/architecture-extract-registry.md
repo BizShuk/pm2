@@ -3,18 +3,18 @@
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * `診斷一：進程狀態與伺服器邏輯高度耦合 (Coupling of Process State and Server Logic)`
-  在 [server.go:L28-35](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L28-L35) 中，`Server` 結構體同時持有了 `processes map[string]*ManagedProcess`。這代表狀態存儲和網絡監聽（如 `Listen` 與 `handleConn`）以及進程生命週期（如 `launchProcess`、`stopProcess`）是混在一起的，違反了 `單一職責原則 (Single Responsibility Principle, SRP)`。
+  在 [server.go:L28-35](../daemon/server.go#L28-L35) 中，`Server` 結構體同時持有了 `processes map[string]*ManagedProcess`。這代表狀態存儲和網絡監聽（如 `Listen` 與 `handleConn`）以及進程生命週期（如 `launchProcess`、`stopProcess`）是混在一起的，違反了 `單一職責原則 (Single Responsibility Principle, SRP)`。
 
 * `診斷二：裸露的 map 與分散的手動讀寫鎖操作 (Exposed Map and Distributed Manual Locking)`
   對 `processes` map 的讀寫和鎖的獲取分散在整個 `daemon` 目錄下的多個文件中。
-  - 在 [manager.go:L14-18](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go#L14-L18) 中 `listAll` 獲取 `s.mu.RLock()`；在 [manager.go:L25-34](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go#L25-L34) 中 `findProcesses` 獲取 `s.mu.RLock()`；在 [manager.go:L83-85](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go#L83-L85) 中 `deleteByName` 獲取 `s.mu.Lock()`。
-  - 在 [metrics.go:L82-91](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L82-L91) 中 `refreshMetrics` 獲取 `s.mu.RLock()` 進行 snapshot，之後在 [metrics.go:L128-142](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L128-L142) 獲取 `s.mu.Lock()` 進行寫回。
-  - 在 [persistence.go:L23-48](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L23-L48) 中 `save` 獲取 `s.mu.RLock()`。
-  - 在 [server.go:L219](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L219) `startApp` 獲取 `s.mu.Lock()`；在 [server.go:L389](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L389) `launchProcess` 獲取 `s.mu.Lock()`；在 [server.go:L520](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L520) `watchProcess` 獲取 `s.mu.Lock()`；在 [server.go:L568](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L568) `stopProcess` 獲取 `s.mu.Lock()`；在 [server.go:L674](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L674) `triggerCron` 獲取 `s.mu.Lock()`。
+  - 在 [manager.go:L14-18](../daemon/manager.go#L14-L18) 中 `listAll` 獲取 `s.mu.RLock()`；在 [manager.go:L25-34](../daemon/manager.go#L25-L34) 中 `findProcesses` 獲取 `s.mu.RLock()`；在 [manager.go:L83-85](../daemon/manager.go#L83-L85) 中 `deleteByName` 獲取 `s.mu.Lock()`。
+  - 在 [metrics.go:L82-91](../daemon/metrics.go#L82-L91) 中 `refreshMetrics` 獲取 `s.mu.RLock()` 進行 snapshot，之後在 [metrics.go:L128-142](../daemon/metrics.go#L128-L142) 獲取 `s.mu.Lock()` 進行寫回。
+  - 在 [persistence.go:L23-48](../daemon/persistence.go#L23-L48) 中 `save` 獲取 `s.mu.RLock()`。
+  - 在 [server.go:L219](../daemon/server.go#L219) `startApp` 獲取 `s.mu.Lock()`；在 [server.go:L389](../daemon/server.go#L389) `launchProcess` 獲取 `s.mu.Lock()`；在 [server.go:L520](../daemon/server.go#L520) `watchProcess` 獲取 `s.mu.Lock()`；在 [server.go:L568](../daemon/server.go#L568) `stopProcess` 獲取 `s.mu.Lock()`；在 [server.go:L674](../daemon/server.go#L674) `triggerCron` 獲取 `s.mu.Lock()`。
   這種手動、分散的鎖獲取非常容易在未來修改代碼時遺漏 Lock/Unlock 或引入 `死鎖 (Deadlock)`。
 
 * `診斷三：缺少統一的狀態變更介面 (Lack of Unified State Mutation Interface)`
-  目前任何地方都可以直接讀寫 `processes[key]` 或是修改其屬性（例如在 [metrics.go:L135-136](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L135-L136) 中直接修改 `mp.Info.CPU` 與 `mp.Info.Memory`，在 [server.go:L692](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L692) 中直接修改 `p.Info.LastCronAt` / `LastCronStatus` 等）。這使得狀態的生命週期極難維護、追蹤和調試，也不容易進行單元測試的 mock。
+  目前任何地方都可以直接讀寫 `processes[key]` 或是修改其屬性（例如在 [metrics.go:L135-136](../daemon/metrics.go#L135-L136) 中直接修改 `mp.Info.CPU` 與 `mp.Info.Memory`，在 [server.go:L692](../daemon/server.go#L692) 中直接修改 `p.Info.LastCronAt` / `LastCronStatus` 等）。這使得狀態的生命週期極難維護、追蹤和調試，也不容易進行單元測試的 mock。
 
 ## 2. 複雜度量測 (Complexity Metrics)
 
@@ -22,15 +22,15 @@
 
 * `代碼規模與高複雜度熱點 (Code Size and High-Complexity Hotspots)`
   當前專案總代碼量約為 `7,241` 行。涉及 `processes` map 讀寫與 `s.mu` 鎖操作的檔案主要為：
-  - [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：`701` 行，鎖操作處多達 15 處以上。
-  - [manager.go](file:///Users/shuk/projects/tmp/pm2/daemon/manager.go)：`88` 行。
-  - [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go)：`155` 行。
-  - [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go)：`95` 行。
+  - [server.go](../daemon/server.go)：`701` 行，鎖操作處多達 15 處以上。
+  - [manager.go](../daemon/manager.go)：`88` 行。
+  - [metrics.go](../daemon/metrics.go)：`155` 行。
+  - [persistence.go](../daemon/persistence.go)：`95` 行。
 
 * `改動熱點分析 (Change Hotspots)`
   在過去 12 個月的提交歷史中，改動頻率最高的檔案為：
-  - [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：改動 `16` 次。
-  - [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：改動 `14` 次。
+  - [server.go](../daemon/server.go)：改動 `16` 次。
+  - [model.go](../tui/model.go)：改動 `14` 次。
 
 * `依賴與扇入扇出分析 (Dependency and Fan-in/out)`
   `processes` 對照表在 `daemon` 套件中被讀寫/引用了至少 26 處，形成了高扇出 (Fan-out)，所有 daemon 內的文件都在操作這個裸露的對照表與其讀寫鎖。

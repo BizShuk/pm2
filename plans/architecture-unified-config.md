@@ -6,24 +6,24 @@
 
 ### 1.1 行程配置結構體的多重定義與重複程式碼 (Multiple Definitions and Redundant Code in Configuration Structs)
 在整個專案中，與行程配置（如 `namespace`、`name`、`script`、`args`、`env`、`cron_restart`、`watch`、`max_restarts` 等）相關的欄位被重複定義了四次。分別位於：
-- [ecosystem.go:L15-33](file:///Users/shuk/projects/tmp/pm2/config/ecosystem.go#L15-L33) 中的 `config.AppConfig`（用於解析生態設定檔）
-- [protocol.go:L46-70](file:///Users/shuk/projects/tmp/pm2/model/protocol.go#L46-L70) 中的 `model.AppStartReq`（用於 CLI 與 daemon 間的 RPC 傳輸）
-- [types.go:L47-66](file:///Users/shuk/projects/tmp/pm2/process/types.go#L47-L66) 中的 `process.DumpEntry`（用於持久化儲存 `dump.json`）
-- [types.go:L17-44](file:///Users/shuk/projects/tmp/pm2/process/types.go#L17-L44) 中的 `process.ProcessInfo`（用於維護守護行程與 TUI 顯示的核心狀態）
+- [ecosystem.go:L15-33](../config/ecosystem.go#L15-L33) 中的 `config.AppConfig`（用於解析生態設定檔）
+- [protocol.go:L46-70](../model/protocol.go#L46-L70) 中的 `model.AppStartReq`（用於 CLI 與 daemon 間的 RPC 傳輸）
+- [types.go:L47-66](../process/types.go#L47-L66) 中的 `process.DumpEntry`（用於持久化儲存 `dump.json`）
+- [types.go:L17-44](../process/types.go#L17-L44) 中的 `process.ProcessInfo`（用於維護守護行程與 TUI 顯示的核心狀態）
 
 這違反了 `不要重複自己 (Don't Repeat Yourself, DRY)` 原則，使得欄位新增與修改的維護開銷非常高。
 
 ### 1.2 手動欄位映射開銷與維護漏洞 (Manual Field Mapping Overhead and Maintenance Vulnerabilities)
 當行程配置在不同模組間流動時，存在大量的硬編碼複製與手動映射。具體表現於：
-- [start.go:L33-52](file:///Users/shuk/projects/tmp/pm2/cmd/start.go#L33-L52)：CLI 啟動時手動將 `config.AppConfig` 轉換為 `model.AppStartReq`
-- [persistence.go:L26-45](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L26-L45)：自動儲存與手動存檔時將 `ProcessInfo` 的各欄位逐一複製至 `process.DumpEntry`
-- [persistence.go:L70-89](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L70-L89)：回復存檔時將 `process.DumpEntry` 反向映射回 `model.AppStartReq`
+- [start.go:L33-52](../cmd/start.go#L33-L52)：CLI 啟動時手動將 `config.AppConfig` 轉換為 `model.AppStartReq`
+- [persistence.go:L26-45](../daemon/persistence.go#L26-L45)：自動儲存與手動存檔時將 `ProcessInfo` 的各欄位逐一複製至 `process.DumpEntry`
+- [persistence.go:L70-89](../daemon/persistence.go#L70-L89)：回復存檔時將 `process.DumpEntry` 反向映射回 `model.AppStartReq`
 
 這種高度耦合的手動映射非常脆弱。一旦未來為了支撐新業務而引入新配置（例如健康檢查探針或 CPU 親和性限制），必須同步修改以上 3 處手動映射邏輯，極易因遺漏而引發靜態欄位丟失或運行期異常。
 
 ### 1.3 配置預設值填充邏輯不一致 (Inconsistent Configuration Normalization)
-目前行程配置的標準化與預設值填充邏輯（如 `Instances` 與 `MaxRestarts` 的預設邊界處理）實作在 [ecosystem.go:L41-85](file:///Users/shuk/projects/tmp/pm2/config/ecosystem.go#L41-L85) 的 `Normalize` 方法中。
-然而，當守護進程從 `dump.json` 讀取並回復行程時（參見 [persistence.go:L59-94](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L59-L94)），卻是直接將 `DumpEntry` 反序列化並傳遞給 `s.startApp`，完全跳過了 `Normalize` 步驟。這將導致從 `dump.json` 被拉起的行程其預設行為可能與直接從生態設定檔啟動的行程不一致。
+目前行程配置的標準化與預設值填充邏輯（如 `Instances` 與 `MaxRestarts` 的預設邊界處理）實作在 [ecosystem.go:L41-85](../config/ecosystem.go#L41-L85) 的 `Normalize` 方法中。
+然而，當守護進程從 `dump.json` 讀取並回復行程時（參見 [persistence.go:L59-94](../daemon/persistence.go#L59-L94)），卻是直接將 `DumpEntry` 反序列化並傳遞給 `s.startApp`，完全跳過了 `Normalize` 步驟。這將導致從 `dump.json` 被拉起的行程其預設行為可能與直接從生態設定檔啟動的行程不一致。
 
 ---
 
@@ -33,12 +33,12 @@
 
 ### 2.1 改動頻率與技術債熱點 (Change Frequency & Debt Hotspots)
 過去 12 個月內，主要修改頻率分布如下：
-- [start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)：改動 `12` 次
-- [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go)：改動 `9` 次
-- [ecosystem.go](file:///Users/shuk/projects/tmp/pm2/config/ecosystem.go)：改動 `9` 次
-- [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go)：改動 `2` 次
+- [start.go](../cmd/start.go)：改動 `12` 次
+- [types.go](../process/types.go)：改動 `9` 次
+- [ecosystem.go](../config/ecosystem.go)：改動 `9` 次
+- [persistence.go](../daemon/persistence.go)：改動 `2` 次
 
-[start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go) 與 [ecosystem.go](file:///Users/shuk/projects/tmp/pm2/config/ecosystem.go) 的高頻改動，說明了配置修改的常態性；而 [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go) 雖改動少，卻包含了大量的長映射代碼塊，增加了重構時的出錯機率。
+[start.go](../cmd/start.go) 與 [ecosystem.go](../config/ecosystem.go) 的高頻改動，說明了配置修改的常態性；而 [persistence.go](../daemon/persistence.go) 雖改動少，卻包含了大量的長映射代碼塊，增加了重構時的出錯機率。
 
 ### 2.2 依賴與扇入分析 (Dependency and Fan-in Analysis)
 - `process` 套件目前是一個葉子套件 (Leaf Package)，其唯一依賴是 Go 的標準庫 `time`。
@@ -114,9 +114,9 @@ pm2/
 我們規劃了 4 個漸進式階段，以絞殺榕模式前進，每一步均需執行編譯與單元測試。
 
 ### Phase 1：建立 AppConfig 與遷移配置標準化 (Complexity: Medium)
-- `步驟 1`：在 [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go) 中定義 `process.AppConfig` 結構體，完整拷貝原有 `config.AppConfig` 的欄位與 JSON tag。
+- `步驟 1`：在 [types.go](../process/types.go) 中定義 `process.AppConfig` 結構體，完整拷貝原有 `config.AppConfig` 的欄位與 JSON tag。
 - `步驟 2`：將 `config.AppConfig` 的 `Normalize` 方法遷移到 `process.AppConfig`。
-- `步驟 3`：修改 `config/ecosystem.go` 讓載入器返回 `process.EcosystemConfig`（由 `[]process.AppConfig` 組成），並修復 [ecosystem_test.go](file:///Users/shuk/projects/tmp/pm2/config/ecosystem_test.go)。
+- `步驟 3`：修改 `config/ecosystem.go` 讓載入器返回 `process.EcosystemConfig`（由 `[]process.AppConfig` 組成），並修復 [ecosystem_test.go](../config/ecosystem_test.go)。
 - `驗證命令`：`go test -v ./config/...`
 
 ### Phase 2：內嵌配置至啟動請求 AppStartReq (Complexity: Low)

@@ -190,6 +190,8 @@ func dotFor(s process.Status) string {
 		return lipgloss.NewStyle().Foreground(clErrored).Render("●")
 	case process.StatusLaunching, process.StatusStopping:
 		return lipgloss.NewStyle().Foreground(clWarn).Render("◌")
+	case process.StatusPaused:
+		return lipgloss.NewStyle().Foreground(clCron).Render("⏸")
 	default:
 		return lipgloss.NewStyle().Foreground(clStopped).Render("○")
 	}
@@ -204,6 +206,8 @@ func statusLabel(s process.Status) string {
 		return lipgloss.NewStyle().Foreground(clErrored).Render(string(s))
 	case process.StatusLaunching, process.StatusStopping:
 		return lipgloss.NewStyle().Foreground(clWarn).Render(string(s))
+	case process.StatusPaused:
+		return lipgloss.NewStyle().Foreground(clCron).Render(string(s))
 	default:
 		return lipgloss.NewStyle().Foreground(clStopped).Render(string(s))
 	}
@@ -219,6 +223,8 @@ func getStatusColor(s process.Status) lipgloss.AdaptiveColor {
 		return clErrored
 	case process.StatusLaunching, process.StatusStopping:
 		return clWarn
+	case process.StatusPaused:
+		return clCron
 	default:
 		return clStopped
 	}

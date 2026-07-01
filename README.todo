@@ -53,7 +53,7 @@
 
 ## 守護進程解耦重構 (Daemon Decoupling Refactor)
 
-> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、`plans/architecture-daemon-decoupling-phase2.md`、[plans/architecture-daemon-decoupling-phase3.md](./plans/architecture-daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 仍為扁平結構，尚無 `protocol/`、`store/`、`tui/views/`。
+> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、[docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)（原 `plans/architecture-daemon-decoupling-phase2.md`，已完成移轉）、[plans/architecture-daemon-decoupling-phase3.md](./plans/architecture-daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 仍為扁平結構，尚無 `daemon/manager/`、`daemon/executor/`、`daemon/network/`、`tui/views/`。
 
 - [x] `第一階段：補強特徵測試 (Characterization tests)`
     - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
@@ -75,7 +75,7 @@
       規格：[docs/specs/unified-config-refactor.md](./docs/specs/unified-config-refactor.md)
       結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`process.DumpEntry` 標記 Deprecated，`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
 
-- [x] `第二階段：抽離 RPC 協定包 (Extract protocol package)`
+- [x] `第二階段：抽離 RPC 協定包 (Extract protocol package)` — 規格 [docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)
     - 將 `daemon/protocol.go`（`Request`/`Response`/`SendRequest`）獨立為 `model/protocol.go`，讓 `cmd` 與 `tui` 不再導入整個 `daemon` 包。
     - 保持 struct JSON tag 完全一致，避免新舊 CLI/TUI 通訊不相容。
     - 驗證：`go test -v ./cmd/... ./tui/...`。
@@ -95,7 +95,7 @@
     - 驗證：`go test -race ./daemon/...`。
 
 
-- [ ] `第四階段：抽離進程執行器 (Extract executor)`
+- [ ] `第四階段：抽離進程執行器 (Extract executor)` — 來源 [plans/architecture-extract-executor.md](./plans/architecture-extract-executor.md)
     - 將 `launchProcess`/`watchProcess`/`stopProcess` 及 `builder.go`/`watcher.go`/`metrics.go` 遷至 `daemon/executor/`，封裝單一進程生命週期與進程組信號。
     - 鎖方向約束：僅 `Manager` 呼叫 `Registry` 時加狀態鎖，`Executor` 不持狀態鎖，避免循環等待死鎖。
     - 驗證：拉起含 cron 重啟 / 日誌 / watch 的多進程，停止後無孤兒進程且 `pm2 list` 狀態正常。

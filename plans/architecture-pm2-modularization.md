@@ -3,22 +3,22 @@
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * `診斷一`：並發安全性缺陷與競態條件風險 (Concurrency Safety and Race Condition Risks)
-  在 [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L15) 中，`save` 函數會遍歷 `s.processes` 的 `map`。然而，此函數內並未進行任何互斥鎖 (Mutex) 的取得與保護。在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L82) 中的自動儲存協程 `startAutoSave` 與 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L168) 中的遠端程序呼叫 (RPC) 命令處理器 `CmdSave` 呼叫 `save` 時，皆無鎖保護。這會在並發新增、停止或刪除進程時直接導致 Go 執行期的並發讀寫崩潰致命錯誤：`fatal error: concurrent map iteration and map write`。
+  在 [persistence.go](../daemon/persistence.go#L15) 中，`save` 函數會遍歷 `s.processes` 的 `map`。然而，此函數內並未進行任何互斥鎖 (Mutex) 的取得與保護。在 [server.go](../daemon/server.go#L82) 中的自動儲存協程 `startAutoSave` 與 [server.go](../daemon/server.go#L168) 中的遠端程序呼叫 (RPC) 命令處理器 `CmdSave` 呼叫 `save` 時，皆無鎖保護。這會在並發新增、停止或刪除進程時直接導致 Go 執行期的並發讀寫崩潰致命錯誤：`fatal error: concurrent map iteration and map write`。
 
 * `診斷二`：鎖競爭與阻塞式外部監控指標收集效能瓶頸 (Lock Contention and Blocking Performance Bottleneck in Metrics Collection)
-  在 [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個遍歷對照表的過程中，全程持有寫鎖 `s.mu.Lock()`。在此寫鎖保護的迴圈內部，同步調用了 [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L14) 的 `getProcessMetrics`，該函數又透過 `exec.Command("ps", ...)` 拉起外部系統進程來獲取數據。當受控進程數量較多時，同步拉起多個外部進程所累積的延遲，將導致整個伺服器長時間處於鎖定狀態，進而阻塞所有網路 RPC 連線，造成 CLI 與 TUI 回應卡頓。
+  在 [metrics.go](../daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個遍歷對照表的過程中，全程持有寫鎖 `s.mu.Lock()`。在此寫鎖保護的迴圈內部，同步調用了 [metrics.go](../daemon/metrics.go#L14) 的 `getProcessMetrics`，該函數又透過 `exec.Command("ps", ...)` 拉起外部系統進程來獲取數據。當受控進程數量較多時，同步拉起多個外部進程所累積的延遲，將導致整個伺服器長時間處於鎖定狀態，進而阻塞所有網路 RPC 連線，造成 CLI 與 TUI 回應卡頓。
 
 * `診斷三`：信號傳遞機制缺陷與背景孤兒進程問題 (Signal Propagation Defect and Background Orphan Processes)
-  在 [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go#L19) 中，執行腳本被包裝在 `/bin/bash -c` 中，並設置了 `Setpgid: true` 來開啟新的進程組。但在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L571) 的 `stopProcess` 中，終止進程只調用了 `mp.Cmd.Process.Signal(syscall.SIGTERM)`，這只會將信號發送給作為父進程的 `bash`，而不會自動傳播給實際執行的用戶進程。這會導致 `bash` 終止後，其實際子進程淪為孤兒進程 (Orphan Process) 並在系統背景繼續運作，脫離 `pm2` 的管控。
+  在 [builder.go](../daemon/builder.go#L19) 中，執行腳本被包裝在 `/bin/bash -c` 中，並設置了 `Setpgid: true` 來開啟新的進程組。但在 [server.go](../daemon/server.go#L571) 的 `stopProcess` 中，終止進程只調用了 `mp.Cmd.Process.Signal(syscall.SIGTERM)`，這只會將信號發送給作為父進程的 `bash`，而不會自動傳播給實際執行的用戶進程。這會導致 `bash` 終止後，其實際子進程淪為孤兒進程 (Orphan Process) 並在系統背景繼續運作，脫離 `pm2` 的管控。
 
 * `診斷四`：排程器命名空間衝突與排程覆蓋 (Scheduler Namespace Collision and Job Overwriting)
-  在 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go#L28) 中，定時排程器 `cron.Scheduler` 註冊任務時以進程名稱 `name` 作為鍵值 (Key)。由於系統支援命名空間 (Namespace)，如果用戶在不同命名空間（例如 `default:api` 與 `production:api`）中啟動了同名進程，它們的排程任務將在排程器內部發生衝突並互相覆蓋，破壞多命名空間的業務隔離性。
+  在 [scheduler.go](../cron/scheduler.go#L28) 中，定時排程器 `cron.Scheduler` 註冊任務時以進程名稱 `name` 作為鍵值 (Key)。由於系統支援命名空間 (Namespace)，如果用戶在不同命名空間（例如 `default:api` 與 `production:api`）中啟動了同名進程，它們的排程任務將在排程器內部發生衝突並互相覆蓋，破壞多命名空間的業務隔離性。
 
 * `診斷五`：RPC 協議傳輸層與守護進程邏輯雙向耦合 (RPC Protocol and Daemon Coupling)
-  在 [protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go) 中，RPC 傳輸協議結構定義（如 `Request`, `Response`）以及客戶端發送函數 `SendRequest` 與伺服器邏輯位於同一個 `daemon` 包下。這導致 CLI 客戶端 [cmd](file:///Users/shuk/projects/tmp/pm2/cmd) 與用戶介面 [tui](file:///Users/shuk/projects/tmp/pm2/tui) 必須導入整個 `daemon` 模組，破壞了系統分層原則，並增加了模組間的雙向耦合度。
+  在 [protocol.go](../daemon/protocol.go) 中，RPC 傳輸協議結構定義（如 `Request`, `Response`）以及客戶端發送函數 `SendRequest` 與伺服器邏輯位於同一個 `daemon` 包下。這導致 CLI 客戶端 [cmd](../cmd) 與用戶介面 [tui](../tui) 必須導入整個 `daemon` 模組，破壞了系統分層原則，並增加了模組間的雙向耦合度。
 
 * `診斷六`：TUI 視圖與狀態控制邏輯重疊 (TUI View and State Control Coupling)
-  在 [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go) 中，Bubbletea 的 `Update` 事件控制與佈局視圖渲染相互交織。雖然 [renderer.go](file:///Users/shuk/projects/tmp/pm2/tui/renderer.go) 承擔了部分渲染，但狀態流轉與 UI 展示的組裝仍高度依賴於單一的狀態變數，限制了面板代碼的模組化與可測試性。
+  在 [model.go](../tui/model.go) 中，Bubbletea 的 `Update` 事件控制與佈局視圖渲染相互交織。雖然 [renderer.go](../tui/renderer.go) 承擔了部分渲染，但狀態流轉與 UI 展示的組裝仍高度依賴於單一的狀態變數，限制了面板代碼的模組化與可測試性。
 
 ## 2. 複雜度量測 (Complexity Metrics)
 
@@ -26,24 +26,24 @@
 
 * 代碼規模與高複雜度熱點 (Code Size and High-Complexity Hotspots)
   當前專案總代碼量約為 `5,961` 行。其中規模前五大的 Go 原始碼檔案為：
-  * [eco_test.go](file:///Users/shuk/projects/tmp/pm2/cmd/eco_test.go)：`988` 行
-  * [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：`670` 行 (包含了龐大的 RPC 路由、複雜的進程啟動與管理邏輯)
-  * [renderer.go](file:///Users/shuk/projects/tmp/pm2/tui/renderer.go)：`512` 行 (處理所有的 UI 渲染邏輯)
-  * [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go)：`510` 行 (單元測試代碼)
-  * [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：`359` 行 (Bubbletea 狀態維護與異步事件)
+  * [eco_test.go](../cmd/eco_test.go)：`988` 行
+  * [server.go](../daemon/server.go)：`670` 行 (包含了龐大的 RPC 路由、複雜的進程啟動與管理邏輯)
+  * [renderer.go](../tui/renderer.go)：`512` 行 (處理所有的 UI 渲染邏輯)
+  * [server_test.go](../daemon/server_test.go)：`510` 行 (單元測試代碼)
+  * [model.go](../tui/model.go)：`359` 行 (Bubbletea 狀態維護與異步事件)
 
 * 改動熱點分析 (Change Hotspots)
   在過去 12 個月的提交歷史中，改動頻率最高的檔案為：
-  * [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：改動 `16` 次
-  * [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：改動 `14` 次
-  * [start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)：改動 `12` 次
-  * [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go)：改動 `9` 次
+  * [server.go](../daemon/server.go)：改動 `16` 次
+  * [model.go](../tui/model.go)：改動 `14` 次
+  * [start.go](../cmd/start.go)：改動 `12` 次
+  * [types.go](../process/types.go)：改動 `9` 次
 
 * 依賴與扇入扇出分析 (Dependency and Fan-in/out)
-  * [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go) 擁有最高的扇入值 (Fan-in)，作為核心數據模型，被 `cmd`, `tui`, `daemon`, `config` 共同引入。
+  * [types.go](../process/types.go) 擁有最高的扇入值 (Fan-in)，作為核心數據模型，被 `cmd`, `tui`, `daemon`, `config` 共同引入。
   * `daemon` 被 `cmd` 與 `tui` 直接引用，形成了高層對底層的多重雙向相依。
 
-根據量測結果，複雜度重構應首要聚焦於「高頻改動 × 巨型檔案」的交集：[server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 的拆分與解耦。
+根據量測結果，複雜度重構應首要聚焦於「高頻改動 × 巨型檔案」的交集：[server.go](../daemon/server.go) 的拆分與解耦。
 
 ## 3. 架構簡化與解耦設計 (Simplification & Decoupling Design)
 

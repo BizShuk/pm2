@@ -1487,5 +1487,109 @@ func TestCronNamespaceIsolation(t *testing.T) {
 	}
 }
 
+// TestPauseResumeCronTask verifies the pause/resume lifecycle for a cron
+// task: pause removes the scheduler entry and flips the status to
+// StatusPaused (distinct from the idle StatusStopped a cron task normally
+// carries), and resume re-registers the schedule and returns it to idle.
+func TestPauseResumeCronTask(t *testing.T) {
+	testDir := testDir(t)
+	s := NewServer(testDir)
+
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace: "default",
+			Name:      "nightly",
+			Script:    "/bin/echo",
+			Args:      []string{"hi"},
+			Cron:      "@every 1h", // cron task: idle between fires
+		},
+	}
+	if _, err := s.startApp(req); err != nil {
+		t.Fatalf("startApp: %v", err)
+	}
+
+	// A cron task boots idle (StatusStopped) with its schedule registered.
+	mp := s.processes["default:nightly"]
+	if mp.Info.Status != process.StatusStopped {
+		t.Fatalf("after start: status=%s, want stopped", mp.Info.Status)
+	}
+	if got := s.scheduler.EntryCount(); got != 1 {
+		t.Fatalf("after start: scheduler has %d entries, want 1", got)
+	}
+
+	// Pause: schedule removed, status becomes paused.
+	if err := s.pauseByName("default:nightly"); err != nil {
+		t.Fatalf("pauseByName: %v", err)
+	}
+	mp = s.processes["default:nightly"]
+	if mp.Info.Status != process.StatusPaused {
+		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
+	}
+	if !mp.paused {
+		t.Errorf("after pause: paused flag not set")
+	}
+	if got := s.scheduler.EntryCount(); got != 0 {
+		t.Errorf("after pause: scheduler has %d entries, want 0 (must not fire)", got)
+	}
+
+	// Resume: schedule re-registered, status back to idle stopped.
+	if err := s.resumeByName("default:nightly"); err != nil {
+		t.Fatalf("resumeByName: %v", err)
+	}
+	mp = s.processes["default:nightly"]
+	if mp.Info.Status != process.StatusStopped {
+		t.Errorf("after resume: status=%s, want stopped (idle)", mp.Info.Status)
+	}
+	if mp.paused {
+		t.Errorf("after resume: paused flag still set")
+	}
+	if got := s.scheduler.EntryCount(); got != 1 {
+		t.Errorf("after resume: scheduler has %d entries, want 1 (re-registered)", got)
+	}
+}
+
+// TestPauseResumeRunningProcess verifies pause stops a live process (PID
+// cleared, status paused) and resume brings it back online.
+func TestPauseResumeRunningProcess(t *testing.T) {
+	testDir := testDir(t)
+	s := NewServer(testDir)
+
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace: "default",
+			Name:      "worker",
+			Script:    "/bin/sh",
+			Args:      []string{"-c", "sleep 60"},
+			Instances: 1,
+		},
+	}
+	if _, err := s.startApp(req); err != nil {
+		t.Fatalf("startApp: %v", err)
+	}
+	defer s.stopByName("default:worker")
+
+	if err := s.pauseByName("default:worker"); err != nil {
+		t.Fatalf("pauseByName: %v", err)
+	}
+	mp := s.processes["default:worker"]
+	if mp.Info.Status != process.StatusPaused {
+		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
+	}
+	if mp.Info.PID != 0 {
+		t.Errorf("after pause: PID=%d, want 0", mp.Info.PID)
+	}
+
+	if err := s.resumeByName("default:worker"); err != nil {
+		t.Fatalf("resumeByName: %v", err)
+	}
+	mp = s.processes["default:worker"]
+	if mp.Info.Status != process.StatusOnline {
+		t.Errorf("after resume: status=%s, want online", mp.Info.Status)
+	}
+	if mp.Info.PID == 0 {
+		t.Errorf("after resume: PID=0, want a live pid")
+	}
+}
+
 
 

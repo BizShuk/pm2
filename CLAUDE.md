@@ -38,7 +38,7 @@ pm2/
 ├── cmd/                      cobra commands (CLI layer)
 │   ├── root.go               pm2Home, socketPath(), Execute()
 │   ├── start.go              pm2 start  — builds AppStartReq, sends to daemon
-│   ├── stop.go               pm2 stop / restart / delete
+│   ├── stop.go               pm2 stop / restart / pause / resume / delete
 │   ├── monitor.go            pm2 monit (live process dashboard) / save / resurrect
 │   ├── logs.go               pm2 logs  — reads log files directly
 │   ├── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
@@ -101,6 +101,23 @@ This prevents deliberate `pm2 stop` from triggering the crash-restart loop.
 3. `stopProcess()` / `deleteByName()` call `scheduler.Remove(name)` explicitly.
 4. Net effect: cron entry is always tied to the currently running instance.
 
+### Pause / resume (cron suspension)
+
+`pm2 pause <target>` suspends a process: `pauseProcess()` reuses `stopProcess()`
+(which removes the scheduler entry and stops any running instance) then sets
+`ManagedProcess.paused = true` and `Status = StatusPaused`.
+
+The `paused` status is what distinguishes a deliberately-suspended cron task
+from one merely idle between fires — both a running-then-stopped process and an
+idle cron task otherwise sit at `StatusStopped`. A paused task has NO scheduler
+entry, so it will not fire until resumed.
+
+`pm2 resume <target>` re-launches via `launchProcess()` with `CronTriggered =
+false`, which re-registers the cron schedule and returns a cron task to idle
+`StatusStopped` (or a regular process to `StatusOnline`). Resume on a
+non-paused process is a no-op. The `paused` flag lives only in runtime state
+(not persisted to dump.json).
+
 ### Relative path resolution
 
 `config.Load()` resolves relative `script` paths relative to the config file's directory
@@ -117,7 +134,9 @@ No persistent connection — each CLI invocation is a fresh dial.
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
 `doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
-list updates without waiting for the next tick.
+list updates without waiting for the next tick. The `p` key is a pause/resume
+toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
+else `CmdPause`), so the same key suspends and reactivates a cron task.
 
 ## Dependencies
 

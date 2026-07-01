@@ -5,17 +5,17 @@
 我們對現有 `pm2` 專案進行了架構審查與技術債診斷，發現了以下關鍵的結構耦合與技術債問題：
 
 ### 1.1 傳輸協定與守護行程實作強耦合 (Protocol and Daemon Implementation Coupling)
-在當前設計中，RPC 傳輸協定定義 [protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go) 放置於 `daemon/` 目錄下。這導致命令列介面 CLI [cmd/](file:///Users/shuk/projects/tmp/pm2/cmd/) 與用戶介面 TUI [tui/](file:///Users/shuk/projects/tmp/pm2/tui/) 在調用 RPC 傳輸方法時，被迫導入整個 `daemon` 軟體包。這違反了 `單向依賴原則 (Single Dependency Principle)`，高層的展示層與命令控制層直接依賴了底層守護行程的核心實作（包含進程生命周期管理、文件監聽等）。
+在當前設計中，RPC 傳輸協定定義 [protocol.go](../daemon/protocol.go) 放置於 `daemon/` 目錄下。這導致命令列介面 CLI [cmd/](../cmd/) 與用戶介面 TUI [tui/](../tui/) 在調用 RPC 傳輸方法時，被迫導入整個 `daemon` 軟體包。這違反了 `單向依賴原則 (Single Dependency Principle)`，高層的展示層與命令控制層直接依賴了底層守護行程的核心實作（包含進程生命周期管理、文件監聽等）。
 
 ### 1.2 進程配置結構定義多重重複 (Redundant Application Configuration Structs)
 系統中存在三個結構高度相似的進程配置定義：
-- [ecosystem.go](file:///Users/shuk/projects/tmp/pm2/config/ecosystem.go#L15) 中的 `config.AppConfig`：用於解析生態文件。
-- [protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go#L36) 中的 `daemon.AppStartReq`：用於網路傳輸。
-- [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go#L47) 中的 `process.DumpEntry`：用於持久化存檔。
+- [ecosystem.go](../config/ecosystem.go#L15) 中的 `config.AppConfig`：用於解析生態文件。
+- [protocol.go](../daemon/protocol.go#L36) 中的 `daemon.AppStartReq`：用於網路傳輸。
+- [types.go](../process/types.go#L47) 中的 `process.DumpEntry`：用於持久化存檔。
 這三個結構體包含完全相同的屬性欄位，造成了維護上的冗餘。若未來要新增配置項目，必須同步在三處修改，極易遺漏。
 
 ### 1.3 進程狀態與鎖機制未封裝 (Unencapsulated Process State and Mutex Locks)
-在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 中，`Server` 結構體直接暴露了其成員 `processes` Map 變數。在核心的進程管理邏輯中，開發人員必須手動透過 `s.mu.Lock()` 與 `s.mu.Unlock()` 來維護併發安全。這種裸露的 Map 讀寫與手動鎖定極易因忘記釋放鎖而導致死鎖，或是因忘記加鎖而導致併發衝突。
+在 [server.go](../daemon/server.go) 中，`Server` 結構體直接暴露了其成員 `processes` Map 變數。在核心的進程管理邏輯中，開發人員必須手動透過 `s.mu.Lock()` 與 `s.mu.Unlock()` 來維護併發安全。這種裸露的 Map 讀寫與手動鎖定極易因忘記釋放鎖而導致死鎖，或是因忘記加鎖而導致併發衝突。
 
 ---
 
@@ -25,10 +25,10 @@
 
 ### 2.1 模組改動頻率分析 (Git Hotspots)
 根據 Git 提交紀錄分析，過去 12 個月改動最頻繁的 Go 檔案依序為：
-- [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)：改動 `16` 次 (核心控制邏輯，也是目前最龐大的檔案)。
-- [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)：改動 `14` 次 (TUI 行為邏輯)。
-- [start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)：改動 `12` 次 (CLI 啟動流程)。
-- [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go)：改動 `9` 次 (資料模型與結構定義)。
+- [server.go](../daemon/server.go)：改動 `16` 次 (核心控制邏輯，也是目前最龐大的檔案)。
+- [model.go](../tui/model.go)：改動 `14` 次 (TUI 行為邏輯)。
+- [start.go](../cmd/start.go)：改動 `12` 次 (CLI 啟動流程)。
+- [types.go](../process/types.go)：改動 `9` 次 (資料模型與結構定義)。
 
 ### 2.2 檔案行數分析 (Code Size & Complexity Hotspots)
 主要模組代碼行數分佈如下：
@@ -37,7 +37,7 @@
 - `tui/model.go`：`359` 行 (Bubbletea 行為處理)。
 - `config/ecosystem.go`：`181` 行 (生態配置加載)。
 
-為了降低複雜度，必須對 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 與其通訊協定進行解耦，將其職責分散到各自的專用模組中。
+為了降低複雜度，必須對 [server.go](../daemon/server.go) 與其通訊協定進行解耦，將其職責分散到各自的專用模組中。
 
 ---
 
@@ -116,7 +116,7 @@ type StateStore interface {
 我們採用 `絞殺榕模式 (Strangler-Fig)` 分布實施，確保每一步都可獨立編譯、測試並支持快速回滾：
 
 ### Phase 1：統一進程配置定義 (Unified Process Configuration)
-1. 在 [types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go) 中建立統一的 `AppConfig` 結構。
+1. 在 [types.go](../process/types.go) 中建立統一的 `AppConfig` 結構。
 2. 重構 `config.AppConfig` 與 `daemon.AppStartReq`，使其直接複用或替換為 `process.AppConfig`。
 3. 驗證命令：`go test -v ./config/...`
 

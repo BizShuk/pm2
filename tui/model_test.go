@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
 
@@ -275,5 +276,51 @@ func TestCroppingUTF8AndRunewidth(t *testing.T) {
 	res4 := cropRight("一二三四五", 6)
 	if res4 != "一二…" {
 		t.Errorf("Expected '一二…', got %q", res4)
+	}
+}
+
+// TestPauseOrResume verifies the `p` key toggle maps a paused process to
+// resume and every other status to pause.
+func TestPauseOrResume(t *testing.T) {
+	if got := pauseOrResume(process.StatusPaused); got != model.CmdResume {
+		t.Errorf("paused → %q, want %q", got, model.CmdResume)
+	}
+	for _, s := range []process.Status{
+		process.StatusOnline,
+		process.StatusStopped,
+		process.StatusErrored,
+		process.StatusLaunching,
+	} {
+		if got := pauseOrResume(s); got != model.CmdPause {
+			t.Errorf("%s → %q, want %q", s, got, model.CmdPause)
+		}
+	}
+}
+
+// TestActionNoticeSurfacesAndClears verifies a failed action's notice is
+// shown in the title bar and cleared on the next refresh tick — so a stale
+// daemon that rejects `pause`/`resume` is visible rather than silent.
+func TestActionNoticeSurfacesAndClears(t *testing.T) {
+	m := New("/tmp/x.sock", false)
+	m.width = 120
+
+	// Simulate the result of a rejected action (e.g. old daemon).
+	updated, _ := m.Update(actionMsg{
+		refreshMsg: refreshMsg{procs: nil},
+		notice:     "pause failed: unknown command: pause",
+	})
+	m = updated.(Model)
+	if m.notice == "" {
+		t.Fatal("notice not recorded on actionMsg")
+	}
+	if title := m.buildTitle(); !strings.Contains(title, "pause failed") {
+		t.Errorf("title bar did not show the action notice, got: %q", title)
+	}
+
+	// A subsequent tick clears the transient notice.
+	updated, _ = m.Update(tickMsg{})
+	m = updated.(Model)
+	if m.notice != "" {
+		t.Errorf("notice not cleared on tick, got %q", m.notice)
 	}
 }

@@ -112,7 +112,9 @@ func getColVal(p process.ProcessInfo, colName string) string {
 func (m Model) buildTitle() string {
 	name := lipgloss.NewStyle().Bold(true).Foreground(clText).Render("pm2 monit")
 	var info string
-	if m.err != nil {
+	if m.notice != "" {
+		info = lipgloss.NewStyle().Foreground(clErrored).Render("  ✗ " + m.notice)
+	} else if m.err != nil {
 		info = lipgloss.NewStyle().Foreground(clErrored).Render("  ✗ daemon unreachable")
 	} else if !m.updated.IsZero() {
 		info = lipgloss.NewStyle().Foreground(clMuted).Render(
@@ -290,7 +292,7 @@ func buildFooter(w int, sortBy SortField) string {
 	keys := [][2]string{
 		{"↑↓ / jk", "navigate"},
 		{"r", "restart"},
-		{"p", "pause"},
+		{"p", "pause/resume"},
 		{"d", "delete"},
 		{"s", "sort: " + string(sortBy)},
 		{"q", "quit"},

@@ -65,6 +65,14 @@ type logsMsg struct {
 	lines []string
 }
 
+// actionMsg carries the result of a user action (restart/pause/resume/
+// delete): the freshly refreshed process list plus an optional human
+// notice describing an action failure to surface in the title bar.
+type actionMsg struct {
+	refreshMsg
+	notice string
+}
+
 // ─── model ───────────────────────────────────────────────────────────────────
 
 type Model struct {
@@ -80,6 +88,7 @@ type Model struct {
 	hostCPU  float64
 	hostMem  float64
 	SortBy   SortField
+	notice   string // transient message from the last action (e.g. a failure)
 }
 
 func New(socket string, detail bool) Model {
@@ -110,28 +119,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 
 	case tickMsg:
+		m.notice = "" // clear a stale action notice on the next tick
 		return m, tea.Batch(
 			doRefresh(m.socket),
 			tea.Tick(refreshDur, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
 
+	case actionMsg:
+		m.notice = msg.notice
+		return m.applyRefresh(msg.refreshMsg)
+
 	case refreshMsg:
-		m.err = msg.err
-		if msg.err == nil {
-			var selectedID int = -1
-			if m.selected >= 0 && m.selected < len(m.procs) {
-				selectedID = m.procs[m.selected].ID
-			}
-			m.procs = msg.procs
-			m.sortProcs(selectedID)
-			m.updated = time.Now()
-			if m.selected >= len(m.procs) {
-				m.selected = max(0, len(m.procs)-1)
-			}
-			if len(m.procs) > 0 && m.Detail {
-				return m, readLogs(m.procs[m.selected].LogFile)
-			}
-		}
+		return m.applyRefresh(msg)
 
 	case logsMsg:
 		if len(m.procs) > 0 && m.selected >= 0 && m.selected < len(m.procs) {
@@ -157,6 +156,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	}
+	return m, nil
+}
+
+// applyRefresh folds a refreshMsg into the model: it records any daemon
+// error, replaces the process list while preserving the selected row,
+// and (in detail mode) re-reads the selected process's log tail. Shared
+// by the periodic refreshMsg and the post-action actionMsg.
+func (m Model) applyRefresh(msg refreshMsg) (tea.Model, tea.Cmd) {
+	m.err = msg.err
+	if msg.err == nil {
+		selectedID := -1
+		if m.selected >= 0 && m.selected < len(m.procs) {
+			selectedID = m.procs[m.selected].ID
+		}
+		m.procs = msg.procs
+		m.sortProcs(selectedID)
+		m.updated = time.Now()
+		if m.selected >= len(m.procs) {
+			m.selected = max(0, len(m.procs)-1)
+		}
+		if len(m.procs) > 0 && m.Detail {
+			return m, readLogs(m.procs[m.selected].LogFile)
+		}
 	}
 	return m, nil
 }
@@ -197,11 +220,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m, doAction(m.socket, model.Request{Command: model.CmdRestart, Name: targetID})
 	case "p":
-		return m, doAction(m.socket, model.Request{Command: model.CmdStop, Name: targetID})
+		// Toggle pause/resume on the selected process. Pausing a cron
+		// task suspends its schedule (status → paused) and stops any
+		// running instance; pressing again resumes it (a cron task
+		// returns to idle, a regular process comes back online). The
+		// selected status was set by the last refresh, and doAction
+		// refreshes immediately, so successive presses flip cleanly.
+		cmd := pauseOrResume(m.procs[m.selected].Status)
+		return m, doAction(m.socket, model.Request{Command: cmd, Name: targetID})
 	case "d":
 		return m, doAction(m.socket, model.Request{Command: model.CmdDelete, Name: targetID})
 	}
 	return m, nil
+}
+
+// pauseOrResume picks the RPC command for the `p` key toggle: a paused
+// process resumes, anything else pauses.
+func pauseOrResume(s process.Status) model.CommandType {
+	if s == process.StatusPaused {
+		return model.CmdResume
+	}
+	return model.CmdPause
 }
 
 func (m *Model) sortProcs(prevSelectedID ...int) {
@@ -322,10 +361,22 @@ func readLogs(path string) tea.Cmd {
 }
 
 // doAction sends an RPC then immediately re-fetches the process list.
+// The action's outcome is threaded back so the UI can report a failure
+// instead of silently swallowing it — e.g. a stale daemon that does not
+// recognise `pause`/`resume` replies "unknown command", which would
+// otherwise leave the status looking unchanged with no explanation.
 func doAction(socket string, req model.Request) tea.Cmd {
 	return func() tea.Msg {
-		_, _ = model.SendRequest(socket, req)
-		return doRefresh(socket)()
+		var notice string
+		resp, err := model.SendRequest(socket, req)
+		switch {
+		case err != nil:
+			notice = fmt.Sprintf("%s failed: %v", req.Command, err)
+		case resp != nil && !resp.OK:
+			notice = fmt.Sprintf("%s failed: %s", req.Command, resp.Error)
+		}
+		refresh := doRefresh(socket)().(refreshMsg)
+		return actionMsg{refreshMsg: refresh, notice: notice}
 	}
 }
 

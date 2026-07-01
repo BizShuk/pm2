@@ -3,13 +3,13 @@
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * `診斷一`：缺失的非互動式列表命令與文件不一致 (Missing Non-Interactive List Command and Documentation Inconsistency)
-  當前專案在 [root.go](file:///Users/shuk/projects/tmp/pm2/cmd/root.go#L41-L54) 中註冊了多個命令，卻缺少最核心的 `pm2 list`、`pm2 ls` 或 `pm2 status` 命令。目前用戶若想查看進程狀態，必須啟動基於 Bubbletea 的互動式終端使用者介面 (TUI) 儀表板 [monitor.go](file:///Users/shuk/projects/tmp/pm2/cmd/monitor.go#L20-L38)。這使得在腳本、自動化管線或簡單終端查詢時無法直接獲取狀態。然而，[CLAUDE.md](file:///Users/shuk/projects/tmp/pm2/CLAUDE.md#L129) 的依賴表中聲稱使用了 `tablewriter` 作為 `pm2 list` 的輸出，且 [README.md](file:///Users/shuk/projects/tmp/pm2/README.md#L253) 也提及了相關配置，這造成了代碼與文件的不一致。
+  當前專案在 [root.go](../cmd/root.go#L41-L54) 中註冊了多個命令，卻缺少最核心的 `pm2 list`、`pm2 ls` 或 `pm2 status` 命令。目前用戶若想查看進程狀態，必須啟動基於 Bubbletea 的互動式終端使用者介面 (TUI) 儀表板 [monitor.go](../cmd/monitor.go#L20-L38)。這使得在腳本、自動化管線或簡單終端查詢時無法直接獲取狀態。然而，[CLAUDE.md](../CLAUDE.md#L129) 的依賴表中聲稱使用了 `tablewriter` 作為 `pm2 list` 的輸出，且 [README.md](../README.md#L253) 也提及了相關配置，這造成了代碼與文件的不一致。
 
 * `診斷二`：命令列介面命令中遠端程序呼叫與自動啟動邏輯重複 (Redundant RPC and Auto-Start Logic in CLI Commands)
-  在 [start.go:L55-69](file:///Users/shuk/projects/tmp/pm2/cmd/start.go#L55-L69)、[stop.go:L16-28](file:///Users/shuk/projects/tmp/pm2/cmd/stop.go#L16-L28), [logs.go:L23-31](file:///Users/shuk/projects/tmp/pm2/cmd/logs.go#L23-L31) 以及 [monitor.go:L50-60](file:///Users/shuk/projects/tmp/pm2/cmd/monitor.go#L50-L60) 中，每個命令都手動重複編寫了呼叫 `model.SendRequest`、錯誤捕獲、嘗試以 `autoStartDaemon()` 自動啟動守護進程，以及響應狀態檢查的代碼。這違反了 `不要重複自己 (Don't Repeat Yourself, DRY)` 的原則，增加了維護成本。
+  在 [start.go:L55-69](../cmd/start.go#L55-L69)、[stop.go:L16-28](../cmd/stop.go#L16-L28), [logs.go:L23-31](../cmd/logs.go#L23-L31) 以及 [monitor.go:L50-60](../cmd/monitor.go#L50-L60) 中，每個命令都手動重複編寫了呼叫 `model.SendRequest`、錯誤捕獲、嘗試以 `autoStartDaemon()` 自動啟動守護進程，以及響應狀態檢查的代碼。這違反了 `不要重複自己 (Don't Repeat Yourself, DRY)` 的原則，增加了維護成本。
 
 * `診斷三`：平台特定的 macOS 主機指標採集缺陷 (Incompatible macOS-Specific Host Metrics Collection)
-  在 [metrics.go:L32-70](file:///Users/shuk/projects/tmp/pm2/tui/metrics.go#L32-L70) 中，`collectHostMetrics` 函數直接執行了 `top -l 1 -n 0` 命令行指令，並以 macOS 特有的字串模式（如 `CPU usage:` 與 `PhysMem:`）解析 CPU 和記憶體佔用率。在 Linux 環境下執行該命令會直接報錯，進而使系統狀態展示回落至硬編碼的靜態值（`5.2` 與 `64.1`），缺乏跨平台的適應能力與模組解耦。
+  在 [metrics.go:L32-70](../tui/metrics.go#L32-L70) 中，`collectHostMetrics` 函數直接執行了 `top -l 1 -n 0` 命令行指令，並以 macOS 特有的字串模式（如 `CPU usage:` 與 `PhysMem:`）解析 CPU 和記憶體佔用率。在 Linux 環境下執行該命令會直接報錯，進而使系統狀態展示回落至硬編碼的靜態值（`5.2` 與 `64.1`），缺乏跨平台的適應能力與模組解耦。
 
 ---
 
