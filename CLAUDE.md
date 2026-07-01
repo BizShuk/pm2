@@ -57,13 +57,16 @@ pm2/
 ├── daemon/
 │   ├── server.go             Server — Listen(), startApp(), watchProcess() goroutine,
 │   │                         stopProcess() (sets stopping=true), cron.Scheduler integration
+│   ├── process_registry.go   ProcessRegistry — sole owner of the process map
+│   │                         and its RWMutex (Add/Get/Remove/UpdateInfo/...)
 │   ├── persistence.go        save() and resurrect() implementations
 │   ├── metrics.go            StartMetricsCollector() and getProcessMetrics()
 │   ├── builder.go            buildCommand() to assemble *exec.Cmd
 │   ├── manager.go            Server methods for stop/restart/delete/list processes
 │   ├── helpers.go            killAll() and other daemon helpers
 │   ├── watcher.go            watchFile() with fsnotify
-│   └── server_test.go        daemon server unit tests
+│   ├── server_test.go        daemon server unit tests
+│   └── process_registry_test.go  ProcessRegistry unit + concurrency tests
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
@@ -162,11 +165,25 @@ else `CmdPause`), so the same key suspends and reactivates a cron task.
 
 ## Conventions
 
-- All process state is owned by `daemon.Server` behind `sync.RWMutex`.
-- `s.mu.Lock()` is acquired, `stopping` / status updated, then released before
-  calling `stopProcess()` — never hold the lock across a blocking call.
-- `watchProcess()` goroutine is the only place that transitions a process from
-  `online` → `errored` or `stopped`. Never update status elsewhere.
+- All process state is owned by `daemon.ProcessRegistry` (defined in
+  `daemon/process_registry.go`). `daemon.Server` holds a `*ProcessRegistry` and delegates
+  lock primitives via `s.Lock()`/`s.Unlock()`/`s.RLock()`/`s.RUnlock()` for
+  the rare callers that need to hold the registry's lock across multiple
+  method calls.
+- Always prefer the high-level `ProcessRegistry` methods (`Get`/`Add`/
+  `Remove`/`UpdateInfo`/`UpdateMetrics`/`UpdateCronStatus`/`Snapshot`/
+  `SnapshotMap`/`SnapshotAppConfigs`/`FindByTarget`/`Len`) over the lock
+  escape hatches. The escape hatches are reserved for code that genuinely
+  needs cross-method atomicity (e.g. `launchProcess` doing lookup + ID
+  increment + map write as one critical section).
+- For atomic field mutations on a single `*ManagedProcess`, use
+  `s.reg.UpdateInfo(key, func(mp *ManagedProcess) { ... })` — never mutate
+  `mp.Info` fields directly from outside the registry. Direct mutation
+  races with `watchProcess`'s own `UpdateInfo` calls and trips the race
+  detector (this is what `TestSaveConcurrentWithMapMutation` was originally
+  designed to catch).
+- `watchProcess()` goroutine is the only place that transitions a process
+  from `online` → `errored` or `stopped`. Never update status elsewhere.
 - Log file paths are resolved once at launch time and stored in `ProcessInfo`.
   Do not re-derive them from name at read time.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.

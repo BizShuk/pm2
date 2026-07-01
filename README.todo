@@ -15,7 +15,6 @@
     - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
     - 做法：新增 `cmd/list.go` 表格渲染、將 RPC 連線邏輯收攏至 `cmd/client.go` 的 `CLIClient`，並將 `tui/metrics.go` 解耦為具備多平台實現的 `HostMetricsCollector`。
 
-
 ## 核心缺陷修復 (Critical Bug Fixes)
 
 > 來源 `plans/architecture-pm2-modularization.md` 與 `plans/architecture-pm2-reorganization.md` 第 1 節診斷。皆已對照當前程式碼確認 `仍未修復`，優先級高於下方結構重整。
@@ -53,7 +52,7 @@
 
 ## 守護進程解耦重構 (Daemon Decoupling Refactor)
 
-> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、[docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)（原 `plans/architecture-daemon-decoupling-phase2.md`，已完成移轉）、[plans/architecture-daemon-decoupling-phase3.md](./plans/architecture-daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 仍為扁平結構，尚無 `daemon/manager/`、`daemon/executor/`、`daemon/network/`、`tui/views/`。
+> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、[docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)（原 `plans/architecture-daemon-decoupling-phase2.md`）、[docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md)（原 `plans/architecture-extract-registry.md`）、[docs/specs/daemon-decoupling-phase3.md](./docs/specs/daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 已內含 `state.go::ProcessRegistry`（扁平結構），尚無 `daemon/executor/`、`daemon/network/`、`tui/views/`、`config/wizard/`。
 
 - [x] `第一階段：補強特徵測試 (Characterization tests)`
     - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
@@ -90,10 +89,10 @@
         - `tui/model.go` 完全切換到 `model` 套件
         - 驗證：`go list -deps ./tui/... | grep -c pm2/daemon` = 0（TUI 已完全不再依賴 daemon 套件）；`go test -race ./...` 全綠；`go test -count=1 -race ./model/... ./cmd/... ./tui/... ./daemon/...` 全部 PASS
 
-- [ ] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 來源 [plans/architecture-extract-registry.md](./plans/architecture-extract-registry.md)
-    - 將 `s.processes` 與其鎖操作封裝至 `daemon/manager/state.go`，提供 `Add()`/`Get()`/`Remove()`/`List()` 等線程安全方法，收斂手動解鎖風險。
-    - 驗證：`go test -race ./daemon/...`。
-
+- [x] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 規格 [docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md)
+      將 `s.processes` 與其鎖操作封裝至 `ProcessRegistry` 結構，提供 `Add()`/`Get()`/`Remove()`/`List()`/`FindByTarget()`/`Snapshot()`/`UpdateInfo()`/`UpdateMetrics()`/`UpdateCronStatus()` 等線程安全方法，收斂手動解鎖風險。
+      驗證：`go test -race ./daemon/...`。
+      結果（2026-07-02）：`daemon.Server` 的 `mu sync.RWMutex` 與 `processes map[string]*ManagedProcess` 兩個直接欄位完全移除，改為單一 `reg *ProcessRegistry` 委派；`Server` 暴露 `Lock/Unlock/RLock/RUnlock` 委派方法（escape hatch）給少數需要跨多次呼叫持鎖的場景。`daemon/manager.go`（listAll/findProcesses/deleteByName）、`daemon/persistence.go`（save）、`daemon/metrics.go`（refreshMetrics phase 1+3）、`daemon/server.go` 5 個函數（startApp/launchProcess/watchProcess/stopProcess/triggerCron + pauseByName/resumeByName）全部改用 Registry 方法。`daemon/server_test.go` 88 處機械式更新（46 處 `s.mu.X()` → `s.X()`、42 處 `s.processes[k]` → `s.reg.Get/Add/Remove`）。**位置偏離計畫**：原計畫將 Registry 放在 `daemon/manager/state.go` 子包，但 Go 不允許子包 import 父包同時父包 import 子包的循環依賴，因此 `ProcessRegistry` 改放在 `daemon/state.go`（同包內，無循環問題），其他 API 與計畫書完全一致。新增 `daemon/state_test.go`：12 個單元測試（TestRegistryBasicCRUD / AddReplacesExisting / SnapshotIsIndependent / FindByTarget / UpdateInfo / UpdateMetricsPIDCheck / UpdateCronStatus / ConcurrentReadWrite / EscapeHatchLocks 等）含 50 goroutine × 200 iter 的並發讀寫壓測，全部穩定通過。`go test -race -count=2 ./...` 全綠；`daemon` 套件 33 個測試 count=3 穩定。
 
 - [ ] `第四階段：抽離進程執行器 (Extract executor)` — 來源 [plans/architecture-extract-executor.md](./plans/architecture-extract-executor.md)
     - 將 `launchProcess`/`watchProcess`/`stopProcess` 及 `builder.go`/`watcher.go`/`metrics.go` 遷至 `daemon/executor/`，封裝單一進程生命週期與進程組信號。

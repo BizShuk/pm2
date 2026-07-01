@@ -54,7 +54,7 @@
 ```mermaid
 flowchart TD
     Server["守護進程伺服器 (daemon.Server)"] -->|"接收 RPC 請求"| Manager["進程協調管理器 (daemon/manager.go)"]
-    Manager -->|"使用 (持有鎖)"| Registry["進程狀態註冊表 (daemon/manager/state.go)"]
+    Manager -->|"使用 (持有鎖)"| Registry["進程狀態註冊表 (daemon/process_registry.go)"]
     Manager -->|"調用 (解鎖狀態)"| Executor["進程生命週期執行器 (daemon/executor/executor.go)"]
     Executor -->|"組裝命令"| Builder["命令建構器 (daemon/executor/builder.go)"]
     Executor -->|"監聽檔案變更"| Watcher["檔案監聽器 (daemon/executor/watcher.go)"]

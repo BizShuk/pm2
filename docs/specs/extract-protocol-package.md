@@ -59,7 +59,7 @@
 ```mermaid
 flowchart TD
     Socket["網路監聽層 (daemon/server.go)"] -->|"分發請求"| Mgr["管理控制層 (daemon/manager.go)"]
-    Mgr -->|"查詢/儲存狀態"| Registry["進程註冊表 (daemon/manager/state.go)"]
+    Mgr -->|"查詢/儲存狀態"| Registry["進程註冊表 (daemon/process_registry.go)"]
     Mgr -->|"控制運行"| Executor["行程執行器 (daemon/executor/)"]
     Executor -->|"註冊排程"| Cron["排程包 (cron/)"]
     Executor -->|"取得系統指標"| Metrics["指標收集器 (daemon/executor/metrics.go)"]
@@ -91,7 +91,7 @@ pm2/
 
 | 舊檔案路徑 | 新模組路徑 | 調整要點 |
 | :--- | :--- | :--- |
-| `daemon/server.go` (processes map) | `daemon/manager/state.go` | 將 `s.processes` 與 `sync.RWMutex` 封裝為 `ProcessRegistry` |
+| `daemon/server.go` (processes map) | `daemon/process_registry.go` | 將 `s.processes` 與 `sync.RWMutex` 封裝為 `ProcessRegistry` |
 | `daemon/server.go` (launch/watch/stop) | `daemon/executor/executor.go` | 封裝進程組生命週期操作，收斂作業系統調用 |
 | `daemon/builder.go` | `daemon/executor/builder.go` | 保持既有邏輯，僅變更 package 名稱 |
 | `daemon/watcher.go` | `daemon/executor/watcher.go` | 保持既有邏輯，僅變更 package 名稱 |
@@ -128,7 +128,7 @@ type TaskScheduler interface {
 - `驗證命令`：`go test -race -v ./cron/... ./daemon/...`
 
 ### Phase 2：封裝狀態註冊表 (Encapsulate Registry)
-- `步驟 1`：建立 `daemon/manager/state.go`，實作執行期線程安全的 `ProcessRegistry`，提供 `Add`, `Get`, `Remove`, `List` 操作。
+- `步驟 1`：建立 `daemon/process_registry.go`，實作執行期線程安全的 `ProcessRegistry`，提供 `Add`, `Get`, `Remove`, `List` 操作。
 - `步驟 2`：修改 `Server`，將內部的裸露 map 變數替換為 `ProcessRegistry`。
 - `驗證命令`：`go test -race -v ./daemon/...`
 

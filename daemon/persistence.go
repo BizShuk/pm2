@@ -12,8 +12,8 @@ import (
 )
 
 // save serialises the in-memory process map to <homeDir>/dump.json.
-// The RLock is taken internally so callers do not need to lock — this
-// matches listAll / findProcesses and prevents the "concurrent map
+// The RLock is taken inside ProcessRegistry.SnapshotAppConfigs so
+// callers do not need to lock — this prevents the "concurrent map
 // iteration and map write" fatal when startAutoSave (background tick)
 // and CmdSave (RPC) race against launchProcess / stopProcess.
 //
@@ -26,12 +26,7 @@ import (
 // runtime fields: ID, PID, Status, Restarts, StartedAt, CPU, Memory,
 // User, LastCronAt, LastCronStatus).
 func (s *Server) save() error {
-	s.mu.RLock()
-	entries := make([]process.AppConfig, 0, len(s.processes))
-	for _, mp := range s.processes {
-		entries = append(entries, mp.Info.AppConfig)
-	}
-	s.mu.RUnlock()
+	entries := s.reg.SnapshotAppConfigs()
 
 	dumpPath := filepath.Join(s.homeDir, "dump.json")
 	data, err := json.MarshalIndent(entries, "", "  ")

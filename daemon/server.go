@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -26,8 +25,7 @@ import (
 
 // Server is the PM2 daemon
 type Server struct {
-	mu           sync.RWMutex
-	processes    map[string]*ManagedProcess
+	reg          *ProcessRegistry
 	nextID       int
 	homeDir      string
 	scheduler    *cron.Scheduler
@@ -44,10 +42,26 @@ type ManagedProcess struct {
 	Watcher  *fsnotify.Watcher
 }
 
+// Lock / Unlock / RLock / RUnlock are escape-hatch delegates to the
+// ProcessRegistry's internal RWMutex. They exist so that legacy
+// call-sites (and a few internal hot paths) that need to hold the
+// registry's lock across more than one operation can do so without
+// re-implementing locking. They are NOT a substitute for the high-level
+// methods on ProcessRegistry — always prefer Get/Add/UpdateInfo for
+// one-shot operations.
+//
+// IMPORTANT: do not call any ProcessRegistry method while holding these
+// locks; sync.RWMutex does not support recursive Lock and recursive
+// RLock only works in the no-pending-writer case.
+func (s *Server) Lock()    { s.reg.Lock() }
+func (s *Server) Unlock()  { s.reg.Unlock() }
+func (s *Server) RLock()   { s.reg.RLock() }
+func (s *Server) RUnlock() { s.reg.RUnlock() }
+
 func NewServer(homeDir string) *Server {
 	return &Server{
-		processes:    make(map[string]*ManagedProcess),
-		homeDir:      homeDir,
+		reg:       NewProcessRegistry(),
+		homeDir:   homeDir,
 		scheduler:    cron.New(),
 		RestartDelay: 30 * time.Second,
 	}
@@ -233,44 +247,19 @@ func (s *Server) startApp(req *model.AppStartReq) ([]process.ProcessInfo, error)
 			name = fmt.Sprintf("%s-%d", req.Name, i)
 		}
 
-		s.mu.Lock()
-		key := ns + ":" + name
-		var existing *ManagedProcess
-		var ok bool
-		if existing, ok = s.processes[key]; ok {
+		// ProcessRegistry.LookupExistingForLaunch takes the read lock
+		// internally and returns both the matching mp and its current
+		// map key (the latter needed by launchProcess for cleanup when
+		// the old entry was stored under a different namespace).
+		existing, _, ok := s.reg.LookupExistingForLaunch(ns, name, req.ConfigFile)
+		if ok {
 			if existing.Info.Script != req.Script {
-				s.mu.Unlock()
 				return infos, fmt.Errorf(
 					"process %q already exists with script %q; use 'pm2 delete %s' first or use a different name",
 					name, existing.Info.Script, name,
 				)
 			}
-			s.mu.Unlock()
 			_ = s.stopProcess(existing)
-		} else {
-			if req.ConfigFile != "" {
-				for _, mp := range s.processes {
-					if mp.Info.Name == name && mp.Info.ConfigFile == req.ConfigFile {
-						existing = mp
-						break
-					}
-				}
-				if existing != nil {
-					if existing.Info.Script != req.Script {
-						s.mu.Unlock()
-						return infos, fmt.Errorf(
-							"process %q already exists with script %q; use 'pm2 delete %s' first or use a different name",
-							name, existing.Info.Script, name,
-						)
-					}
-					s.mu.Unlock()
-					_ = s.stopProcess(existing)
-				} else {
-					s.mu.Unlock()
-				}
-			} else {
-				s.mu.Unlock()
-			}
 		}
 
 		info, err := s.launchProcess(name, req)
@@ -403,22 +392,17 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 		version = getAppVersion(req.Script)
 	}
 
-	s.mu.Lock()
+	// Lock the registry's write lock so the lookup + ID assignment +
+	// map write happen as one atomic operation. This matches the
+	// original s.mu.Lock() ... s.mu.Unlock() semantics exactly;
+	// ProcessRegistry is now where the lock actually lives.
+	s.Lock()
+	defer s.Unlock()
+
 	var id int
 	var lastCronAt time.Time
 	var lastCronStatus string
-	var oldKey string
-	existing, ok := s.processes[ns+":"+name]
-	if !ok && req.ConfigFile != "" {
-		for k, mp := range s.processes {
-			if mp.Info.Name == name && mp.Info.ConfigFile == req.ConfigFile {
-				existing = mp
-				ok = true
-				oldKey = k
-				break
-			}
-		}
-	}
+	existing, oldKey, ok := s.reg.findExistingForLaunchUnderLock(ns, name, req.ConfigFile)
 
 	var restarts int
 	if ok {
@@ -476,11 +460,10 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 		done:    make(chan struct{}),
 		Watcher: watcher,
 	}
-	s.processes[ns+":"+name] = mp
+	s.reg.processes[ns+":"+name] = mp
 	if oldKey != "" && oldKey != ns+":"+name {
-		delete(s.processes, oldKey)
+		delete(s.reg.processes, oldKey)
 	}
-	s.mu.Unlock()
 
 	if !isCronTask {
 		// Watch for process exit in background
@@ -497,16 +480,11 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 			restartErr := s.restartByName(cronKey)
 			// Write last-run info onto the newly launched process
 			// (map was replaced by restartByName).
-			s.mu.Lock()
-			if p, ok := s.processes[cronKey]; ok {
-				p.Info.LastCronAt = firedAt
-				if restartErr != nil {
-					p.Info.LastCronStatus = "failed"
-				} else {
-					p.Info.LastCronStatus = "ok"
-				}
+			cronStatus := "ok"
+			if restartErr != nil {
+				cronStatus = "failed"
 			}
-			s.mu.Unlock()
+			s.reg.UpdateCronStatus(cronKey, firedAt, cronStatus)
 		}); err != nil {
 			slog.Info("cron_restart parse error", "name", cronKey, "err", err)
 		}
@@ -521,14 +499,11 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 		}
 	}
 
-	// Hand back a snapshot of ProcessInfo under the read lock. Without
-	// this RLock the struct copy races with watchProcess's Lock-guarded
-	// field writes (mp.Info.PID / Status / Restarts), which the race
-	// detector flags whenever a spawned process exits before launchProcess
-	// returns — i.e. almost always.
-	s.mu.RLock()
+	// Hand back a snapshot of ProcessInfo. We're still inside the write
+	// lock from the launchProcess critical section above, so this copy
+	// is race-free against watchProcess's UpdateInfo writes to mp.Info
+	// fields (PID / Status / Restarts).
 	info := mp.Info
-	s.mu.RUnlock()
 	return info, nil
 }
 
@@ -538,31 +513,38 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 	errF.Close()
 	close(mp.done)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	key := mp.Info.Namespace + ":" + mp.Info.Name
+	shouldRestart := false
+	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+		mp.Info.PID = 0
+		if err != nil {
+			mp.Info.Status = process.StatusErrored
+		} else {
+			mp.Info.Status = process.StatusStopped
+		}
 
-	mp.Info.PID = 0
-	if err != nil {
-		mp.Info.Status = process.StatusErrored
-	} else {
-		mp.Info.Status = process.StatusStopped
-	}
+		// Auto-restart if within max restarts limit and not deliberately stopped
+		if !mp.stopping && mp.Info.Status == process.StatusErrored && mp.Info.Restarts < mp.Info.MaxRestarts {
+			mp.Info.Restarts++
+			mp.Info.Status = process.StatusLaunching
+			shouldRestart = true
+		}
+	})
 
-	// Auto-restart if within max restarts limit and not deliberately stopped
-	if !mp.stopping && mp.Info.Status == process.StatusErrored && mp.Info.Restarts < mp.Info.MaxRestarts {
-		mp.Info.Restarts++
-		mp.Info.Status = process.StatusLaunching
+	// Auto-restart: wait RestartDelay, then verify the same mp instance
+	// is still in the registry and not stopping, then re-launch.
+	if shouldRestart {
 		go func() {
 			time.Sleep(s.RestartDelay)
-			s.mu.Lock()
-			// Check if the process still exists in our map and is the same instance, and is not stopping
-			key := mp.Info.Namespace + ":" + mp.Info.Name
-			current, exists := s.processes[key]
-			if !exists || current != mp || mp.stopping {
-				s.mu.Unlock()
+
+			ok := s.reg.UpdateInfo(key, func(current *ManagedProcess) {
+				if current != mp || current.stopping {
+					shouldRestart = false
+				}
+			})
+			if !ok || !shouldRestart {
 				return
 			}
-			s.mu.Unlock()
 
 			req := &model.AppStartReq{
 				AppConfig: process.AppConfig{
@@ -587,15 +569,16 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 }
 
 func (s *Server) stopProcess(mp *ManagedProcess) error {
-	s.mu.Lock()
-	mp.stopping = true
-	mp.Info.Status = process.StatusStopping
-	s.mu.Unlock()
+	key := mp.Info.Namespace + ":" + mp.Info.Name
+	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+		mp.stopping = true
+		mp.Info.Status = process.StatusStopping
+	})
 
 	// Cancel cron before stopping. The scheduler keys entries by
 	// "namespace:name" (see launchProcess), so the Remove key must
 	// match — otherwise the cron entry leaks and fires on a dead mp.
-	s.scheduler.Remove(mp.Info.Namespace + ":" + mp.Info.Name)
+	s.scheduler.Remove(key)
 
 	if mp.Watcher != nil {
 		_ = mp.Watcher.Close()
@@ -635,10 +618,10 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 		}
 	}
 
-	s.mu.Lock()
-	mp.Info.Status = process.StatusStopped
-	mp.Info.PID = 0
-	s.mu.Unlock()
+	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+		mp.Info.Status = process.StatusStopped
+		mp.Info.PID = 0
+	})
 	return nil
 }
 
@@ -708,10 +691,11 @@ func (s *Server) pauseByName(name string) error {
 		// instance — leaving status at StatusStopped. We then upgrade
 		// that to StatusPaused and mark the process for resume.
 		_ = s.stopProcess(mp)
-		s.mu.Lock()
-		mp.paused = true
-		mp.Info.Status = process.StatusPaused
-		s.mu.Unlock()
+		key := mp.Info.Namespace + ":" + mp.Info.Name
+		s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+			mp.paused = true
+			mp.Info.Status = process.StatusPaused
+		})
 	}
 	return nil
 }
@@ -727,9 +711,11 @@ func (s *Server) resumeByName(name string) error {
 		return fmt.Errorf("process or namespace not found: %s", name)
 	}
 	for _, mp := range targets {
-		s.mu.RLock()
-		paused := mp.paused
-		s.mu.RUnlock()
+		key := mp.Info.Namespace + ":" + mp.Info.Name
+		paused := false
+		s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+			paused = mp.paused
+		})
 		if !paused {
 			continue
 		}
@@ -762,10 +748,8 @@ func (s *Server) resumeByName(name string) error {
 }
 
 func (s *Server) triggerCron(ns, name string, originalReq *model.AppStartReq) {
-	s.mu.Lock()
 	key := ns + ":" + name
-	mp, ok := s.processes[key]
-	s.mu.Unlock()
+	mp, ok := s.reg.Get(key)
 	if !ok {
 		return
 	}
@@ -778,14 +762,9 @@ func (s *Server) triggerCron(ns, name string, originalReq *model.AppStartReq) {
 	_ = s.stopProcess(mp)
 	_, err := s.launchProcess(name, &triggerReq)
 
-	s.mu.Lock()
-	if p, ok := s.processes[key]; ok {
-		p.Info.LastCronAt = firedAt
-		if err != nil {
-			p.Info.LastCronStatus = "failed"
-		} else {
-			p.Info.LastCronStatus = "ok"
-		}
+	cronStatus := "ok"
+	if err != nil {
+		cronStatus = "failed"
 	}
-	s.mu.Unlock()
+	s.reg.UpdateCronStatus(key, firedAt, cronStatus)
 }

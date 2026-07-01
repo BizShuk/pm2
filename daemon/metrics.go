@@ -78,17 +78,17 @@ const metricsWorkers = 8
 // was restarted during the slow phase would inherit the old PID's
 // stale CPU/Memory readings until the next 2 s tick.
 func (s *Server) refreshMetrics() {
-	// Phase 1 — snapshot under RLock.
-	s.mu.RLock()
-	targets := make([]metricsTarget, 0, len(s.processes))
-	for k, mp := range s.processes {
+	// Phase 1 — snapshot (key, pid, online) tuples for every managed
+	// process. ProcessRegistry.SnapshotMap takes the read lock internally.
+	snapshot := s.reg.SnapshotMap()
+	targets := make([]metricsTarget, 0, len(snapshot))
+	for k, mp := range snapshot {
 		targets = append(targets, metricsTarget{
 			key:    k,
 			pid:    mp.Info.PID,
 			online: mp.Info.PID > 0 && mp.Info.Status == process.StatusOnline,
 		})
 	}
-	s.mu.RUnlock()
 
 	// Phase 2 — collect metrics in parallel. NO lock held here; this
 	// is the slow path that previously starved every concurrent RPC.
@@ -122,24 +122,13 @@ func (s *Server) refreshMetrics() {
 		wg.Wait()
 	}
 
-	// Phase 3 — write back under Lock. A process may have been
-	// stopped/deleted between snapshot and write-back; a process may
-	// also have been restarted (new PID). Both cases skip the write.
-	s.mu.Lock()
+	// Phase 3 — write back. ProcessRegistry.UpdateMetrics holds the
+	// write lock internally and re-checks both the key and the PID
+	// before applying the sample — so a process that was stopped or
+	// restarted between snapshot and write-back is silently skipped.
 	for i, t := range targets {
-		mp, ok := s.processes[t.key]
-		if !ok || mp.Info.PID != t.pid {
-			continue
-		}
-		if t.online {
-			mp.Info.CPU = samples[i].cpu
-			mp.Info.Memory = samples[i].mem
-		} else {
-			mp.Info.CPU = 0
-			mp.Info.Memory = 0
-		}
+		s.reg.UpdateMetrics(t.key, t.pid, samples[i].cpu, samples[i].mem)
 	}
-	s.mu.Unlock()
 }
 
 // StartMetricsCollector spawns a goroutine that refreshes CPU/Mem on

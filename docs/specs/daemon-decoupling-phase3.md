@@ -54,7 +54,7 @@ flowchart TD
     CLI["命令列介面 (cmd/)"] -->|"UNIX socket RPC"| Network["網路監聽層 (daemon/server.go)"]
     TUI["用戶介面 (tui/)"] -->|"UNIX socket RPC"| Network
     Network -->|"呼叫"| Manager["進程協調管理器 (daemon/manager.go)"]
-    Manager -->|"讀寫狀態"| Registry["進程狀態註冊表 (daemon/manager/state.go)"]
+    Manager -->|"讀寫狀態"| Registry["進程狀態註冊表 (daemon/process_registry.go)"]
     Manager -->|"執行/監聽生命週期"| Executor["進程生命週期執行器 (daemon/executor/)"]
     Executor -->|"呼叫"| Watcher["檔案監聽器 (daemon/executor/watcher.go)"]
     Executor -->|"呼叫"| Metrics["指標收集器 (daemon/executor/metrics.go)"]
@@ -82,7 +82,7 @@ pm2/
 ```
 
 舊模組與新結構之遷移映射表 (Migration Map)：
-* `processes map` -> `daemon/manager/state.go` 的 `ProcessRegistry`
+* `processes map` -> `daemon/process_registry.go` 的 `ProcessRegistry`
 * `daemon/builder.go` -> `daemon/executor/builder.go`
 * `daemon/watcher.go` -> `daemon/executor/watcher.go`
 * `daemon/metrics.go` -> `daemon/executor/metrics.go`
@@ -110,7 +110,7 @@ pm2/
 本重構完全遵循絞殺榕模式 (Strangler-Fig Pattern)，將重構拆分為小步。每一步皆可獨立編譯、測試並支持快速回滾。
 
 ### 第一階段：建立並封裝狀態註冊表 (Encapsulate Registry)
-* 步驟 1：建立 `daemon/manager/state.go`，實作執行期線程安全的 `ProcessRegistry`，提供 `Add`, `Get`, `Remove`, `List` 操作。
+* 步驟 1：建立 `daemon/process_registry.go`，實作執行期線程安全的 `ProcessRegistry`，提供 `Add`, `Get`, `Remove`, `List` 操作。
 * 步驟 2：修改 `Server`，將內部的裸露 map 變數與 lock 替換為 `ProcessRegistry`。
 * 驗證命令：`go test -race -v ./daemon/...`
 

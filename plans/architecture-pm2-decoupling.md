@@ -77,7 +77,7 @@ pm2/
 * 原 `daemon/server.go`：
   * `Listen`, `handleConn` 遷移至 `daemon/network/listener.go` 與 `handler.go`。
   - `startApp`, `listAll`, `deleteByName` 遷移至 `daemon/manager/manager.go`。
-  - `processes` Map 及對其進行的鎖操作遷移至 `daemon/manager/state.go`。
+  - `processes` Map 及對其進行的鎖操作遷移至 `daemon/process_registry.go`。
   - `launchProcess`, `watchProcess`, `stopProcess` 遷移至 `daemon/executor/executor.go`。
 * 原 `daemon/persistence.go`：
   * 遷移至 `daemon/manager/persistence.go`。
@@ -119,7 +119,7 @@ pm2/
   - 行動：在 `daemon/server_test.go` 中，增加針對高並行啟動、進程異常終止、環境變數繼承與 `Cron` 重啟的測試案例。
 * `第二階段：分離進程註冊表 (Extract Process Registry)`
   * 目標：收斂鎖的範圍，消除手動解鎖的潛在風險。
-  - 行動：將 `processes` Map 移至 `daemon/manager/state.go`，並封裝為 `ProcessRegistry`，提供如 `Add()`, `Get()`, `Remove()`, `List()` 等線程安全方法，內部統一管理 `sync.RWMutex`。
+  - 行動：將 `processes` Map 移至 `daemon/process_registry.go`，並封裝為 `ProcessRegistry`，提供如 `Add()`, `Get()`, `Remove()`, `List()` 等線程安全方法，內部統一管理 `sync.RWMutex`。
 * `第三階段：抽離進程執行器 (Extract Process Executor)`
   * 目標：解耦作業系統層級的進程控制。
   - 行動：將 `launchProcess` 與 `watchProcess` 的邏輯轉移至 `daemon/executor`，實現單一進程的完整封裝。

@@ -105,7 +105,7 @@ pm2/
 * `daemon/protocol.go` -> `protocol/protocol.go`
 * `daemon/server.go` 的連線與 RPC 分發 -> `daemon/network/listener.go` 與 `handler.go`
 * `daemon/server.go` 的進程管理與狀態變更 -> `daemon/manager/manager.go`
-* `daemon/server.go` 的 processes 地圖及鎖操作 -> `daemon/manager/state.go`
+* `daemon/server.go` 的 processes 地圖及鎖操作 -> `daemon/process_registry.go`
 * `daemon/server.go` 的 launchProcess, watchProcess -> `daemon/executor/executor.go`
 * `daemon/persistence.go` -> `daemon/manager/persistence.go`
 * `daemon/metrics.go` -> `daemon/executor/metrics.go` (重新設計為非阻塞式，透過異步 Channel 將指標送回，更新進程狀態)
@@ -142,7 +142,7 @@ pm2/
 * 驗證：執行 `go test -v ./cmd/...` 與 `go test -v ./tui/...`，確保通訊協定與連接行為未發生改變。
 
 ### 第三階段：解決併發安全性缺陷與鎖競爭 (Concurrency & Lock Fixes)
-* 步驟 1：將 processes 封裝進 `daemon/manager/state.go`，提供線程安全的增刪改查介面。
+* 步驟 1：將 processes 封裝進 `daemon/process_registry.go`，提供線程安全的增刪改查介面。
 * 步驟 2：在 `save` 執行時，先調用 state 獲取安全的進程列表快照，避免在 iterating map 時被其他寫操作干擾。
 * 步驟 3：重構指標收集模組，將指標採集 `getProcessMetrics` 移到鎖外部執行（例如在獨立協程中同步採集後，再通過通道更新狀態），避免長時間鎖定 `s.mu` 造成 RPC 響應阻塞。
 * 驗證：運行 `go test -v ./daemon/...` 且通過並發競態測試 `go test -race -v ./daemon/...`。
