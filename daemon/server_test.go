@@ -47,6 +47,7 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 
 	// Bash expands $MARKER in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "envcheck",
 		Script:    "echo",
@@ -54,6 +55,7 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 		Instances: 1,
 		// Snapshot does NOT live in the daemon's os.Environ().
 		BaseEnv: append(os.Environ(), marker+"="+want),
+	},
 	}
 
 	if _, err := s.startApp(req); err != nil {
@@ -87,12 +89,14 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 
 	s := NewServer(testDir)
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "persistcheck",
 		Script:    "sleep",
 		Args:      []string{"30"},
 		Instances: 1,
 		BaseEnv:   snapshot,
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -143,16 +147,28 @@ func envHas(env []string, key, val string) bool {
 func TestFindProcesses(t *testing.T) {
 	s := NewServer(testDir(t))
 	s.processes["default:appA"] = &ManagedProcess{
-		Info: process.ProcessInfo{ID: 0, Name: "appA", Namespace: "default"},
+		Info: process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "appA", Namespace: "default"},
+		ID: 0,
+	},
 	}
 	s.processes["Infra:appB"] = &ManagedProcess{
-		Info: process.ProcessInfo{ID: 1, Name: "appB", Namespace: "Infra"},
+		Info: process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "appB", Namespace: "Infra"},
+		ID: 1,
+	},
 	}
 	s.processes["Infra:appC"] = &ManagedProcess{
-		Info: process.ProcessInfo{ID: 2, Name: "appC", Namespace: "Infra"},
+		Info: process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "appC", Namespace: "Infra"},
+		ID: 2,
+	},
 	}
 	s.processes["default:appB"] = &ManagedProcess{
-		Info: process.ProcessInfo{ID: 3, Name: "appB", Namespace: "default"},
+		Info: process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "appB", Namespace: "default"},
+		ID: 3,
+	},
 	}
 
 	// 1. 測試 ID 匹配
@@ -186,12 +202,14 @@ func TestWatchStateInheritance(t *testing.T) {
 
 	s.processes["default:watch-app"] = &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:        1,
-			Name:      "watch-app",
-			Namespace: "default",
-			Watch:     true,
-			Script:    "test.js",
-		},
+		AppConfig: process.AppConfig{
+		Name:      "watch-app",
+		Namespace: "default",
+		Watch:     true,
+		Script:    "test.js",
+	},
+				ID:        1,
+	},
 	}
 
 	err := s.save()
@@ -205,13 +223,13 @@ func TestWatchStateInheritance(t *testing.T) {
 		t.Fatalf("Failed to read dump file: %v", err)
 	}
 
-	var entries []process.DumpEntry
+	var entries []process.AppConfig
 	if err := json.Unmarshal(data, &entries); err != nil {
 		t.Fatalf("Failed to unmarshal dump entries: %v", err)
 	}
 
 	if len(entries) != 1 || !entries[0].Watch {
-		t.Errorf("DumpEntry did not preserve Watch attribute: %+v", entries)
+		t.Errorf("AppConfig did not preserve Watch attribute: %+v", entries)
 	}
 }
 
@@ -221,12 +239,14 @@ func TestVersionStateInheritance(t *testing.T) {
 
 	s.processes["default:version-app"] = &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:        1,
-			Name:      "version-app",
-			Namespace: "default",
-			Version:   "1.2.3",
-			Script:    "test.js",
-		},
+		AppConfig: process.AppConfig{
+		Name:      "version-app",
+		Namespace: "default",
+		Version:   "1.2.3",
+		Script:    "test.js",
+	},
+				ID:        1,
+	},
 	}
 
 	err := s.save()
@@ -240,13 +260,13 @@ func TestVersionStateInheritance(t *testing.T) {
 		t.Fatalf("Failed to read dump file: %v", err)
 	}
 
-	var entries []process.DumpEntry
+	var entries []process.AppConfig
 	if err := json.Unmarshal(data, &entries); err != nil {
 		t.Fatalf("Failed to unmarshal dump entries: %v", err)
 	}
 
 	if len(entries) != 1 || entries[0].Version != "1.2.3" {
-		t.Errorf("DumpEntry did not preserve Version attribute: %+v", entries)
+		t.Errorf("AppConfig did not preserve Version attribute: %+v", entries)
 	}
 }
 
@@ -261,6 +281,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 	outPath := filepath.Join(testDir, "pwd.out")
 	// Bash expands $PWD in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "pwdcheck",
 		Script:    "echo",
@@ -269,6 +290,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 		CWD:       workDir,
 		// Snapshot deliberately carries a stale PWD.
 		BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -295,12 +317,14 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 
 	for _, name := range []string{"a", "b", "c"} {
 		req := &model.AppStartReq{
-			Namespace: "default",
-			Name:      name,
-			Script:    "/bin/sh",
-			Args:      []string{"-c", "sleep 30"},
-			Instances: 1,
-		}
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      name,
+		Script:    "/bin/sh",
+		Args:      []string{"-c", "sleep 30"},
+		Instances: 1,
+	},
+	}
 		if _, err := s.startApp(req); err != nil {
 			t.Fatalf("startApp %s failed: %v", name, err)
 		}
@@ -344,21 +368,25 @@ func TestConfigFileReplacement(t *testing.T) {
 
 	s.processes["default:agentmemory"] = &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:         42,
-			Name:       "agentmemory",
-			Namespace:  "default",
-			Script:     scriptFile,
-			ConfigFile: "/path/to/ecosystem.config.js",
-		},
+		AppConfig: process.AppConfig{
+		Name:       "agentmemory",
+		Namespace:  "default",
+		Script:     scriptFile,
+		ConfigFile: "/path/to/ecosystem.config.js",
+	},
+				ID:         42,
+	},
 		done: make(chan struct{}),
 	}
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:  "Agent",
 		Name:       "agentmemory",
 		Script:     scriptFile,
 		ConfigFile: "/path/to/ecosystem.config.js",
 		Instances:  1,
+	},
 	}
 
 	_, err := s.startApp(req)
@@ -391,11 +419,13 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	s.RestartDelay = 500 * time.Millisecond
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:   "default",
 		Name:        "fail-app",
 		Script:      "/usr/bin/false",
 		MaxRestarts: 5,
 		Instances:   1,
+	},
 	}
 
 	_, err := s.startApp(req)
@@ -445,19 +475,23 @@ func TestRestartsInheritance(t *testing.T) {
 
 	s.processes["default:appA"] = &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:        1,
-			Name:      "appA",
-			Namespace: "default",
+		AppConfig: process.AppConfig{
+		Name:      "appA",
+		Namespace: "default",
+		Script:    "/bin/echo",
+	},
+				ID:        1,
 			Restarts:  5,
-			Script:    "/bin/echo",
-		},
+	},
 	}
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "appA",
 		Script:    "/bin/echo",
 		Instances: 1,
+	},
 	}
 
 	_, err := s.startApp(req)
@@ -499,6 +533,7 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 	s := NewServer(testDir)
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "homeexpandcheck",
 		Script:    "/bin/sh",
@@ -506,6 +541,7 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 		Instances: 1,
 		OutFile:   "~/test-home-expand-out.log",
 		ErrorFile: "~/test-home-expand-err.log",
+	},
 	}
 
 	pi, err := s.startApp(req)
@@ -585,12 +621,14 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 			} else {
 				s.processes[key] = &ManagedProcess{
 					Info: process.ProcessInfo{
-						ID:        n,
-						Namespace: "default",
-						Name:      name,
-						Script:    "sleep",
-						Version:   fmt.Sprintf("v%d", n),
-					},
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      name,
+		Script:    "sleep",
+		Version:   fmt.Sprintf("v%d", n),
+	},
+							ID:        n,
+	},
 				}
 			}
 			s.mu.Unlock()
@@ -636,7 +674,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dump: %v", err)
 	}
-	var entries []process.DumpEntry
+	var entries []process.AppConfig
 	if err := json.Unmarshal(data, &entries); err != nil {
 		t.Fatalf("unmarshal dump: %v", err)
 	}
@@ -688,12 +726,14 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 		key := fmt.Sprintf("default:metric-%d", i)
 		s.processes[key] = &ManagedProcess{
 			Info: process.ProcessInfo{
-				ID:        i,
-				Namespace: "default",
-				Name:      fmt.Sprintf("metric-%d", i),
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      fmt.Sprintf("metric-%d", i),
+	},
+					ID:        i,
 				PID:       10000 + i,
 				Status:    process.StatusOnline,
-			},
+	},
 		}
 	}
 
@@ -775,12 +815,14 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	const key = "default:lonely"
 	s.processes[key] = &ManagedProcess{
 		Info: process.ProcessInfo{
-			ID:        1,
-			Namespace: "default",
-			Name:      "lonely",
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      "lonely",
+	},
+				ID:        1,
 			PID:       1234,
 			Status:    process.StatusOnline,
-		},
+	},
 	}
 
 	s.refreshMetrics()
@@ -832,12 +874,14 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 		key := fmt.Sprintf("default:speed-%d", i)
 		s.processes[key] = &ManagedProcess{
 			Info: process.ProcessInfo{
-				ID:        i,
-				Namespace: "default",
-				Name:      fmt.Sprintf("speed-%d", i),
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      fmt.Sprintf("speed-%d", i),
+	},
+					ID:        i,
 				PID:       1000 + i,
 				Status:    process.StatusOnline,
-			},
+	},
 		}
 	}
 
@@ -913,12 +957,14 @@ func TestHighConcurrencyStartup(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			req := &model.AppStartReq{
-				Namespace: "default",
-				Name:      fmt.Sprintf("concurrent-%d", idx),
-				Script:    "/bin/sleep",
-				Args:      []string{"30"},
-				Instances: 1,
-			}
+		AppConfig: process.AppConfig{
+		Namespace: "default",
+		Name:      fmt.Sprintf("concurrent-%d", idx),
+		Script:    "/bin/sleep",
+		Args:      []string{"30"},
+		Instances: 1,
+	},
+	}
 			if _, err := s.startApp(req); err != nil {
 				errs <- fmt.Errorf("startApp[%d]: %w", idx, err)
 			}
@@ -977,11 +1023,13 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 	s.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "errored-norestart",
 		Script:    "false",
 		Instances: 1,
 		// MaxRestarts defaults to 0 → no auto-restart.
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1042,6 +1090,7 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 	s.RestartDelay = 200 * time.Millisecond
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:   "default",
 		Name:        "errored-autorestart",
 		// Bash script that sleeps 100 ms then exits 1. This gives a
@@ -1052,6 +1101,7 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 		Args:      []string{"0.1", "&&", "false"},
 		Instances: 1,
 		MaxRestarts: 5,
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1128,11 +1178,13 @@ func TestProcessCleanExit(t *testing.T) {
 	s.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:   "default",
 		Name:        "clean-exit",
 		Script:      "true",
 		Instances:   1,
 		MaxRestarts: 5, // even with budget, clean exit must NOT restart
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1206,6 +1258,7 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	s := NewServer(testDir)
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "cron-restart-app",
 		// Long-lived script so the test can observe the new PID
@@ -1215,6 +1268,7 @@ func TestCronRestartFiresReboot(t *testing.T) {
 		Args:        []string{"60"},
 		Instances:   1,
 		CronRestart: "@every 1s",
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1322,10 +1376,12 @@ func TestStopProcessKillsChildren(t *testing.T) {
 	}
 
 	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace: "default",
 		Name:      "orphan-test",
 		Script:    scriptPath,
 		Instances: 1,
+	},
 	}
 	if _, err := s.startApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
@@ -1391,11 +1447,13 @@ func TestCronNamespaceIsolation(t *testing.T) {
 	}
 
 	req1 := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:   "default",
 		Name:        "api",
 		Script:      "/bin/sleep",
 		Args:        []string{"60"},
 		CronRestart: "@every 1h", // long interval — we only check EntryCount
+	},
 	}
 	if _, err := s.startApp(req1); err != nil {
 		t.Fatalf("start default:api: %v", err)
@@ -1407,11 +1465,13 @@ func TestCronNamespaceIsolation(t *testing.T) {
 	}
 
 	req2 := &model.AppStartReq{
+		AppConfig: process.AppConfig{
 		Namespace:   "production",
 		Name:        "api",
 		Script:      "/bin/sleep",
 		Args:        []string{"60"},
 		CronRestart: "@every 1h",
+	},
 	}
 	if _, err := s.startApp(req2); err != nil {
 		t.Fatalf("start production:api: %v", err)

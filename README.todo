@@ -11,7 +11,7 @@
     - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
     - 備註：目前 daemon 已透過 `AppStartReq.BaseEnv`（CLI `os.Environ()` 快照）攜帶完整 `PATH`，此選項僅針對「daemon 由 launchd 直接拉起」的場景，屬補強性質。
 
-- [ ] `CLI 列表命令與跨平台指標採集 (CLI List Command & Cross-platform Metrics)` — 來源 [plans/architecture-cli-list-and-metrics.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-cli-list-and-metrics.md)
+- [ ] `CLI 列表命令與跨平台指標採集 (CLI List Command & Cross-platform Metrics)` — 來源 [plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
     - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
     - 做法：新增 `cmd/list.go` 表格渲染、將 RPC 連線邏輯收攏至 `cmd/client.go` 的 `CLIClient`，並將 `tui/metrics.go` 解耦為具備多平台實現的 `HostMetricsCollector`。
 
@@ -53,7 +53,7 @@
 
 ## 守護進程解耦重構 (Daemon Decoupling Refactor)
 
-> 來源 [plans/architecture-pm2-refactor.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、`plans/architecture-daemon-decoupling-phase2.md`、[plans/architecture-daemon-decoupling-phase3.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 仍為扁平結構，尚無 `protocol/`、`store/`、`tui/views/`。
+> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、`plans/architecture-daemon-decoupling-phase2.md`、[plans/architecture-daemon-decoupling-phase3.md](./plans/architecture-daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 仍為扁平結構，尚無 `protocol/`、`store/`、`tui/views/`。
 
 - [x] `第一階段：補強特徵測試 (Characterization tests)`
     - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
@@ -68,10 +68,12 @@
     - 測試本身的所有 `mp.Info.*` 欄位讀取都在 `s.mu.RLock` 範圍內，避免在 release-after-RUnlock 後裸讀欄位引發 race detector 誤判。
     - 驗證結果：`go test -race ./...` 全綠（cmd/config/daemon/tui 4 個 package 全部 stable），`-count=3` 壓測亦穩定通過。
 
-- [ ] `統一進程配置定義 (Unified Process Configuration)` — 來源 [plans/architecture-unified-config.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-unified-config.md)
+- [x] `統一進程配置定義 (Unified Process Configuration)` — 來源 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md)
       目標：於 `process/types.go` 建立統一的 `AppConfig` 結構，重構 `config.AppConfig` 與 `daemon.AppStartReq`，使其複用 `process.AppConfig`，消除重複定義。
-      做法：依照 [plans/architecture-unified-config.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq`、`DumpEntry` 與 `ProcessInfo` 的定義與映射程式碼。
+      做法：依照 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq`、`DumpEntry` 與 `ProcessInfo` 的定義與映射程式碼。
       驗證：`go test -race -v ./...`。
+      規格：[docs/specs/unified-config-refactor.md](./docs/specs/unified-config-refactor.md)
+      結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`process.DumpEntry` 標記 Deprecated，`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
 
 - [x] `第二階段：抽離 RPC 協定包 (Extract protocol package)`
     - 將 `daemon/protocol.go`（`Request`/`Response`/`SendRequest`）獨立為 `model/protocol.go`，讓 `cmd` 與 `tui` 不再導入整個 `daemon` 包。
@@ -88,7 +90,7 @@
         - `tui/model.go` 完全切換到 `model` 套件
         - 驗證：`go list -deps ./tui/... | grep -c pm2/daemon` = 0（TUI 已完全不再依賴 daemon 套件）；`go test -race ./...` 全綠；`go test -count=1 -race ./model/... ./cmd/... ./tui/... ./daemon/...` 全部 PASS
 
-- [ ] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 來源 [plans/architecture-extract-registry.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-extract-registry.md)
+- [ ] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 來源 [plans/architecture-extract-registry.md](./plans/architecture-extract-registry.md)
     - 將 `s.processes` 與其鎖操作封裝至 `daemon/manager/state.go`，提供 `Add()`/`Get()`/`Remove()`/`List()` 等線程安全方法，收斂手動解鎖風險。
     - 驗證：`go test -race ./daemon/...`。
 
@@ -103,13 +105,13 @@
     - 嚴守由外向內單向依賴，`executor`/`manager` 不得引用 `network`，防 `import cycle not allowed`。
     - 驗證：`go test -race ./...` + E2E 確認 CLI/TUI 行為與重構前一致。
 
-- [ ] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 來源 [plans/architecture-tui-decoupling.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-tui-decoupling.md)
+- [ ] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 來源 [plans/architecture-tui-decoupling.md](./plans/architecture-tui-decoupling.md)
     - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
     - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
 
 ## 生態配置精靈解耦 (Ecosystem Wizard Decoupling)
 
-- [ ] `生態配置精靈與渲染器抽離 (Extract Ecosystem Wizard and Renderer)` — 來源 [plans/architecture-wizard-decoupling.md](file:///Users/shuk/projects/tmp/pm2/plans/architecture-wizard-decoupling.md)
+- [ ] `生態配置精靈與渲染器抽離 (Extract Ecosystem Wizard and Renderer)` — 來源 [plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
     - 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
     - 驗證：`go test -race ./...` 與 `go build` 通過。
 

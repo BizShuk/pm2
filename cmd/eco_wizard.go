@@ -9,19 +9,19 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/process"
 )
 
 // defaultApp returns a single AppConfig pre-filled with safe defaults.
-func defaultApp() config.AppConfig {
-	a := config.AppConfig{
+func defaultApp() process.AppConfig {
+	a := process.AppConfig{
 		Script:    ecoDefaultScript,
 		Name:      ecoDefaultName,
 		Namespace: ecoDefaultNS,
 		Instances: 1,
 		Version:   ecoDefaultVersion,
 	}
-	a.Normalize()
+	a.Normalize("")
 	return a
 }
 
@@ -113,16 +113,16 @@ func promptEnvVars(rdr *bufio.Reader, out io.Writer) (map[string]string, error) 
 }
 
 // collectAnswers walks the per-app question block and loops on "add another app?".
-func collectAnswers(in io.Reader, out io.Writer) ([]config.AppConfig, error) {
+func collectAnswers(in io.Reader, out io.Writer) ([]process.AppConfig, error) {
 	rdr := bufio.NewReader(in)
-	var apps []config.AppConfig
+	var apps []process.AppConfig
 	for n := 1; n <= ecoMaxApps; n++ {
 		fmt.Fprintf(out, "\n=== App #%d ===\n", n)
 		app, err := askOneApp(rdr, out)
 		if err != nil {
 			return nil, err
 		}
-		app.Normalize()
+		app.Normalize("")
 		apps = append(apps, app)
 		fmt.Fprintf(out, "  -> app #%d: name=%s script=%s instances=%d namespace=%s watch=%t cron=%q\n",
 			n, app.Name, app.Script, app.Instances, app.Namespace, app.Watch, app.Cron)
@@ -142,8 +142,8 @@ func collectAnswers(in io.Reader, out io.Writer) ([]config.AppConfig, error) {
 }
 
 // askOneApp runs the per-app question block for a single AppConfig.
-func askOneApp(rdr *bufio.Reader, out io.Writer) (config.AppConfig, error) {
-	var app config.AppConfig
+func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
+	var app process.AppConfig
 
 	script, err := promptLine(rdr, out, "Script path", ecoDefaultScript)
 	if err != nil {

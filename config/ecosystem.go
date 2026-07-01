@@ -4,84 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/dop251/goja"
-)
 
-// AppConfig mirrors PM2's app entry in ecosystem.config.js
-type AppConfig struct {
-	Namespace   string            `json:"namespace"`    // Default: "default"
-	Name        string            `json:"name"`         // Default: script filename
-	Script      string            `json:"script"`       // Required
-	Args        []string          `json:"args"`         // Default: []
-	Instances   int               `json:"instances"`    // Default: 1
-	Env         map[string]string `json:"env"`          // Default: {}
-	CronRestart string            `json:"cron_restart"` // Default: ""
-	Cron        string            `json:"cron"`         // Default: ""
-	Watch       bool              `json:"watch"`        // Default: false
-	MaxRestarts int               `json:"max_restarts"` // Default: 15
-	Version     string            `json:"version"`      // Default: "-"
-	LogFile     string            `json:"log_file"`     // Default: "~/.pm2/logs/<name>-out.log"
-	OutFile     string            `json:"out_file"`     // Default: ""
-	ErrorFile   string            `json:"error_file"`   // Default: "~/.pm2/logs/<name>-err.log"
-	ConfigDir   string            `json:"config_dir"`   // Default: "~/.config/<name>/"
-	ConfigFile  string            `json:"config_file"`  // Default: "<cwd>/ecosystem.config.js"
-	CWD         string            `json:"cwd"`          // Working directory when the process is spawned
-}
+	"github.com/bizshuk/pm2/process"
+)
 
 // EcosystemConfig is the top-level config structure
 type EcosystemConfig struct {
-	Apps []AppConfig `json:"apps"`
-}
-
-// Normalize fills in defaults for an AppConfig
-func (a *AppConfig) Normalize() {
-	if a.Instances <= 0 {
-		a.Instances = 1
-	}
-	if a.MaxRestarts <= 0 {
-		a.MaxRestarts = 15
-	}
-	if a.Namespace == "" {
-		a.Namespace = "default"
-	}
-	if a.Name == "" && a.Script != "" {
-		base := filepath.Base(a.Script)
-		a.Name = strings.TrimSuffix(base, filepath.Ext(base))
-	}
-	if a.ConfigDir == "" {
-		if a.OutFile != "" {
-			a.ConfigDir = filepath.Dir(a.OutFile)
-		} else if a.LogFile != "" {
-			a.ConfigDir = filepath.Dir(a.LogFile)
-		} else if a.ErrorFile != "" {
-			a.ConfigDir = filepath.Dir(a.ErrorFile)
-		} else {
-			a.ConfigDir = "~/.config/" + a.Name
-		}
-	}
-	if a.ConfigDir != "" {
-		if a.LogFile == "" && a.OutFile == "" {
-			a.LogFile = filepath.Join(a.ConfigDir, "logs", "daemon.log")
-		}
-		if a.ErrorFile == "" {
-			a.ErrorFile = filepath.Join(a.ConfigDir, "logs", "daemon.err")
-		}
-	}
-	if a.LogFile == "" && a.OutFile != "" {
-		a.LogFile = a.OutFile
-	}
-	if a.ConfigFile == "" {
-		cwd, err := os.Getwd()
-		if err == nil {
-			a.ConfigFile = filepath.Join(cwd, "ecosystem.config.js")
-		} else {
-			a.ConfigFile = "ecosystem.config.js"
-		}
-	}
+	Apps []process.AppConfig `json:"apps"`
 }
 
 // Load parses an ecosystem config file (.js or .json)
@@ -112,8 +45,7 @@ func loadJSON(path string) (*EcosystemConfig, error) {
 	}
 	configDir := filepath.Dir(path)
 	for i := range cfg.Apps {
-		cfg.Apps[i].Normalize()
-		cfg.Apps[i].Script = resolveScriptPath(configDir, cfg.Apps[i].Script)
+		cfg.Apps[i].Normalize(configDir)
 		cfg.Apps[i].ConfigFile = path
 	}
 	return &cfg, nil
@@ -152,29 +84,8 @@ func loadJS(path string) (*EcosystemConfig, error) {
 	}
 	configDir := filepath.Dir(path)
 	for i := range cfg.Apps {
-		cfg.Apps[i].Normalize()
-		cfg.Apps[i].Script = resolveScriptPath(configDir, cfg.Apps[i].Script)
+		cfg.Apps[i].Normalize(configDir)
 		cfg.Apps[i].ConfigFile = path
 	}
 	return &cfg, nil
-}
-
-func resolveScriptPath(baseDir, script string) string {
-	if script == "" || filepath.IsAbs(script) {
-		return script
-	}
-	if filepath.Base(script) != script || strings.Contains(script, "/") || strings.Contains(script, string(filepath.Separator)) {
-		return filepath.Join(baseDir, script)
-	}
-	targetPath := filepath.Join(baseDir, script)
-	if _, err := os.Stat(targetPath); err == nil {
-		return targetPath
-	}
-	if lookPath, err := exec.LookPath(script); err == nil {
-		if absPath, err := filepath.Abs(lookPath); err == nil {
-			return absPath
-		}
-		return lookPath
-	}
-	return script
 }

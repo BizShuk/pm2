@@ -12,10 +12,12 @@ import (
 func TestBuildDetailScriptArgsCombined(t *testing.T) {
 	m := New("mock_socket", true)
 	p := process.ProcessInfo{
+		AppConfig: process.AppConfig{
+			Name:   "test-app",
+			Script: "/path/to/script.sh",
+			Args:   []string{"--foo", "bar", "-v"},
+		},
 		ID:        1,
-		Name:      "test-app",
-		Script:    "/path/to/script.sh",
-		Args:      []string{"--foo", "bar", "-v"},
 		Status:    process.StatusOnline,
 		StartedAt: time.Now(),
 	}
@@ -31,10 +33,11 @@ func TestBuildDetailScriptArgsCombined(t *testing.T) {
 func TestBuildDetailScriptNoArgs(t *testing.T) {
 	m := New("mock_socket", true)
 	p := process.ProcessInfo{
+		AppConfig: process.AppConfig{
+			Name:   "test-app",
+			Script: "/path/to/script.sh",
+		},
 		ID:        1,
-		Name:      "test-app",
-		Script:    "/path/to/script.sh",
-		Args:      nil,
 		Status:    process.StatusOnline,
 		StartedAt: time.Now(),
 	}
@@ -51,25 +54,22 @@ func TestProcessSorting(t *testing.T) {
 	m := New("mock_socket", false)
 
 	p1 := process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "b-app", Namespace: "prod"},
 		ID:        1,
-		Name:      "b-app",
-		Namespace: "prod",
 		CPU:       5.5,
 		Memory:    2048,
 		Status:    process.StatusOnline,
 	}
 	p2 := process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "a-app", Namespace: "dev"},
 		ID:        2,
-		Name:      "a-app",
-		Namespace: "dev",
 		CPU:       10.2,
 		Memory:    1024,
 		Status:    process.StatusErrored,
 	}
 	p3 := process.ProcessInfo{
+		AppConfig: process.AppConfig{Name: "c-app", Namespace: "dev"},
 		ID:        3,
-		Name:      "c-app",
-		Namespace: "dev",
 		CPU:       2.1,
 		Memory:    4096,
 		Status:    process.StatusStopped,
@@ -138,15 +138,15 @@ func TestRefreshPreservesSelection(t *testing.T) {
 
 	// Setup initial processes (sorted by Name: a-app [ID: 2], b-app [ID: 1])
 	m.procs = []process.ProcessInfo{
-		{ID: 2, Name: "a-app"},
-		{ID: 1, Name: "b-app"},
+		{AppConfig: process.AppConfig{Name: "a-app"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "b-app"}, ID: 1},
 	}
 	m.selected = 0 // points to "a-app" (ID 2)
 
 	// Simulate refreshMsg, which receives a list sorted by ID (b-app [ID: 1], a-app [ID: 2])
 	refreshedProcs := []process.ProcessInfo{
-		{ID: 1, Name: "b-app"},
-		{ID: 2, Name: "a-app"},
+		{AppConfig: process.AppConfig{Name: "b-app"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "a-app"}, ID: 2},
 	}
 
 	msg := refreshMsg{procs: refreshedProcs}
@@ -183,8 +183,8 @@ func TestDetailTuiStability(t *testing.T) {
 	// Setup a model with 2 processes in detail mode
 	m := New("mock_socket", true)
 	m.procs = []process.ProcessInfo{
-		{ID: 1, Name: "proc-1", LogFile: "/path/to/proc1.log"},
-		{ID: 2, Name: "proc-2", LogFile: "/path/to/proc2.log"},
+		{AppConfig: process.AppConfig{Name: "proc-1", LogFile: "/path/to/proc1.log"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "proc-2", LogFile: "/path/to/proc2.log"}, ID: 2},
 	}
 	m.selected = 0
 	m.logs = []string{"old log 1", "old log 2"}
@@ -277,5 +277,3 @@ func TestCroppingUTF8AndRunewidth(t *testing.T) {
 		t.Errorf("Expected '一二…', got %q", res4)
 	}
 }
-
-

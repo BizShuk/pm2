@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bizshuk/pm2/process"
 )
 
 // TestRequestRoundTrip pins down the on-wire JSON shape of Request.
@@ -66,25 +68,27 @@ func TestRequestRoundTrip(t *testing.T) {
 // breaks dump.json compatibility with existing installations.
 func TestAppStartReqRoundTrip(t *testing.T) {
 	req := &AppStartReq{
-		Namespace:      "production",
-		Name:           "api",
-		Script:         "/usr/bin/node",
-		Args:           []string{"server.js", "--port", "8080"},
-		Env:            map[string]string{"NODE_ENV": "prod"},
-		CronRestart:    "@every 1h",
-		Cron:           "0 2 * * *",
-		CronTriggered:  true,
-		Instances:      4,
-		MaxRestarts:    10,
-		Version:        "1.2.3",
-		LogFile:        "/var/log/api.log",
-		OutFile:        "/var/log/api-out.log",
-		ErrorFile:      "/var/log/api-err.log",
-		ConfigDir:      "/etc/pm2",
-		Watch:          true,
-		ConfigFile:     "/etc/pm2/ecosystem.js",
-		CWD:            "/srv/api",
-		BaseEnv:        []string{"PATH=/usr/bin", "HOME=/root"},
+		AppConfig: process.AppConfig{
+			Namespace:   "production",
+			Name:        "api",
+			Script:      "/usr/bin/node",
+			Args:        []string{"server.js", "--port", "8080"},
+			Env:         map[string]string{"NODE_ENV": "prod"},
+			CronRestart: "@every 1h",
+			Cron:        "0 2 * * *",
+			Instances:   4,
+			MaxRestarts: 10,
+			Version:     "1.2.3",
+			LogFile:     "/var/log/api.log",
+			OutFile:     "/var/log/api-out.log",
+			ErrorFile:   "/var/log/api-err.log",
+			ConfigDir:   "/etc/pm2",
+			Watch:       true,
+			ConfigFile:  "/etc/pm2/ecosystem.js",
+			CWD:         "/srv/api",
+			BaseEnv:     []string{"PATH=/usr/bin", "HOME=/root"},
+		},
+		CronTriggered: true,
 	}
 	data, err := json.Marshal(req)
 	if err != nil {

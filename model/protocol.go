@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/bizshuk/pm2/process"
 )
 
 // CommandType enumerates RPC commands sent from CLI to daemon
@@ -42,31 +44,15 @@ type Request struct {
 	Follow  bool        `json:"follow,omitempty"`
 }
 
-// AppStartReq carries the config for a new process
+// AppStartReq carries the config for a new process. The static
+// configuration fields (name/script/args/env/...) are inherited from
+// process.AppConfig via anonymous embedding; CronTriggered is the only
+// transport-layer addition (the daemon needs to know whether the
+// request was triggered by cron so it can avoid re-registering the
+// cron entry on every restart).
 type AppStartReq struct {
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	Script      string            `json:"script"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	CronRestart   string            `json:"cron_restart"`
-	Cron          string            `json:"cron"`
-	CronTriggered bool              `json:"cron_triggered"`
-	Instances     int               `json:"instances"`
-	MaxRestarts int               `json:"max_restarts"`
-	Version     string            `json:"version"`
-	LogFile     string            `json:"log_file"`
-	OutFile     string            `json:"out_file"`
-	ErrorFile   string            `json:"error_file"`
-	ConfigDir   string            `json:"config_dir"`
-	Watch       bool              `json:"watch"`
-	ConfigFile  string            `json:"config_file"`
-	CWD         string            `json:"cwd"`
-	// BaseEnv is a snapshot of the CLI process environment (os.Environ()).
-	// The CLI runs in the user's interactive shell, so this carries the full
-	// PATH (and anything exported via .bashrc/.profile) through to the daemon,
-	// which would otherwise spawn with its own minimal environment.
-	BaseEnv []string `json:"base_env,omitempty"`
+	process.AppConfig
+	CronTriggered bool `json:"cron_triggered"`
 }
 
 // Response is a daemon → CLI message

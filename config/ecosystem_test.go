@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/bizshuk/pm2/process"
 )
 
 func TestResolveScriptPath(t *testing.T) {
@@ -16,7 +18,7 @@ func TestResolveScriptPath(t *testing.T) {
 
 	// Test 1: Absolute path should remain unchanged
 	absPath := "/usr/bin/node"
-	res := resolveScriptPath(tempDir, absPath)
+	res := process.ResolveScriptPath(tempDir, absPath)
 	if res != absPath {
 		t.Errorf("Expected %q, got %q", absPath, res)
 	}
@@ -24,7 +26,7 @@ func TestResolveScriptPath(t *testing.T) {
 	// Test 2: Script path with separator should be resolved to absolute path
 	relPath := "./bin/server"
 	expectedAbs := filepath.Join(tempDir, relPath)
-	res = resolveScriptPath(tempDir, relPath)
+	res = process.ResolveScriptPath(tempDir, relPath)
 	if res != expectedAbs {
 		t.Errorf("Expected %q, got %q", expectedAbs, res)
 	}
@@ -38,7 +40,7 @@ func TestResolveScriptPath(t *testing.T) {
 	f.Close()
 
 	expectedAbs2 := filepath.Join(tempDir, scriptName)
-	res = resolveScriptPath(tempDir, scriptName)
+	res = process.ResolveScriptPath(tempDir, scriptName)
 	if res != expectedAbs2 {
 		t.Errorf("Expected %q, got %q", expectedAbs2, res)
 	}
@@ -50,7 +52,7 @@ func TestResolveScriptPath(t *testing.T) {
 		if abs, err := filepath.Abs(expectedPath); err == nil {
 			expectedPath = abs
 		}
-		res = resolveScriptPath(tempDir, cmdName)
+		res = process.ResolveScriptPath(tempDir, cmdName)
 		if res != expectedPath {
 			t.Errorf("Expected %q, got %q", expectedPath, res)
 		}
@@ -58,7 +60,7 @@ func TestResolveScriptPath(t *testing.T) {
 
 	// Test 5: Bare filename that does not exist in baseDir nor in PATH should be left as-is
 	nonExistentCmd := "nonexistentcommand12345"
-	res = resolveScriptPath(tempDir, nonExistentCmd)
+	res = process.ResolveScriptPath(tempDir, nonExistentCmd)
 	if res != nonExistentCmd {
 		t.Errorf("Expected %q, got %q", nonExistentCmd, res)
 	}

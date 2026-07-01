@@ -31,26 +31,11 @@ func newStartCmd() *cobra.Command {
 				req := model.Request{
 					Command: model.CmdStart,
 					App: &model.AppStartReq{
-						Namespace:   app.Namespace,
-						Name:        app.Name,
-						Script:      app.Script,
-						Args:        app.Args,
-						Env:         app.Env,
-						CronRestart: app.CronRestart,
-						Cron:        app.Cron,
-						Instances:   app.Instances,
-						MaxRestarts: app.MaxRestarts,
-						LogFile:     app.LogFile,
-						OutFile:     app.OutFile,
-						ErrorFile:   app.ErrorFile,
-						ConfigDir:   app.ConfigDir,
-						Watch:       app.Watch,
-						Version:     app.Version,
-						ConfigFile:  app.ConfigFile,
-						CWD:         app.CWD,
-						BaseEnv:     os.Environ(),
+						AppConfig: app,
 					},
 				}
+				// CLI environment snapshot travels in the embedded AppConfig.
+				req.App.AppConfig.BaseEnv = os.Environ()
 
 				resp, err := model.SendRequest(socketPath(), req)
 				if err != nil {

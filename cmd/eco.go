@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/process"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -116,9 +116,9 @@ func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
 		return fmt.Errorf("non-interactive mode requires --yes")
 	}
 
-	var apps []config.AppConfig
+	var apps []process.AppConfig
 	if flags.yesAll {
-		apps = []config.AppConfig{defaultApp()}
+		apps = []process.AppConfig{defaultApp()}
 	} else {
 		var err error
 		apps, err = collectAnswers(in, out)

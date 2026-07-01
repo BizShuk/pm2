@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
 
@@ -69,7 +69,7 @@ func newEcoInstallCmd() *cobra.Command {
 				output = ecoDefaultOutput
 			}
 			if err := writeEcosystemFile(
-				[]config.AppConfig{app}, output, force, noMerge,
+				[]process.AppConfig{app}, output, force, noMerge,
 				ecoFormatJS, cmd.InOrStdin(), out, errOut, true /* yesAll */); err != nil {
 				return err
 			}
@@ -97,7 +97,7 @@ func newEcoInstallCmd() *cobra.Command {
 // The process name is derived as `<deriveName(script)>-<cwdBasename>`
 // so multiple installs of the same script in different folders don't
 // collide.
-func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) config.AppConfig {
+func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
 	name := deriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
@@ -113,7 +113,7 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 	}
 	args = append(args, "-p", "'"+prompt+"'")
 
-	a := config.AppConfig{
+	a := process.AppConfig{
 		Script:    script,
 		Name:      name,
 		Args:      args,
@@ -122,7 +122,7 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 		Version:   ecoDefaultVersion,
 		CWD:       cwd,
 	}
-	a.Normalize()
+	a.Normalize("")
 	return a
 }
 

@@ -19,30 +19,17 @@ import (
 //
 // File I/O runs outside the lock so a slow disk write does not block
 // other RPC handlers or the cron / watch goroutines.
+//
+// dump.json is now []process.AppConfig directly — the unified-config
+// refactor (Phase 4) eliminated the separate DumpEntry type. Each
+// process contributes its embedded AppConfig (everything except the
+// runtime fields: ID, PID, Status, Restarts, StartedAt, CPU, Memory,
+// User, LastCronAt, LastCronStatus).
 func (s *Server) save() error {
 	s.mu.RLock()
-	entries := make([]process.DumpEntry, 0, len(s.processes))
+	entries := make([]process.AppConfig, 0, len(s.processes))
 	for _, mp := range s.processes {
-		entries = append(entries, process.DumpEntry{
-			Namespace:   mp.Info.Namespace,
-			Name:        mp.Info.Name,
-			Script:      mp.Info.Script,
-			Args:        mp.Info.Args,
-			Env:         mp.Info.Env,
-			CronRestart: mp.Info.CronRestart,
-			Cron:        mp.Info.Cron,
-			Instances:   1,
-			MaxRestarts: mp.Info.MaxRestarts,
-			LogFile:     mp.Info.LogFile,
-			OutFile:     mp.Info.LogFile,
-			ErrorFile:   mp.Info.ErrorFile,
-			ConfigDir:   mp.Info.ConfigDir,
-			Watch:       mp.Info.Watch,
-			Version:     mp.Info.Version,
-			ConfigFile:  mp.Info.ConfigFile,
-			CWD:         mp.Info.CWD,
-			BaseEnv:     mp.Info.BaseEnv,
-		})
+		entries = append(entries, mp.Info.AppConfig)
 	}
 	s.mu.RUnlock()
 
@@ -56,39 +43,27 @@ func (s *Server) save() error {
 
 // resurrect reads <homeDir>/dump.json and starts every saved process.
 // A per-entry failure is logged but does not abort the rest.
+//
+// The dump format is []process.AppConfig. Resurrect also calls
+// AppConfig.Normalize() on each entry so the defaults for MaxRestarts,
+// Instances, Name derivation, etc. match what `pm2 start` from a fresh
+// ecosystem file would produce — closing the gap that
+// plans/architecture-unified-config.md §1.3 flagged as a known bug.
 func (s *Server) resurrect() error {
 	dumpPath := filepath.Join(s.homeDir, "dump.json")
 	data, err := os.ReadFile(dumpPath)
 	if err != nil {
 		return fmt.Errorf("no dump found (run pm2 save first): %w", err)
 	}
-	var entries []process.DumpEntry
+	var entries []process.AppConfig
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return err
+		return fmt.Errorf("dump.json format incompatible (unified-config refactor — please run `pm2 delete all` then re-add your apps, or restore from a pre-refactor backup): %w", err)
 	}
-	for _, e := range entries {
-		req := &model.AppStartReq{
-			Namespace:   e.Namespace,
-			Name:        e.Name,
-			Script:      e.Script,
-			Args:        e.Args,
-			Env:         e.Env,
-			CronRestart: e.CronRestart,
-			Cron:        e.Cron,
-			Watch:       e.Watch,
-			Instances:   e.Instances,
-			MaxRestarts: e.MaxRestarts,
-			LogFile:     e.LogFile,
-			OutFile:     e.OutFile,
-			ErrorFile:   e.ErrorFile,
-			ConfigDir:   e.ConfigDir,
-			Version:     e.Version,
-			ConfigFile:  e.ConfigFile,
-			CWD:         e.CWD,
-			BaseEnv:     e.BaseEnv,
-		}
+	for i := range entries {
+		entries[i].Normalize("")
+		req := &model.AppStartReq{AppConfig: entries[i]}
 		if _, err := s.startApp(req); err != nil {
-			slog.Info("resurrect error", "name", e.Name, "err", err)
+			slog.Info("resurrect error", "name", entries[i].Name, "err", err)
 		}
 	}
 	return nil

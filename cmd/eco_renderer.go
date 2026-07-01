@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/process"
 )
 
 // writeEcosystemFile is the shared merge-or-replace-then-write step
@@ -18,9 +19,9 @@ import (
 // `yesAll=true` skips the interactive "Write?" confirm prompt (used
 // by non-interactive callers like `install`). Returns the list of
 // names that were actually written to the file.
-func writeEcosystemFile(apps []config.AppConfig, output string, force, noMerge bool, format string, in io.Reader, out, errOut io.Writer, yesAll bool) error {
+func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge bool, format string, in io.Reader, out, errOut io.Writer, yesAll bool) error {
 	var (
-		mergedApps []config.AppConfig
+		mergedApps []process.AppConfig
 		skipped    int
 		writeFmt   = format
 	)
@@ -95,7 +96,7 @@ func writeEcosystemFile(apps []config.AppConfig, output string, force, noMerge b
 //   - (nil, nil)  if the file does not exist
 //   - (nil, err)  if the file exists but is malformed / unreadable
 //   - (apps, nil) on success
-func loadExistingApps(path string) ([]config.AppConfig, error) {
+func loadExistingApps(path string) ([]process.AppConfig, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -117,19 +118,21 @@ func loadExistingApps(path string) ([]config.AppConfig, error) {
 // the AppConfig.Name field. Existing apps win on name collision.
 // Names are compared after Normalize() so "api" and "" both map to the
 // derived form consistently.
-func mergeAppsByName(existing, newApps []config.AppConfig) (merged []config.AppConfig, skipped int) {
+func mergeAppsByName(existing, newApps []process.AppConfig) (merged []process.AppConfig, skipped int) {
 	seen := make(map[string]struct{}, len(existing))
-	merged = make([]config.AppConfig, 0, len(existing)+len(newApps))
-	for _, a := range existing {
-		a.Normalize()
+	merged = make([]process.AppConfig, 0, len(existing)+len(newApps))
+	for i := range existing {
+		existing[i].Normalize("")
+		a := existing[i]
 		if a.Name == "" {
 			continue
 		}
 		seen[a.Name] = struct{}{}
 		merged = append(merged, a)
 	}
-	for _, a := range newApps {
-		a.Normalize()
+	for i := range newApps {
+		newApps[i].Normalize("")
+		a := newApps[i]
 		if a.Name == "" {
 			continue
 		}
@@ -158,7 +161,7 @@ func detectFormatFromExt(path string) (string, bool) {
 
 // renderEcosystemJS emits the canonical PM2 JS form. Skips zero-value
 // fields except `script`. Uses 4-space indent and double quotes.
-func renderEcosystemJS(apps []config.AppConfig) string {
+func renderEcosystemJS(apps []process.AppConfig) string {
 	var b strings.Builder
 	b.WriteString("module.exports = {\n")
 	b.WriteString("    apps: [\n")
@@ -174,7 +177,7 @@ func renderEcosystemJS(apps []config.AppConfig) string {
 	return b.String()
 }
 
-func writeAppJS(b *strings.Builder, a config.AppConfig) {
+func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	ns := a.Namespace
 	if ns == "" {
 		ns = ecoDefaultNS
@@ -240,7 +243,7 @@ func writeAppJS(b *strings.Builder, a config.AppConfig) {
 }
 
 // renderEcosystemJSON is the JSON counterpart for --format json.
-func renderEcosystemJSON(apps []config.AppConfig) (string, error) {
+func renderEcosystemJSON(apps []process.AppConfig) (string, error) {
 	cfg := config.EcosystemConfig{Apps: apps}
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {

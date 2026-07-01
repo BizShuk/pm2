@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/bizshuk/pm2/config"
+	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ func TestRenderEcosystemJSEmpty(t *testing.T) {
 }
 
 func TestRenderEcosystemJSSingle(t *testing.T) {
-	app := config.AppConfig{
+	app := process.AppConfig{
 		Name:      "api",
 		Script:    "./bin/server",
 		Args:      []string{"--port", "8080"},
@@ -33,9 +34,9 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 		Instances: 2,
 		Env:       map[string]string{"NODE_ENV": "production"},
 	}
-	app.Normalize()
+	app.Normalize("")
 
-	got := renderEcosystemJS([]config.AppConfig{app})
+	got := renderEcosystemJS([]process.AppConfig{app})
 
 	// Spot-check key lines (don't lock the entire template to ease future tweaks).
 	mustContain := []string{
@@ -58,13 +59,13 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 }
 
 func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
-	app := config.AppConfig{
+	app := process.AppConfig{
 		Name:   "minimal",
 		Script: "app.js",
 	}
-	app.Normalize()
+	app.Normalize("")
 
-	got := renderEcosystemJS([]config.AppConfig{app})
+	got := renderEcosystemJS([]process.AppConfig{app})
 
 	skip := []string{
 		"args:",
@@ -81,7 +82,7 @@ func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
 }
 
 func TestRenderEcosystemJSON(t *testing.T) {
-	app := config.AppConfig{
+	app := process.AppConfig{
 		Name:      "worker",
 		Script:    "worker.js",
 		Args:      []string{"--q"},
@@ -90,9 +91,9 @@ func TestRenderEcosystemJSON(t *testing.T) {
 		Watch:     true,
 		Env:       map[string]string{"FOO": "bar"},
 	}
-	app.Normalize()
+	app.Normalize("")
 
-	out, err := renderEcosystemJSON([]config.AppConfig{app})
+	out, err := renderEcosystemJSON([]process.AppConfig{app})
 	if err != nil {
 		t.Fatalf("renderEcosystemJSON: %v", err)
 	}
@@ -119,17 +120,17 @@ func TestRenderRoundTrip(t *testing.T) {
 
 	cases := []struct {
 		name string
-		apps []config.AppConfig
+		apps []process.AppConfig
 	}{
 		{
 			name: "single",
-			apps: []config.AppConfig{
+			apps: []process.AppConfig{
 				{Name: "api", Script: "./server.js", Instances: 1, Namespace: "default"},
 			},
 		},
 		{
 			name: "multi",
-			apps: []config.AppConfig{
+			apps: []process.AppConfig{
 				{Name: "api", Script: "./a.js", Instances: 2, Namespace: "default", Watch: true},
 				{Name: "worker", Script: "./b.js", Instances: 1, Namespace: "jobs",
 					Env: map[string]string{"K": "V"}},
@@ -137,7 +138,7 @@ func TestRenderRoundTrip(t *testing.T) {
 		},
 		{
 			name: "cron",
-			apps: []config.AppConfig{
+			apps: []process.AppConfig{
 				{Name: "sched", Script: "./c.js", Cron: "0 * * * *", CronRestart: "0 3 * * *"},
 			},
 		},
@@ -146,7 +147,7 @@ func TestRenderRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		// Normalize inputs to match what the loader will produce.
 		for i := range tc.apps {
-			tc.apps[i].Normalize()
+			tc.apps[i].Normalize("")
 		}
 
 		js := renderEcosystemJS(tc.apps)
@@ -189,11 +190,11 @@ func TestRenderRoundTrip(t *testing.T) {
 
 func TestRenderEscapes(t *testing.T) {
 	weird := "weird\"name\\path"
-	app := config.AppConfig{
+	app := process.AppConfig{
 		Name:   "escape-test",
 		Script: weird,
 	}
-	app.Normalize()
+	app.Normalize("")
 
 	tempDir, err := os.MkdirTemp("", "pm2-test")
 	if err != nil {
@@ -201,7 +202,7 @@ func TestRenderEscapes(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	js := renderEcosystemJS([]config.AppConfig{app})
+	js := renderEcosystemJS([]process.AppConfig{app})
 	path := filepath.Join(tempDir, "eco.js")
 	if err := os.WriteFile(path, []byte(js), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -452,15 +453,15 @@ func TestLoadExistingAppsBadExt(t *testing.T) {
 
 // ---------- mergeAppsByName ----------
 
-func mkApp(name, script string) config.AppConfig {
-	a := config.AppConfig{Name: name, Script: script}
-	a.Normalize()
+func mkApp(name, script string) process.AppConfig {
+	a := process.AppConfig{Name: name, Script: script}
+	a.Normalize("")
 	return a
 }
 
 func TestMergeAppsByNameNoCollision(t *testing.T) {
-	existing := []config.AppConfig{mkApp("api", "a.js"), mkApp("worker", "w.js")}
-	newApps := []config.AppConfig{mkApp("cron", "c.js")}
+	existing := []process.AppConfig{mkApp("api", "a.js"), mkApp("worker", "w.js")}
+	newApps := []process.AppConfig{mkApp("cron", "c.js")}
 	merged, skipped := mergeAppsByName(existing, newApps)
 	if skipped != 0 {
 		t.Errorf("skipped = %d, want 0", skipped)
@@ -475,11 +476,11 @@ func TestMergeAppsByNameNoCollision(t *testing.T) {
 }
 
 func TestMergeAppsByNameSkipDuplicate(t *testing.T) {
-	existing := []config.AppConfig{
+	existing := []process.AppConfig{
 		{Name: "api", Script: "a.js", Instances: 4, Env: map[string]string{"K": "v"}},
 		mkApp("worker", "w.js"),
 	}
-	newApps := []config.AppConfig{
+	newApps := []process.AppConfig{
 		mkApp("worker", "different.js"),
 		mkApp("cron", "c.js"),
 	}
@@ -512,8 +513,8 @@ func TestMergeAppsByNameSkipDuplicate(t *testing.T) {
 }
 
 func TestMergeAppsByNameAllDuplicates(t *testing.T) {
-	existing := []config.AppConfig{mkApp("api", "a.js")}
-	newApps := []config.AppConfig{mkApp("api", "a2.js"), mkApp("api", "a3.js")}
+	existing := []process.AppConfig{mkApp("api", "a.js")}
+	newApps := []process.AppConfig{mkApp("api", "a2.js"), mkApp("api", "a3.js")}
 	merged, skipped := mergeAppsByName(existing, newApps)
 	if skipped != 2 {
 		t.Errorf("skipped = %d, want 2", skipped)
