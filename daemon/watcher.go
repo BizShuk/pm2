@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/bizshuk/pm2/model"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -15,7 +16,7 @@ const debounceDuration = 500 * time.Millisecond
 // A goroutine is launched that debounces events for debounceDuration before
 // calling s.restartByName. Returns (nil, nil) if req.Watch is false or the
 // watcher could not be created.
-func (s *Server) startFileWatcher(req *AppStartReq, name string) (*fsnotify.Watcher, error) {
+func (s *Server) startFileWatcher(req *model.AppStartReq, name string) (*fsnotify.Watcher, error) {
 	if !req.Watch {
 		return nil, nil
 	}

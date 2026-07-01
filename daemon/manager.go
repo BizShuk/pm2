@@ -33,6 +33,13 @@ func (s *Server) findProcesses(target string) []*ManagedProcess {
 		return list
 	}
 
+	// 0. Exact key match — needed for namespaced lookups like
+	// "default:api" vs "production:api" (cron callbacks, in
+	// particular, fire with "namespace:name" composite keys).
+	if mp, ok := s.processes[target]; ok {
+		return []*ManagedProcess{mp}
+	}
+
 	// 1. ID 匹配
 	var idVal int
 	if _, err := fmt.Sscan(target, &idVal); err == nil {

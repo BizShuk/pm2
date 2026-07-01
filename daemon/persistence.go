@@ -7,13 +7,21 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
 
 // save serialises the in-memory process map to <homeDir>/dump.json.
-// Caller must hold s.mu (read lock) — this function does not lock.
+// The RLock is taken internally so callers do not need to lock — this
+// matches listAll / findProcesses and prevents the "concurrent map
+// iteration and map write" fatal when startAutoSave (background tick)
+// and CmdSave (RPC) race against launchProcess / stopProcess.
+//
+// File I/O runs outside the lock so a slow disk write does not block
+// other RPC handlers or the cron / watch goroutines.
 func (s *Server) save() error {
-	var entries []process.DumpEntry
+	s.mu.RLock()
+	entries := make([]process.DumpEntry, 0, len(s.processes))
 	for _, mp := range s.processes {
 		entries = append(entries, process.DumpEntry{
 			Namespace:   mp.Info.Namespace,
@@ -36,6 +44,7 @@ func (s *Server) save() error {
 			BaseEnv:     mp.Info.BaseEnv,
 		})
 	}
+	s.mu.RUnlock()
 
 	dumpPath := filepath.Join(s.homeDir, "dump.json")
 	data, err := json.MarshalIndent(entries, "", "  ")
@@ -58,7 +67,7 @@ func (s *Server) resurrect() error {
 		return err
 	}
 	for _, e := range entries {
-		req := &AppStartReq{
+		req := &model.AppStartReq{
 			Namespace:   e.Namespace,
 			Name:        e.Name,
 			Script:      e.Script,

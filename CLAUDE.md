@@ -55,7 +55,6 @@ pm2/
 │   │                         relative to config file dir (not CWD)
 │   └── ecosystem_test.go     Unit tests for script path resolution and configuration loading
 ├── daemon/
-│   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   ├── server.go             Server — Listen(), startApp(), watchProcess() goroutine,
 │   │                         stopProcess() (sets stopping=true), cron.Scheduler integration
 │   ├── persistence.go        save() and resurrect() implementations
@@ -65,6 +64,9 @@ pm2/
 │   ├── helpers.go            killAll() and other daemon helpers
 │   ├── watcher.go            watchFile() with fsnotify
 │   └── server_test.go        daemon server unit tests
+├── model/
+│   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
+│   └── protocol_test.go      Unit tests for protocol structures and serialization
 ├── process/
 │   └── types.go              ProcessInfo (runtime state), DumpEntry (persisted state)
 ├── cron/
@@ -107,7 +109,7 @@ at parse time (in the CLI process). The daemon always receives absolute paths.
 ### RPC protocol
 
 Newline-delimited JSON over a Unix socket (`~/.pm2/pm2.sock`).
-`daemon.SendRequest()` dials, sends one `Request`, reads one `Response`, closes.
+`model.SendRequest()` dials, sends one `Request`, reads one `Response`, closes.
 No persistent connection — each CLI invocation is a fresh dial.
 
 ### TUI refresh

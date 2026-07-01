@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +20,7 @@ func newLogsCmd() *cobra.Command {
 		Short: "Tail process logs",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdList})
+			resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdList})
 			if err != nil {
 				return err
 			}

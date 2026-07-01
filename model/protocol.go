@@ -1,4 +1,14 @@
-package daemon
+// Package model holds the cross-package data contracts that travel
+// between the CLI, the daemon, and any other process that wants to
+// speak to pm2. It contains pure types and the JSON wire helpers —
+// no business logic, no side effects beyond the network dial.
+//
+// Lives outside the daemon/ subtree on purpose: cmd/ and tui/ import
+// model/ to talk to a running daemon without dragging in the entire
+// server (process registry, executor, network listener, etc.). A
+// process that only needs to send RPC requests should depend on
+// model/ alone.
+package model
 
 import (
 	"encoding/json"

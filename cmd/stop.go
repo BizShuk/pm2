@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
 
@@ -13,8 +13,8 @@ func newStopCmd() *cobra.Command {
 		Short: "Stop a process",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{
-				Command: daemon.CmdStop,
+			resp, err := model.SendRequest(socketPath(), model.Request{
+				Command: model.CmdStop,
 				Name:    args[0],
 			})
 			if err != nil {
@@ -35,8 +35,8 @@ func newRestartCmd() *cobra.Command {
 		Short: "Restart a process",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{
-				Command: daemon.CmdRestart,
+			resp, err := model.SendRequest(socketPath(), model.Request{
+				Command: model.CmdRestart,
 				Name:    args[0],
 			})
 			if err != nil {
@@ -58,8 +58,8 @@ func newDeleteCmd() *cobra.Command {
 		Short:   "Remove a process from the list",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{
-				Command: daemon.CmdDelete,
+			resp, err := model.SendRequest(socketPath(), model.Request{
+				Command: model.CmdDelete,
 				Name:    args[0],
 			})
 			if err != nil {

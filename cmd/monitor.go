@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -47,7 +47,7 @@ func newSaveCmd() *cobra.Command {
 		Use:   "save",
 		Short: "Persist current process list to dump.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdSave})
+			resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdSave})
 			if err != nil {
 				return err
 			}
@@ -65,7 +65,7 @@ func newResurrectCmd() *cobra.Command {
 		Use:   "resurrect",
 		Short: "Restore previously saved process list",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdResurrect})
+			resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdResurrect})
 			if err != nil {
 				return err
 			}

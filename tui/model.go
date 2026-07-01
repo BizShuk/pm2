@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
 
@@ -195,11 +195,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "r":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdRestart, Name: targetID})
+		return m, doAction(m.socket, model.Request{Command: model.CmdRestart, Name: targetID})
 	case "p":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdStop, Name: targetID})
+		return m, doAction(m.socket, model.Request{Command: model.CmdStop, Name: targetID})
 	case "d":
-		return m, doAction(m.socket, daemon.Request{Command: daemon.CmdDelete, Name: targetID})
+		return m, doAction(m.socket, model.Request{Command: model.CmdDelete, Name: targetID})
 	}
 	return m, nil
 }
@@ -286,7 +286,7 @@ func (m *Model) cycleSort() {
 
 func doRefresh(socket string) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := daemon.SendRequest(socket, daemon.Request{Command: daemon.CmdList})
+		resp, err := model.SendRequest(socket, model.Request{Command: model.CmdList})
 		if err != nil {
 			return refreshMsg{err: err}
 		}
@@ -322,9 +322,9 @@ func readLogs(path string) tea.Cmd {
 }
 
 // doAction sends an RPC then immediately re-fetches the process list.
-func doAction(socket string, req daemon.Request) tea.Cmd {
+func doAction(socket string, req model.Request) tea.Cmd {
 	return func() tea.Msg {
-		_, _ = daemon.SendRequest(socket, req)
+		_, _ = model.SendRequest(socket, req)
 		return doRefresh(socket)()
 	}
 }

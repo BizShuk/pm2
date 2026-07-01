@@ -57,6 +57,16 @@ func (s *Scheduler) Remove(name string) {
 	}
 }
 
+// EntryCount returns the number of registered cron entries. Exposed for
+// tests that need to verify entries don't collide on the key (e.g. two
+// processes with the same name in different namespaces must produce
+// two distinct entries, not overwrite each other).
+func (s *Scheduler) EntryCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
+}
+
 // Stop shuts down the scheduler gracefully
 func (s *Scheduler) Stop() {
 	s.c.Stop()

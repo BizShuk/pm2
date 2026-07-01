@@ -17,6 +17,7 @@ import (
 	_ "github.com/bizshuk/gosdk/log" // initialize gosdk slog default handler
 
 	"github.com/bizshuk/pm2/cron"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
 	"github.com/mitchellh/go-homedir"
@@ -111,79 +112,79 @@ func (s *Server) Listen(socketPath string) error {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
-	var req Request
-	if err := ReadJSON(conn, &req); err != nil {
-		_ = WriteJSON(conn, Response{Error: err.Error()})
+	var req model.Request
+	if err := model.ReadJSON(conn, &req); err != nil {
+		_ = model.WriteJSON(conn, model.Response{Error: err.Error()})
 		return
 	}
 
-	var resp Response
+	var resp model.Response
 	switch req.Command {
-	case CmdPing:
-		resp = Response{OK: true}
+	case model.CmdPing:
+		resp = model.Response{OK: true}
 
-	case CmdStart:
+	case model.CmdStart:
 		if req.App == nil {
-			resp = Response{Error: "missing app config"}
+			resp = model.Response{Error: "missing app config"}
 		} else {
 			infos, err := s.startApp(req.App)
 			if err != nil {
-				resp = Response{Error: err.Error()}
+				resp = model.Response{Error: err.Error()}
 			} else {
 				payload, _ := json.Marshal(infos)
-				resp = Response{OK: true, Payload: payload}
+				resp = model.Response{OK: true, Payload: payload}
 			}
 		}
 
-	case CmdStop:
+	case model.CmdStop:
 		err := s.stopByName(req.Name)
 		if err != nil {
-			resp = Response{Error: err.Error()}
+			resp = model.Response{Error: err.Error()}
 		} else {
-			resp = Response{OK: true}
+			resp = model.Response{OK: true}
 		}
 
-	case CmdRestart:
+	case model.CmdRestart:
 		err := s.restartByName(req.Name)
 		if err != nil {
-			resp = Response{Error: err.Error()}
+			resp = model.Response{Error: err.Error()}
 		} else {
-			resp = Response{OK: true}
+			resp = model.Response{OK: true}
 		}
 
-	case CmdDelete:
+	case model.CmdDelete:
 		err := s.deleteByName(req.Name)
 		if err != nil {
-			resp = Response{Error: err.Error()}
+			resp = model.Response{Error: err.Error()}
 		} else {
-			resp = Response{OK: true}
+			resp = model.Response{OK: true}
 		}
 
-	case CmdList:
+	case model.CmdList:
 		infos := s.listAll()
 		payload, _ := json.Marshal(infos)
-		resp = Response{OK: true, Payload: payload}
+		resp = model.Response{OK: true, Payload: payload}
 
-	case CmdSave:
+	case model.CmdSave:
 		if err := s.save(); err != nil {
-			resp = Response{Error: err.Error()}
+			resp = model.Response{Error: err.Error()}
 		} else {
-			resp = Response{OK: true}
+			resp = model.Response{OK: true}
 		}
 
-	case CmdResurrect:
+	case model.CmdResurrect:
 		if err := s.resurrect(); err != nil {
-			resp = Response{Error: err.Error()}
+			resp = model.Response{Error: err.Error()}
 		} else {
-			resp = Response{OK: true}
+			resp = model.Response{OK: true}
 		}
 
-	case CmdKill:
+	case model.CmdKill:
 		// Gracefully stop every managed process, reply, then exit the daemon.
 		s.killAll()
-		resp = Response{OK: true}
+		resp = model.Response{OK: true}
 		// Exit after the response is flushed below; the small delay lets
-		// WriteJSON at the end of handleConn complete first.
+		// model.WriteJSON at the end of handleConn complete first.
 		go func() {
 			time.Sleep(150 * time.Millisecond)
 			slog.Info("daemon shutting down via kill command")
@@ -191,13 +192,13 @@ func (s *Server) handleConn(conn net.Conn) {
 		}()
 
 	default:
-		resp = Response{Error: fmt.Sprintf("unknown command: %s", req.Command)}
+		resp = model.Response{Error: fmt.Sprintf("unknown command: %s", req.Command)}
 	}
 
-	_ = WriteJSON(conn, resp)
+	_ = model.WriteJSON(conn, resp)
 }
 
-func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
+func (s *Server) startApp(req *model.AppStartReq) ([]process.ProcessInfo, error) {
 	var infos []process.ProcessInfo
 	instances := req.Instances
 	if instances <= 0 {
@@ -264,7 +265,7 @@ func (s *Server) startApp(req *AppStartReq) ([]process.ProcessInfo, error) {
 	return infos, nil
 }
 
-func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessInfo, error) {
+func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.ProcessInfo, error) {
 	logDir := filepath.Join(s.homeDir, "logs")
 	_ = os.MkdirAll(logDir, 0o755)
 
@@ -465,15 +466,18 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 		go s.watchProcess(mp, outF, errF)
 	}
 
-	// Register cron restart if configured
+	// Register cron restart if configured. The scheduler keys entries
+	// by "namespace:name" (composite) so that two processes sharing a
+	// name across namespaces don't overwrite each other's cron job.
+	cronKey := ns + ":" + name
 	if req.CronRestart != "" {
-		if err := s.scheduler.Register(name, req.CronRestart, func() {
+		if err := s.scheduler.Register(cronKey, req.CronRestart, func() {
 			firedAt := time.Now()
-			restartErr := s.restartByName(name)
-			// Write last-run info onto the newly launched process (map was replaced by restartByName)
+			restartErr := s.restartByName(cronKey)
+			// Write last-run info onto the newly launched process
+			// (map was replaced by restartByName).
 			s.mu.Lock()
-			key := ns + ":" + name
-			if p, ok := s.processes[key]; ok {
+			if p, ok := s.processes[cronKey]; ok {
 				p.Info.LastCronAt = firedAt
 				if restartErr != nil {
 					p.Info.LastCronStatus = "failed"
@@ -483,20 +487,28 @@ func (s *Server) launchProcess(name string, req *AppStartReq) (process.ProcessIn
 			}
 			s.mu.Unlock()
 		}); err != nil {
-			slog.Info("cron_restart parse error", "name", name, "err", err)
+			slog.Info("cron_restart parse error", "name", cronKey, "err", err)
 		}
 	}
 
 	// Register cron schedule if configured
 	if req.Cron != "" {
-		if err := s.scheduler.Register(name, req.Cron, func() {
+		if err := s.scheduler.Register(cronKey, req.Cron, func() {
 			s.triggerCron(ns, name, req)
 		}); err != nil {
-			slog.Info("cron parse error", "name", name, "err", err)
+			slog.Info("cron parse error", "name", cronKey, "err", err)
 		}
 	}
 
-	return mp.Info, nil
+	// Hand back a snapshot of ProcessInfo under the read lock. Without
+	// this RLock the struct copy races with watchProcess's Lock-guarded
+	// field writes (mp.Info.PID / Status / Restarts), which the race
+	// detector flags whenever a spawned process exits before launchProcess
+	// returns — i.e. almost always.
+	s.mu.RLock()
+	info := mp.Info
+	s.mu.RUnlock()
+	return info, nil
 }
 
 func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
@@ -531,7 +543,7 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 			}
 			s.mu.Unlock()
 
-			req := &AppStartReq{
+			req := &model.AppStartReq{
 				Namespace:   mp.Info.Namespace,
 				Name:        mp.Info.Name,
 				Script:      mp.Info.Script,
@@ -558,8 +570,10 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 	mp.Info.Status = process.StatusStopping
 	s.mu.Unlock()
 
-	// Cancel cron before stopping
-	s.scheduler.Remove(mp.Info.Name)
+	// Cancel cron before stopping. The scheduler keys entries by
+	// "namespace:name" (see launchProcess), so the Remove key must
+	// match — otherwise the cron entry leaks and fires on a dead mp.
+	s.scheduler.Remove(mp.Info.Namespace + ":" + mp.Info.Name)
 
 	if mp.Watcher != nil {
 		_ = mp.Watcher.Close()
@@ -568,17 +582,33 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 
 	if mp.Cmd != nil {
 		if mp.Cmd.Process != nil {
-			if err := mp.Cmd.Process.Signal(syscall.SIGTERM); err != nil {
-				_ = mp.Cmd.Process.Kill()
+			pid := mp.Cmd.Process.Pid
+			// Send SIGTERM to the *whole process group* (negative pid
+			// = process group ID in kill(2)). The daemon sets Setpgid
+			// on every spawned process (see builder.go), so the bash
+			// leader + every descendant share this pgrp. Sending only
+			// to the bash leader would leave the child processes
+			// orphaned — re-parented to PID 1, still holding ports /
+			// files / FDs, and invisible to pm2 list. The fix matches
+			// what `pm2 start "sh -c 'node server.js &'"` has always
+			// needed but never done.
+			if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+				// ESRCH = group already gone (process died before we
+				// got here). Anything else (EPERM, etc.) — fall back
+				// to the single-process kill which bypasses signal
+				// handlers.
+				if err != syscall.ESRCH {
+					_ = mp.Cmd.Process.Kill()
+				}
 			}
 		}
 
-		// Wait with timeout
+		// Wait with timeout, then escalate to the process group.
 		select {
 		case <-mp.done:
 		case <-time.After(5 * time.Second):
-			if mp.Cmd.Process != nil {
-				_ = mp.Cmd.Process.Kill()
+			if mp.Cmd != nil && mp.Cmd.Process != nil {
+				_ = syscall.Kill(-mp.Cmd.Process.Pid, syscall.SIGKILL)
 			}
 		}
 	}
@@ -615,7 +645,7 @@ func (s *Server) restartByName(name string) error {
 		return fmt.Errorf("process or namespace not found: %s", name)
 	}
 	for _, mp := range targets {
-		req := &AppStartReq{
+		req := &model.AppStartReq{
 			Namespace:     mp.Info.Namespace,
 			Name:          mp.Info.Name,
 			Script:        mp.Info.Script,
@@ -640,7 +670,7 @@ func (s *Server) restartByName(name string) error {
 	return nil
 }
 
-func (s *Server) triggerCron(ns, name string, originalReq *AppStartReq) {
+func (s *Server) triggerCron(ns, name string, originalReq *model.AppStartReq) {
 	s.mu.Lock()
 	key := ns + ":" + name
 	mp, ok := s.processes[key]

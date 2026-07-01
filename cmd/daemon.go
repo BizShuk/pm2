@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +20,7 @@ func newKillCmd() *cobra.Command {
 		Short: "Stop all processes and shut down the PM2 daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := daemon.SendRequest(socketPath(), daemon.Request{Command: daemon.CmdKill})
+			resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdKill})
 			if err != nil {
 				// No reachable daemon — nothing to kill.
 				fmt.Println("PM2 daemon is not running.")
@@ -195,7 +196,7 @@ func autoStartDaemon() error {
 	sock := socketPath()
 	for i := 0; i < 30; i++ {
 		time.Sleep(100 * time.Millisecond)
-		resp, err := daemon.SendRequest(sock, daemon.Request{Command: daemon.CmdPing})
+		resp, err := model.SendRequest(sock, model.Request{Command: model.CmdPing})
 		if err == nil && resp.OK {
 			return nil
 		}

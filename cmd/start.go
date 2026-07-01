@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/bizshuk/pm2/config"
-	"github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
@@ -28,9 +28,9 @@ func newStartCmd() *cobra.Command {
 			}
 
 			for _, app := range cfg.Apps {
-				req := daemon.Request{
-					Command: daemon.CmdStart,
-					App: &daemon.AppStartReq{
+				req := model.Request{
+					Command: model.CmdStart,
+					App: &model.AppStartReq{
 						Namespace:   app.Namespace,
 						Name:        app.Name,
 						Script:      app.Script,
@@ -52,14 +52,14 @@ func newStartCmd() *cobra.Command {
 					},
 				}
 
-				resp, err := daemon.SendRequest(socketPath(), req)
+				resp, err := model.SendRequest(socketPath(), req)
 				if err != nil {
 					// Try to auto-start the daemon
 					fmt.Fprintln(os.Stderr, "daemon not running, starting it...")
 					if startErr := autoStartDaemon(); startErr != nil {
 						return fmt.Errorf("cannot start daemon: %w", startErr)
 					}
-					resp, err = daemon.SendRequest(socketPath(), req)
+					resp, err = model.SendRequest(socketPath(), req)
 					if err != nil {
 						return err
 					}
