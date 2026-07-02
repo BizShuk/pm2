@@ -28,7 +28,7 @@
 `daemon.Server` 在 `daemon/server.go` 內直接實作了 `launchProcess`/`watchProcess`/`stopProcess` 三個函數，加上 `daemon/builder.go`（48 行 `buildCommand`）、`daemon/watcher.go`（58 行 `startFileWatcher`，是 `Server` 的方法並直接呼叫 `s.restartByName`）、`daemon/metrics.go`（143 行 `refreshMetrics`/`StartMetricsCollector`/`getProcessMetrics`），總計約 250 行的作業系統層邏輯直接耦合在 `Server` 結構上。
 
 來源計畫：
-- [plans/architecture-extract-executor.md](../plans/architecture-extract-executor.md)（**主計畫**：4 階段 Strangler-Fig，定義 `daemon/executor/` 子包結構）
+- [architecture-extract-executor.md](./architecture-extract-executor.md)（**主計畫**：4 階段 Strangler-Fig，定義 `daemon/executor/` 子包結構）
 
 **目標**：抽出 `Executor` 結構體封裝單一進程的「衍生 + 等待 + 信號」生命週期作業；`Server` 僅負責 RPC 路由、狀態協調、cron 排程。
 
@@ -47,9 +47,9 @@
 ## 完成後 TODO 動作
 
 - [x] 標記 Phase 4 為 `[x]`（本檔案）
-- [ ] 將 `plans/architecture-extract-executor.md` 用 `git mv` 移到 `docs/specs/extract-process-executor.md`
-- [ ] 補上 Phase 4 條目的「規格」連結
-- [ ] 在 spec 標頭加註位置偏離（子包結構）
+- [x] 將 `plans/architecture-extract-executor.md` 用 `git mv` 移到 `docs/specs/extract-process-executor.md`
+- [x] 補上 Phase 4 條目的「規格」連結
+- [x] 在 spec 標頭加註位置偏離（子包結構）
 
 ---
 

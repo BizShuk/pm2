@@ -1,5 +1,13 @@
 # 架構演進與優化計畫 — extract-executor (Architecture Evolution & Optimization Plan)
 
+> **實作位置偏離 (Implementation Location Deviation)**
+> 原計畫僅抽取 `Executor` 至 `daemon/executor/` 子包。實際實作擴張為兩個新子包：
+>
+> - `daemon/executor/` — 封裝單一進程生命週期（`executor.go` / `builder.go` / `watcher.go` / `metrics.go`）
+> - `daemon/network/` — 封裝 Unix socket 監聽與 RPC 路由（`listener.go` / `handler.go` / `manager.go`）
+>
+> 為打破 `*ManagedProcess` 跨界造成的循環依賴，`Executor` 改採**原始型別 API**（`*exec.Cmd` / `*os.File` / `chan struct{}` / callbacks），不持有 `ProcessRegistry` 鎖。Manager 介面（11 方法）由 `*Server` 隱性實作，`Server.Listen` 變成薄殼委派。Commit: `684ed77` + `31b36bc`。詳見 [abstract-strolling-scroll.md](./abstract-strolling-scroll.md)。
+
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 我們對現有 `pm2` 專案的進程執行與生命週期管理邏輯進行了架構審查，診斷出以下關鍵的結構耦合與技術債問題：

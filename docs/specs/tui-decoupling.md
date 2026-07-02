@@ -1,5 +1,10 @@
 # 架構演進與優化計畫 — tui-decoupling (Architecture Evolution & Optimization Plan)
 
+> **實作位置偏離 (Implementation Location Deviation)**
+> 原計畫將調色盤定義在 `tui/theme.go`。實際實作為避免 `tui/views` 與 `tui/model` 的匯入循環，調色盤下沉至 `tui/theme/palette.go` 純子包，並保留 `tui/theme.go` 作為 `clXxx` 變數的 re-export 出口。
+>
+> `tui/formatter.go` 整個併入 `tui/views/format.go`（每個函式只被 view 程式碼消費，留於主包會重新引入耦合）。`tui/renderer.go` 完全刪除。`View()` 從 25 行排版計算降為 16 行「建 ViewContext → 委派 views.RenderLayout」。視覺輸出與重構前**逐字節相同**。Commit: `4ed9e89`。
+
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * `診斷一`：TUI 視圖與狀態控制邏輯高度耦合 (TUI View and State Control Coupling)
