@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
@@ -708,8 +709,8 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	// the RLock and entered the unlocked slow phase.
 	phase2Started := make(chan struct{}, 8)
 
-	orig := getProcessMetrics
-	getProcessMetrics = func(pid int) (float64, uint64) {
+	orig := executor.GetProcessMetrics
+	executor.GetProcessMetrics = func(pid int) (float64, uint64) {
 		select {
 		case phase2Started <- struct{}{}:
 		default:
@@ -717,7 +718,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		return 42.0, 4096
 	}
-	defer func() { getProcessMetrics = orig }()
+	defer func() { executor.GetProcessMetrics = orig }()
 
 	// Pre-populate 5 fake online processes. Fake PIDs are fine — the
 	// stub never invokes a real `ps`.
@@ -793,14 +794,14 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 
 	// Save the real implementation and restore on exit so subsequent
 	// tests still get a working `ps` call.
-	orig := getProcessMetrics
-	defer func() { getProcessMetrics = orig }()
+	orig := executor.GetProcessMetrics
+	defer func() { executor.GetProcessMetrics = orig }()
 
 	// The stub captures the PID it was called with (i.e. the snapshot
 	// value from phase 1) and then mutates the underlying ProcessInfo
 	// to simulate a restart that happens DURING phase 2.
 	var capturedPID int
-	getProcessMetrics = func(pid int) (float64, uint64) {
+	executor.GetProcessMetrics = func(pid int) (float64, uint64) {
 		capturedPID = pid
 		const key = "default:lonely"
 		s.RLock()
@@ -859,13 +860,13 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 	s := NewServer(testDir(t))
 
-	orig := getProcessMetrics
-	defer func() { getProcessMetrics = orig }()
+	orig := executor.GetProcessMetrics
+	defer func() { executor.GetProcessMetrics = orig }()
 
 	const stubMs = 50
 	const N = 32 // > metricsWorkers * 4 to ensure batching is visible
 
-	getProcessMetrics = func(pid int) (float64, uint64) {
+	executor.GetProcessMetrics = func(pid int) (float64, uint64) {
 		time.Sleep(stubMs * time.Millisecond)
 		return float64(pid), uint64(pid) * 1024
 	}
@@ -895,9 +896,9 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 	// (3× ideal) so the test isn't flaky on loaded CI machines, while
 	// still failing clearly if phase 2 ever regresses to sequential
 	// (1600ms >> 600ms threshold).
-	parallelUpper := 3 * time.Duration(N/metricsWorkers) * stubMs * time.Millisecond
+	parallelUpper := 3 * time.Duration(N/executor.MetricsWorkers) * stubMs * time.Millisecond
 	t.Logf("refreshMetrics: %d processes in %v (sequential would be ~%v, ideal-parallel ~%v)",
-		N, elapsed, sequential, time.Duration(N/metricsWorkers)*stubMs*time.Millisecond)
+		N, elapsed, sequential, time.Duration(N/executor.MetricsWorkers)*stubMs*time.Millisecond)
 
 	if elapsed > parallelUpper {
 		t.Errorf("refreshMetrics took %v, want < %v — phase 2 may have regressed to sequential",

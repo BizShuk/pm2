@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,24 +9,23 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"os/user"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "github.com/bizshuk/gosdk/log" // initialize gosdk slog default handler
 
 	"github.com/bizshuk/pm2/cron"
+	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
-	"github.com/mitchellh/go-homedir"
-	"os/user"
 )
 
 // Server is the PM2 daemon
 type Server struct {
 	reg          *ProcessRegistry
+	executor     *executor.Executor
 	nextID       int
 	homeDir      string
 	scheduler    *cron.Scheduler
@@ -62,7 +62,8 @@ func NewServer(homeDir string) *Server {
 	return &Server{
 		reg:       NewProcessRegistry(),
 		homeDir:   homeDir,
-		scheduler:    cron.New(),
+		executor:  executor.NewExecutor(homeDir),
+		scheduler: cron.New(),
 		RestartDelay: 30 * time.Second,
 	}
 }
@@ -271,121 +272,23 @@ func (s *Server) startApp(req *model.AppStartReq) ([]process.ProcessInfo, error)
 	return infos, nil
 }
 
+// launchProcess is the Server-side wrapper around executor.Start. It
+// owns the registry-state side of a launch (id assignment, mp
+// construction, registry write, cron registration) and delegates all
+// OS operations to the Executor.
 func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.ProcessInfo, error) {
-	logDir := filepath.Join(s.homeDir, "logs")
-	_ = os.MkdirAll(logDir, 0o755)
-
-	logFile := req.LogFile
-	if logFile == "" {
-		logFile = req.OutFile
-	}
-	if logFile == "" && req.ConfigDir != "" {
-		logFile = filepath.Join(req.ConfigDir, "logs", "daemon.log")
-	}
-	if logFile == "" {
-		logFile = filepath.Join(logDir, name)
-	} else {
-		if h, err := homedir.Expand(logFile); err == nil {
-			logFile = h
-		}
-	}
-	errFile := req.ErrorFile
-	if errFile == "" && req.ConfigDir != "" {
-		errFile = filepath.Join(req.ConfigDir, "logs", "daemon.err")
-	}
-	if errFile == "" {
-		errFile = filepath.Join(logDir, name)
-	} else {
-		if h, err := homedir.Expand(errFile); err == nil {
-			errFile = h
-		}
+	// Wire the file-watcher onDetect to our restart hook — closure
+	// captures `name` so the watcher's debounced callback can locate
+	// the right entry. Must be built BEFORE executor.Start so it is
+	// captured in the watcher goroutine's closure.
+	onFileChanged := func() {
+		_ = s.restartByName(name)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
-		return process.ProcessInfo{}, fmt.Errorf("create log directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(errFile), 0o755); err != nil {
-		return process.ProcessInfo{}, fmt.Errorf("create error log directory: %w", err)
-	}
-
-	// Ensure log files exist
-	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return process.ProcessInfo{}, fmt.Errorf("create log file: %w", err)
-		}
-		f.Close()
-	}
-	if _, err := os.Stat(errFile); os.IsNotExist(err) {
-		f, err := os.OpenFile(errFile, os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return process.ProcessInfo{}, fmt.Errorf("create error log file: %w", err)
-		}
-		f.Close()
-	}
-
-	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	result, err := s.executor.Start(req, name, onFileChanged)
 	if err != nil {
-		return process.ProcessInfo{}, err
+		return process.ProcessInfo{}, fmt.Errorf("executor start: %w", err)
 	}
-	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		outF.Close()
-		return process.ProcessInfo{}, err
-	}
-
-	var cmd *exec.Cmd
-	var startedAt time.Time
-	var pid int
-	status := process.StatusOnline
-
-	isCronTask := req.Cron != "" && !req.CronTriggered
-
-	if isCronTask {
-		status = process.StatusStopped
-		outF.Close()
-		errF.Close()
-	} else {
-		// Resolve the working directory: req.CWD wins; otherwise fall back to
-		// the directory of the originating ecosystem.config.js.
-		workDir := req.CWD
-		if workDir == "" {
-			workDir = filepath.Dir(req.ConfigFile)
-		}
-		// Fall back to the daemon's own cwd if the resolved workDir does not
-		// exist on disk (e.g. tests pass a fake /path/to/ecosystem.config.js
-		// and we don't want os.StartProcess to fail with ENOENT).
-		if workDir != "" {
-			if _, err := os.Stat(workDir); err != nil {
-				workDir = ""
-			}
-		}
-
-		// Prefer the CLI's environment snapshot; fall back to daemon's environ.
-		base := req.BaseEnv
-		if len(base) == 0 {
-			base = os.Environ()
-		}
-
-		cmd = buildCommand(req.Script, req.Args, base, req.Env, workDir)
-		cmd.Stdout = outF
-		cmd.Stderr = errF
-
-		if err := cmd.Start(); err != nil {
-			outF.Close()
-			errF.Close()
-			return process.ProcessInfo{}, fmt.Errorf("start process: %w", err)
-		}
-		pid = cmd.Process.Pid
-		startedAt = time.Now()
-	}
-
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
-	}
-
-	watcher, _ := s.startFileWatcher(req, name)
 
 	version := req.Version
 	if version == "" {
@@ -402,6 +305,23 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 	var id int
 	var lastCronAt time.Time
 	var lastCronStatus string
+	var startedAt time.Time
+	var pid int
+	status := process.StatusOnline
+
+	isCronTask := req.Cron != "" && !req.CronTriggered
+	if isCronTask {
+		status = process.StatusStopped
+	} else {
+		startedAt = time.Now()
+		pid = result.Cmd.Process.Pid
+	}
+
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
 	existing, oldKey, ok := s.reg.findExistingForLaunchUnderLock(ns, name, req.ConfigFile)
 
 	var restarts int
@@ -443,9 +363,9 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 				CWD:         req.CWD,
 				BaseEnv:     req.BaseEnv,
 				// LogFile / ErrorFile hold the resolved absolute paths —
-				// see launchProcess's homedir.Expand block above.
-				LogFile:   logFile,
-				ErrorFile: errFile,
+				// returned by executor.Start (which runs homedir.Expand).
+				LogFile:   result.LogFile,
+				ErrorFile: result.ErrFile,
 			},
 			ID:             id,
 			PID:            pid,
@@ -456,18 +376,22 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 			LastCronAt:     lastCronAt,
 			LastCronStatus: lastCronStatus,
 		},
-		Cmd:     cmd,
+		Cmd:     result.Cmd,
 		done:    make(chan struct{}),
-		Watcher: watcher,
+		Watcher: result.Watcher,
 	}
 	s.reg.processes[ns+":"+name] = mp
 	if oldKey != "" && oldKey != ns+":"+name {
 		delete(s.reg.processes, oldKey)
 	}
 
+	// Watch for process exit in background. The Executor owns the
+	// cmd.Wait + file-close + done-close + onExit lifecycle; we only
+	// supply the state-update closure.
 	if !isCronTask {
-		// Watch for process exit in background
-		go s.watchProcess(mp, outF, errF)
+		go s.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(waitErr error) {
+			s.onProcessExit(mp, waitErr)
+		})
 	}
 
 	// Register cron restart if configured. The scheduler keys entries
@@ -501,23 +425,22 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 
 	// Hand back a snapshot of ProcessInfo. We're still inside the write
 	// lock from the launchProcess critical section above, so this copy
-	// is race-free against watchProcess's UpdateInfo writes to mp.Info
-	// fields (PID / Status / Restarts).
+	// is race-free against Watch's onExit writes to mp.Info fields
+	// (PID / Status / Restarts).
 	info := mp.Info
 	return info, nil
 }
 
-func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
-	err := mp.Cmd.Wait()
-	outF.Close()
-	errF.Close()
-	close(mp.done)
-
+// onProcessExit is the callback that runs after executor.Watch observes
+// cmd.Wait returning. It mirrors what the old watchProcess did inline:
+// updates PID/Status, decides whether to auto-restart, and (if so)
+// spawns the restart goroutine after RestartDelay.
+func (s *Server) onProcessExit(mp *ManagedProcess, waitErr error) {
 	key := mp.Info.Namespace + ":" + mp.Info.Name
 	shouldRestart := false
 	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 		mp.Info.PID = 0
-		if err != nil {
+		if waitErr != nil {
 			mp.Info.Status = process.StatusErrored
 		} else {
 			mp.Info.Status = process.StatusStopped
@@ -568,61 +491,44 @@ func (s *Server) watchProcess(mp *ManagedProcess, outF, errF *os.File) {
 	}
 }
 
+// stopProcess is the Server-side wrapper around executor.Stop. It
+// owns the registry-state side of a stop (stopping=true + Status
+// update via onStopping, scheduler removal) and delegates the actual
+// signal / wait / kill to the Executor.
 func (s *Server) stopProcess(mp *ManagedProcess) error {
 	key := mp.Info.Namespace + ":" + mp.Info.Name
-	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-		mp.stopping = true
-		mp.Info.Status = process.StatusStopping
-	})
 
 	// Cancel cron before stopping. The scheduler keys entries by
 	// "namespace:name" (see launchProcess), so the Remove key must
 	// match — otherwise the cron entry leaks and fires on a dead mp.
 	s.scheduler.Remove(key)
 
+	// Close the watcher (if any) before the process goes away so the
+	// watcher goroutine cannot race with restartByName after we've
+	// decided to stop.
 	if mp.Watcher != nil {
 		_ = mp.Watcher.Close()
 		mp.Watcher = nil
 	}
 
-	if mp.Cmd != nil {
-		if mp.Cmd.Process != nil {
-			pid := mp.Cmd.Process.Pid
-			// Send SIGTERM to the *whole process group* (negative pid
-			// = process group ID in kill(2)). The daemon sets Setpgid
-			// on every spawned process (see builder.go), so the bash
-			// leader + every descendant share this pgrp. Sending only
-			// to the bash leader would leave the child processes
-			// orphaned — re-parented to PID 1, still holding ports /
-			// files / FDs, and invisible to pm2 list. The fix matches
-			// what `pm2 start "sh -c 'node server.js &'"` has always
-			// needed but never done.
-			if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-				// ESRCH = group already gone (process died before we
-				// got here). Anything else (EPERM, etc.) — fall back
-				// to the single-process kill which bypasses signal
-				// handlers.
-				if err != syscall.ESRCH {
-					_ = mp.Cmd.Process.Kill()
-				}
-			}
-		}
-
-		// Wait with timeout, then escalate to the process group.
-		select {
-		case <-mp.done:
-		case <-time.After(5 * time.Second):
-			if mp.Cmd != nil && mp.Cmd.Process != nil {
-				_ = syscall.Kill(-mp.Cmd.Process.Pid, syscall.SIGKILL)
-			}
-		}
-	}
-
-	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-		mp.Info.Status = process.StatusStopped
-		mp.Info.PID = 0
-	})
-	return nil
+	return s.executor.Stop(
+		mp.Cmd,
+		mp.done,
+		// onStopping: mark stopping=true + Status=StatusStopping under lock
+		func() {
+			s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+				mp.stopping = true
+				mp.Info.Status = process.StatusStopping
+			})
+		},
+		// onStopped: clear PID + Status=StatusStopped under lock
+		func() {
+			s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+				mp.Info.Status = process.StatusStopped
+				mp.Info.PID = 0
+			})
+		},
+	)
 }
 
 // killAll gracefully stops every managed process. Used by the kill command
@@ -767,4 +673,24 @@ func (s *Server) triggerCron(ns, name string, originalReq *model.AppStartReq) {
 		cronStatus = "failed"
 	}
 	s.reg.UpdateCronStatus(key, firedAt, cronStatus)
+}
+
+// StartMetricsCollector spawns a goroutine that runs the executor's
+// MetricsCollector refresh loop on a 2-second ticker. Runs until the
+// daemon exits.
+//
+// Uses context.Background() because the daemon does not own a Context
+// today (CmdKill triggers os.Exit directly). If a real context is
+// added later (signal-driven shutdown), wire it here.
+func (s *Server) StartMetricsCollector() {
+	collector := executor.NewMetricsCollector(s.reg, executor.MetricsWorkers)
+	go collector.Run(context.Background())
+}
+
+// refreshMetrics is the test-compatible shim around MetricsCollector.
+// It exists so that tests calling s.refreshMetrics() directly (to
+// trigger a synchronous refresh) keep working after Phase 4 — the
+// actual algorithm now lives in executor.MetricsCollector.Refresh.
+func (s *Server) refreshMetrics() {
+	executor.NewMetricsCollector(s.reg, executor.MetricsWorkers).Refresh()
 }

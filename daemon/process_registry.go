@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/process"
 )
 
@@ -97,6 +98,28 @@ func (r *ProcessRegistry) SnapshotMap() map[string]*ManagedProcess {
 	out := make(map[string]*ManagedProcess, len(r.processes))
 	for k, v := range r.processes {
 		out[k] = v
+	}
+	return out
+}
+
+// SnapshotForMetrics returns a (key -> executor.ProcessSample) map under
+// the read lock. Used by executor.MetricsCollector.Refresh (phase 1).
+// Implements executor.MetricsBackend.
+//
+// ProcessSample deliberately hides the full *ManagedProcess from the
+// executor package — the collector only needs (PID, Online) for its
+// three-phase pipeline. Caller MUST treat the returned map as a
+// snapshot; the mp pointers are not exposed so no field mutation can
+// leak back into the registry from the executor side.
+func (r *ProcessRegistry) SnapshotForMetrics() map[string]executor.ProcessSample {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]executor.ProcessSample, len(r.processes))
+	for k, mp := range r.processes {
+		out[k] = executor.ProcessSample{
+			PID:    mp.Info.PID,
+			Online: mp.Info.PID > 0 && mp.Info.Status == process.StatusOnline,
+		}
 	}
 	return out
 }
