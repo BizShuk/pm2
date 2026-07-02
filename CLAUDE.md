@@ -15,20 +15,32 @@ flowchart TD
         C["Cobra Commands"]
     end
 
-    subgraph Daemon ["Daemon Process (daemon/server.go)"]
+    subgraph Daemon ["Daemon Process"]
         direction TB
-        S["Unix Socket Listener"]
-        L["Process Lifecycle (os/exec)"]
+        N["network/  (Unix socket listener + dispatch)"]
+        S["server.go (Server / Manager)"]
+        R["process_registry.go"]
+        E["executor/  (fork+exec, watch, stop, fsnotify, metrics)"]
         CR["cron/scheduler.go (robfig/cron)"]
         D["~/.pm2/dump.json (persist)"]
 
-        S --> L
-        S --> CR
-        S --> D
+        N -->|"Manager.StartApp / StopByName / ..."| S
+        S -->|"Get / UpdateInfo / SnapshotForMetrics"| R
+        S -->|"Start / Watch / Stop"| E
+        S -->|"Register / Remove"| CR
+        S -->|"Save / Resurrect"| D
     end
 
-    C -- "JSON over ~/.pm2/pm2.sock" --> S
+    C -- "JSON over ~/.pm2/pm2.sock" --> N
 ```
+
+Import direction (no cycles):
+
+- `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
+- `daemon` -> `executor`, `network`, `model`, `process`, `cron`
+- `executor` -> `model` only
+
+The lock and import invariants are spelled out in the Conventions section below.
 
 ## Package map
 
@@ -55,23 +67,39 @@ pm2/
 │   │                         relative to config file dir (not CWD)
 │   └── ecosystem_test.go     Unit tests for script path resolution and configuration loading
 ├── daemon/
-│   ├── server.go             Server — Listen(), startApp(), watchProcess() goroutine,
-│   │                         stopProcess() (sets stopping=true), cron.Scheduler integration
+│   ├── server.go             Server — thin Manager: owns Registry + Executor + Scheduler
+│   │                         + Cron. Listen() delegates to daemon/network. Lifecycle
+│   │                         methods delegate to daemon/executor.Executor.
 │   ├── process_registry.go   ProcessRegistry — sole owner of the process map
 │   │                         and its RWMutex (Add/Get/Remove/UpdateInfo/...)
-│   ├── persistence.go        save() and resurrect() implementations
-│   ├── metrics.go            StartMetricsCollector() and getProcessMetrics()
-│   ├── builder.go            buildCommand() to assemble *exec.Cmd
-│   ├── manager.go            Server methods for stop/restart/delete/list processes
-│   ├── helpers.go            killAll() and other daemon helpers
-│   ├── watcher.go            watchFile() with fsnotify
+│   ├── persistence.go        Save() / Resurrect() — dump.json serialisation
+│   ├── manager.go            ListAll / DeleteByName / Ping — additional Manager
+│   │                         methods (rest are on Server directly)
+│   ├── helpers.go            getAppVersion() — version probe from package.json
 │   ├── server_test.go        daemon server unit tests
-│   └── process_registry_test.go  ProcessRegistry unit + concurrency tests
+│   ├── process_registry_test.go  ProcessRegistry unit + concurrency tests
+│   ├── executor/             daemon/executor sub-package — OS-level process ops
+│   │   ├── executor.go       Executor struct + Start/Watch/Stop (lock-free)
+│   │   ├── builder.go        BuildCommand — wraps script+args in `bash -c`,
+│   │   │                     sets Setpgid, builds the env
+│   │   ├── watcher.go        NewFileWatcher(path, onDetect) — fsnotify +
+│   │   │                     500ms debounce
+│   │   └── metrics.go        MetricsCollector (3-phase refresh) +
+│   │                         MetricsBackend interface + GetProcessMetrics
+│   └── network/              daemon/network sub-package — Unix socket listener
+│       ├── listener.go       Listen(socketPath, m Manager) — bind + accept loop
+│       ├── handler.go        Handle(conn, m Manager) — read Request, dispatch,
+│       │                     write Response, post-CmdKill exit hook
+│       └── manager.go        Manager interface — the only contract network
+│                             needs from the daemon (StartApp, StopByName,
+│                             RestartByName, PauseByName, ResumeByName,
+│                             DeleteByName, ListAll, Save, Resurrect, KillAll,
+│                             Ping). Import-cycle guard.
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
 ├── process/
-│   └── types.go              ProcessInfo (runtime state), DumpEntry (persisted state)
+│   └── types.go              ProcessInfo (runtime state), AppConfig (persistent)
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
 └── tui/
@@ -101,26 +129,28 @@ pm2/
 
 ### Process identity
 
-Keyed by `name` in `Server.processes` map.
-Override rule in `startApp()`: same name + same script → stop-and-replace.
+Keyed by `namespace:name` in `Server.reg.processes` map.
+Override rule in `StartApp()`: same name + same script → stop-and-replace.
 Same name + different script → error (caller must `pm2 delete` first).
 
 ### Auto-restart suppression
 
-`ManagedProcess.stopping` bool is set to `true` by `stopProcess()` before SIGTERM.
-`watchProcess()` skips auto-restart when `stopping == true`.
+`ManagedProcess.stopping` bool is set to `true` by `stopProcess()` (via
+`executor.Stop`'s `onStopping` callback) before SIGTERM.
+`onProcessExit` (the executor.Watch callback) skips auto-restart when
+`stopping == true`.
 This prevents deliberate `pm2 stop` from triggering the crash-restart loop.
 
 ### Cron restart lifecycle
 
-1. `launchProcess()` calls `scheduler.Register(name, expr, fn)` after spawning.
-2. Cron fires → `restartByName(name)` → `stopProcess()` (removes cron entry) → `launchProcess()` (re-registers).
-3. `stopProcess()` / `deleteByName()` call `scheduler.Remove(name)` explicitly.
+1. `launchProcess()` calls `scheduler.Register(key, expr, fn)` after spawning.
+2. Cron fires → `RestartByName(name)` → `stopProcess()` (removes cron entry) → `launchProcess()` (re-registers).
+3. `stopProcess()` / `DeleteByName()` call `scheduler.Remove(key)` explicitly.
 4. Net effect: cron entry is always tied to the currently running instance.
 
 ### Pause / resume (cron suspension)
 
-`pm2 pause <target>` suspends a process: `pauseProcess()` reuses `stopProcess()`
+`pm2 pause <target>` suspends a process: `PauseByName()` reuses `stopProcess()`
 (which removes the scheduler entry and stops any running instance) then sets
 `ManagedProcess.paused = true` and `Status = StatusPaused`.
 
@@ -186,21 +216,44 @@ else `CmdPause`), so the same key suspends and reactivates a cron task.
   method calls.
 - Always prefer the high-level `ProcessRegistry` methods (`Get`/`Add`/
   `Remove`/`UpdateInfo`/`UpdateMetrics`/`UpdateCronStatus`/`Snapshot`/
-  `SnapshotMap`/`SnapshotAppConfigs`/`FindByTarget`/`Len`) over the lock
-  escape hatches. The escape hatches are reserved for code that genuinely
-  needs cross-method atomicity (e.g. `launchProcess` doing lookup + ID
-  increment + map write as one critical section).
+  `SnapshotForMetrics`/`SnapshotMap`/`SnapshotAppConfigs`/`FindByTarget`/
+  `Len`) over the lock escape hatches. The escape hatches are reserved
+  for code that genuinely needs cross-method atomicity (e.g. `launchProcess`
+  doing lookup + ID increment + map write as one critical section).
 - For atomic field mutations on a single `*ManagedProcess`, use
   `s.reg.UpdateInfo(key, func(mp *ManagedProcess) { ... })` — never mutate
   `mp.Info` fields directly from outside the registry. Direct mutation
-  races with `watchProcess`'s own `UpdateInfo` calls and trips the race
+  races with `onProcessExit`'s own `UpdateInfo` calls and trips the race
   detector (this is what `TestSaveConcurrentWithMapMutation` was originally
   designed to catch).
-- `watchProcess()` goroutine is the only place that transitions a process
-  from `online` → `errored` or `stopped`. Never update status elsewhere.
+- `onProcessExit` (the `executor.Watch` callback) is the only place that
+  transitions a process from `online` → `errored` or `stopped` *for processes
+  that exit on their own*. Deliberate stops update status from inside
+  `stopProcess`'s `onStopping`/`onStopped` callbacks instead.
+- The Status race: when a process is deliberately stopped, both
+  `onProcessExit` and `stopProcess.onStopped` race to acquire the
+  registry lock after `close(done)`. The losing writer would otherwise
+  clobber the winning writer's Status. Guard the `onProcessExit` Status
+  write with `!mp.stopping` so `stopProcess` owns the "stopped" Status
+  and `onProcessExit` only writes Status when the process exited on its
+  own.
 - Log file paths are resolved once at launch time and stored in `ProcessInfo`.
   Do not re-derive them from name at read time.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
+- **Executor lock direction (Phase 4 invariant)**: `daemon.Server` may
+  call `executor.Executor` while holding the registry lock, because the
+  Executor holds NO lock during its execution. The Executor NEVER calls
+  back into the registry — every state update flows through the
+  `onStopping` / `onStopped` / `onExit` / `onFileChanged` callbacks the
+  Server passes in. The callback implementations take the registry lock
+  internally via `UpdateInfo` and never hold it across a blocking call.
+- **Network import direction (Phase 5 invariant)**: `daemon/network`
+  depends ONLY on the `network.Manager` interface — never on the concrete
+  `*daemon.Server` type. `daemon.Server` implements `Manager` via its
+  existing public methods (`StartApp`, `StopByName`, …). The Executor and
+  Registry packages MUST NOT import `daemon/network`; the import graph
+  is strictly `network → (Manager contract only)` with no cycle.
+  `network/manager.go` is the canonical interface declaration.
 - All TUI view rendering lives in `tui/views/` as pure functions. Every
   exported renderer takes a `views.ViewContext` (or the specific primitive
   it needs) and returns a `string`. Views never mutate state, never reach
