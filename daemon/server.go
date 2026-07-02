@@ -2,11 +2,9 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/bizshuk/pm2/cron"
 	"github.com/bizshuk/pm2/daemon/executor"
+	"github.com/bizshuk/pm2/daemon/network"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
@@ -69,7 +68,7 @@ func NewServer(homeDir string) *Server {
 }
 
 func (s *Server) startAutoResurrect() {
-	if err := s.resurrect(); err != nil {
+	if err := s.Resurrect(); err != nil {
 		if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "no such file or directory") {
 			slog.Info("auto-resurrect: no saved processes found (dump.json does not exist)")
 		} else {
@@ -96,7 +95,7 @@ func (s *Server) startAutoSave() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if err := s.save(); err != nil {
+		if err := s.Save(); err != nil {
 			slog.Error("auto-save failed", "err", err)
 		} else {
 			slog.Info("auto-save: processes persisted successfully")
@@ -104,133 +103,28 @@ func (s *Server) startAutoSave() {
 	}
 }
 
-// Listen starts the Unix socket server
+// Listen starts the Unix socket server.
+//
+// Phase 5: this is a thin wrapper around network.Listen. The Server
+// satisfies the network.Manager interface (see the Manager methods
+// declared later in this file), so the network layer can dispatch
+// every RPC command to the Server's existing methods without knowing
+// about ManagedProcess / ProcessRegistry / Executor.
 func (s *Server) Listen(socketPath string) error {
 	s.StartMetricsCollector()
-	_ = os.Remove(socketPath)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	slog.Info("daemon listening", "socketPath", socketPath)
 
 	go s.startAutoResurrect()
 	go s.startAutoSave()
 
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		go s.handleConn(conn)
-	}
+	return network.Listen(socketPath, s)
 }
 
-func (s *Server) handleConn(conn net.Conn) {
-	defer conn.Close()
-	var req model.Request
-	if err := model.ReadJSON(conn, &req); err != nil {
-		_ = model.WriteJSON(conn, model.Response{Error: err.Error()})
-		return
-	}
-
-	var resp model.Response
-	switch req.Command {
-	case model.CmdPing:
-		resp = model.Response{OK: true}
-
-	case model.CmdStart:
-		if req.App == nil {
-			resp = model.Response{Error: "missing app config"}
-		} else {
-			infos, err := s.startApp(req.App)
-			if err != nil {
-				resp = model.Response{Error: err.Error()}
-			} else {
-				payload, _ := json.Marshal(infos)
-				resp = model.Response{OK: true, Payload: payload}
-			}
-		}
-
-	case model.CmdStop:
-		err := s.stopByName(req.Name)
-		if err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdRestart:
-		err := s.restartByName(req.Name)
-		if err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdPause:
-		err := s.pauseByName(req.Name)
-		if err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdResume:
-		err := s.resumeByName(req.Name)
-		if err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdDelete:
-		err := s.deleteByName(req.Name)
-		if err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdList:
-		infos := s.listAll()
-		payload, _ := json.Marshal(infos)
-		resp = model.Response{OK: true, Payload: payload}
-
-	case model.CmdSave:
-		if err := s.save(); err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdResurrect:
-		if err := s.resurrect(); err != nil {
-			resp = model.Response{Error: err.Error()}
-		} else {
-			resp = model.Response{OK: true}
-		}
-
-	case model.CmdKill:
-		// Gracefully stop every managed process, reply, then exit the daemon.
-		s.killAll()
-		resp = model.Response{OK: true}
-		// Exit after the response is flushed below; the small delay lets
-		// model.WriteJSON at the end of handleConn complete first.
-		go func() {
-			time.Sleep(150 * time.Millisecond)
-			slog.Info("daemon shutting down via kill command")
-			os.Exit(0)
-		}()
-
-	default:
-		resp = model.Response{Error: fmt.Sprintf("unknown command: %s", req.Command)}
-	}
-
-	_ = model.WriteJSON(conn, resp)
-}
-
-func (s *Server) startApp(req *model.AppStartReq) ([]process.ProcessInfo, error) {
+// StartApp handles the RPC `start` command. It resolves the namespace,
+// expands instances to N names, stops any pre-existing process that
+// shares (namespace, name, configFile), and launches each one.
+//
+// Satisfies network.Manager (CmdStart).
+func (s *Server) StartApp(req *model.AppStartReq) ([]process.ProcessInfo, error) {
 	var infos []process.ProcessInfo
 	instances := req.Instances
 	if instances <= 0 {
@@ -282,7 +176,7 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 	// the right entry. Must be built BEFORE executor.Start so it is
 	// captured in the watcher goroutine's closure.
 	onFileChanged := func() {
-		_ = s.restartByName(name)
+		_ = s.RestartByName(name)
 	}
 
 	result, err := s.executor.Start(req, name, onFileChanged)
@@ -401,7 +295,7 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 	if req.CronRestart != "" {
 		if err := s.scheduler.Register(cronKey, req.CronRestart, func() {
 			firedAt := time.Now()
-			restartErr := s.restartByName(cronKey)
+			restartErr := s.RestartByName(cronKey)
 			// Write last-run info onto the newly launched process
 			// (map was replaced by restartByName).
 			cronStatus := "ok"
@@ -435,16 +329,29 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 // cmd.Wait returning. It mirrors what the old watchProcess did inline:
 // updates PID/Status, decides whether to auto-restart, and (if so)
 // spawns the restart goroutine after RestartDelay.
+//
+// Lock-ordering invariant: this callback can race with stopProcess's
+// onStopped callback for the registry lock. If stopping=true, that
+// means Stop has already (or is about to) set Status=StatusStopped —
+// we MUST NOT overwrite it back to errored. The guard below makes the
+// "stopped" state deterministic regardless of which goroutine wins the
+// race for the lock after close(done).
 func (s *Server) onProcessExit(mp *ManagedProcess, waitErr error) {
 	key := mp.Info.Namespace + ":" + mp.Info.Name
 	shouldRestart := false
 	s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 		mp.Info.PID = 0
-		if waitErr != nil {
-			mp.Info.Status = process.StatusErrored
-		} else {
-			mp.Info.Status = process.StatusStopped
+		if !mp.stopping {
+			// Process exited on its own (not via deliberate stop).
+			if waitErr != nil {
+				mp.Info.Status = process.StatusErrored
+			} else {
+				mp.Info.Status = process.StatusStopped
+			}
 		}
+		// If stopping=true, stopProcess's onStopped callback has set
+		// (or is about to set) Status=StatusStopped. Don't race with
+		// it — leave Status as Stop set it.
 
 		// Auto-restart if within max restarts limit and not deliberately stopped
 		if !mp.stopping && mp.Info.Status == process.StatusErrored && mp.Info.Restarts < mp.Info.MaxRestarts {
@@ -531,15 +438,21 @@ func (s *Server) stopProcess(mp *ManagedProcess) error {
 	)
 }
 
-// killAll gracefully stops every managed process. Used by the kill command
+// KillAll gracefully stops every managed process. Used by the kill command
 // before the daemon exits.
-func (s *Server) killAll() {
+//
+// Satisfies network.Manager (CmdKill).
+func (s *Server) KillAll() {
 	for _, mp := range s.findProcesses("all") {
 		_ = s.stopProcess(mp)
 	}
 }
 
-func (s *Server) stopByName(name string) error {
+// StopByName stops every process matching `name` (exact name, namespace,
+// or numeric ID per FindByTarget rules).
+//
+// Satisfies network.Manager (CmdStop).
+func (s *Server) StopByName(name string) error {
 	targets := s.findProcesses(name)
 	if len(targets) == 0 {
 		return fmt.Errorf("process or namespace not found: %s", name)
@@ -550,7 +463,10 @@ func (s *Server) stopByName(name string) error {
 	return nil
 }
 
-func (s *Server) restartByName(name string) error {
+// RestartByName stops then re-launches every matching process.
+//
+// Satisfies network.Manager (CmdRestart).
+func (s *Server) RestartByName(name string) error {
 	targets := s.findProcesses(name)
 	if len(targets) == 0 {
 		return fmt.Errorf("process or namespace not found: %s", name)
@@ -582,11 +498,13 @@ func (s *Server) restartByName(name string) error {
 	return nil
 }
 
-// pauseByName suspends every matching process. A paused process has its
+// PauseByName suspends every matching process. A paused process has its
 // cron schedule removed (it will not fire) and any running instance is
 // stopped; its status becomes StatusPaused so callers can distinguish a
 // deliberately-suspended cron task from one merely idle between fires.
-func (s *Server) pauseByName(name string) error {
+//
+// Satisfies network.Manager (CmdPause).
+func (s *Server) PauseByName(name string) error {
 	targets := s.findProcesses(name)
 	if len(targets) == 0 {
 		return fmt.Errorf("process or namespace not found: %s", name)
@@ -606,12 +524,14 @@ func (s *Server) pauseByName(name string) error {
 	return nil
 }
 
-// resumeByName reverses pauseByName for every matching process. It
+// ResumeByName reverses PauseByName for every matching process. It
 // re-launches through launchProcess, which re-registers the cron
 // schedule and returns a cron task to its idle StatusStopped state (or
 // a regular process to StatusOnline). Resuming a process that was not
 // paused is a no-op that still succeeds, keeping the command idempotent.
-func (s *Server) resumeByName(name string) error {
+//
+// Satisfies network.Manager (CmdResume).
+func (s *Server) ResumeByName(name string) error {
 	targets := s.findProcesses(name)
 	if len(targets) == 0 {
 		return fmt.Errorf("process or namespace not found: %s", name)

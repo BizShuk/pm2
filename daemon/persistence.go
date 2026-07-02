@@ -11,7 +11,7 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
-// save serialises the in-memory process map to <homeDir>/dump.json.
+// Save serialises the in-memory process map to <homeDir>/dump.json.
 // The RLock is taken inside ProcessRegistry.SnapshotAppConfigs so
 // callers do not need to lock — this prevents the "concurrent map
 // iteration and map write" fatal when startAutoSave (background tick)
@@ -25,7 +25,9 @@ import (
 // process contributes its embedded AppConfig (everything except the
 // runtime fields: ID, PID, Status, Restarts, StartedAt, CPU, Memory,
 // User, LastCronAt, LastCronStatus).
-func (s *Server) save() error {
+//
+// Satisfies network.Manager (CmdSave).
+func (s *Server) Save() error {
 	entries := s.reg.SnapshotAppConfigs()
 
 	dumpPath := filepath.Join(s.homeDir, "dump.json")
@@ -36,7 +38,7 @@ func (s *Server) save() error {
 	return os.WriteFile(dumpPath, data, 0o644)
 }
 
-// resurrect reads <homeDir>/dump.json and starts every saved process.
+// Resurrect reads <homeDir>/dump.json and starts every saved process.
 // A per-entry failure is logged but does not abort the rest.
 //
 // The dump format is []process.AppConfig. Resurrect also calls
@@ -44,7 +46,9 @@ func (s *Server) save() error {
 // Instances, Name derivation, etc. match what `pm2 start` from a fresh
 // ecosystem file would produce — closing the gap that
 // plans/architecture-unified-config.md §1.3 flagged as a known bug.
-func (s *Server) resurrect() error {
+//
+// Satisfies network.Manager (CmdResurrect).
+func (s *Server) Resurrect() error {
 	dumpPath := filepath.Join(s.homeDir, "dump.json")
 	data, err := os.ReadFile(dumpPath)
 	if err != nil {
@@ -57,7 +61,7 @@ func (s *Server) resurrect() error {
 	for i := range entries {
 		entries[i].Normalize("")
 		req := &model.AppStartReq{AppConfig: entries[i]}
-		if _, err := s.startApp(req); err != nil {
+		if _, err := s.StartApp(req); err != nil {
 			slog.Info("resurrect error", "name", entries[i].Name, "err", err)
 		}
 	}

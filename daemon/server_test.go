@@ -59,7 +59,7 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	},
 	}
 
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 		BaseEnv:   snapshot,
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	}
 
 	// 2. Replayed by restart.
-	if err := s.restartByName("persistcheck"); err != nil {
+	if err := s.RestartByName("persistcheck"); err != nil {
 		t.Fatalf("restart failed: %v", err)
 	}
 	s.RLock()
@@ -123,13 +123,13 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	}
 
 	// 3. Round-trips through save/resurrect into a fresh server.
-	if err := s.save(); err != nil {
+	if err := s.Save(); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
-	_ = s.stopByName("persistcheck")
+	_ = s.StopByName("persistcheck")
 
 	s2 := NewServer(testDir)
-	if err := s2.resurrect(); err != nil {
+	if err := s2.Resurrect(); err != nil {
 		t.Fatalf("resurrect failed: %v", err)
 	}
 	s2.RLock()
@@ -138,7 +138,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	if mp2 == nil || !envHas(mp2.Info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv lost across save/resurrect")
 	}
-	_ = s2.stopByName("persistcheck")
+	_ = s2.StopByName("persistcheck")
 }
 
 func envHas(env []string, key, val string) bool {
@@ -213,7 +213,7 @@ func TestWatchStateInheritance(t *testing.T) {
 	},
 })
 
-	err := s.save()
+	err := s.Save()
 	if err != nil {
 		t.Fatalf("Failed to save: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestVersionStateInheritance(t *testing.T) {
 	},
 })
 
-	err := s.save()
+	err := s.Save()
 	if err != nil {
 		t.Fatalf("Failed to save: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 		BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
@@ -326,12 +326,12 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 		Instances: 1,
 	},
 	}
-		if _, err := s.startApp(req); err != nil {
+		if _, err := s.StartApp(req); err != nil {
 			t.Fatalf("startApp %s failed: %v", name, err)
 		}
 	}
 
-	s.killAll()
+	s.KillAll()
 
 	s.RLock()
 	defer s.RUnlock()
@@ -390,7 +390,7 @@ func TestConfigFileReplacement(t *testing.T) {
 	},
 	}
 
-	_, err := s.startApp(req)
+	_, err := s.StartApp(req)
 	if err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	},
 	}
 
-	_, err := s.startApp(req)
+	_, err := s.StartApp(req)
 	if err != nil {
 		t.Fatalf("Failed to start app: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	}
 
 	// Delete it while it's sleeping (or about to restart)
-	err = s.deleteByName("fail-app")
+	err = s.DeleteByName("fail-app")
 	if err != nil {
 		t.Fatalf("Failed to delete process: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestRestartsInheritance(t *testing.T) {
 	},
 	}
 
-	_, err := s.startApp(req)
+	_, err := s.StartApp(req)
 	if err != nil {
 		t.Fatalf("Failed to start app: %v", err)
 	}
@@ -545,11 +545,11 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 	},
 	}
 
-	pi, err := s.startApp(req)
+	pi, err := s.StartApp(req)
 	if err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.stopByName("homeexpandcheck")
+	defer s.StopByName("homeexpandcheck")
 
 	if len(pi) == 0 {
 		t.Fatalf("No process info returned")
@@ -651,7 +651,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 					return
 				default:
 				}
-				if err := s.save(); err != nil {
+				if err := s.Save(); err != nil {
 					t.Errorf("save failed: %v", err)
 					return
 				}
@@ -668,7 +668,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 	// Final save must still produce a valid dump.json containing the
 	// entries we just wrote (sanity check that the fix did not silently
 	// produce empty / truncated output).
-	if err := s.save(); err != nil {
+	if err := s.Save(); err != nil {
 		t.Fatalf("final save failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(s.homeDir, "dump.json"))
@@ -753,7 +753,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	// stub), listAll() must NOT be blocked behind it. The previous
 	// implementation would have held s.Lock() for ~500 ms here.
 	start := time.Now()
-	infos := s.listAll()
+	infos := s.ListAll()
 	elapsed := time.Since(start)
 
 	if elapsed > 50*time.Millisecond {
@@ -966,7 +966,7 @@ func TestHighConcurrencyStartup(t *testing.T) {
 		Instances: 1,
 	},
 	}
-			if _, err := s.startApp(req); err != nil {
+			if _, err := s.StartApp(req); err != nil {
 				errs <- fmt.Errorf("startApp[%d]: %w", idx, err)
 			}
 		}(i)
@@ -978,7 +978,7 @@ func TestHighConcurrencyStartup(t *testing.T) {
 	}
 	defer func() {
 		for i := 0; i < N; i++ {
-			_ = s.stopByName(fmt.Sprintf("concurrent-%d", i))
+			_ = s.StopByName(fmt.Sprintf("concurrent-%d", i))
 		}
 	}()
 
@@ -1032,10 +1032,10 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 		// MaxRestarts defaults to 0 → no auto-restart.
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.stopByName("errored-norestart")
+	defer s.StopByName("errored-norestart")
 
 	// Wait for the process to die and watchProcess to update state.
 	// All field reads happen under RLock so the race detector sees a
@@ -1104,10 +1104,10 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 		MaxRestarts: 5,
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.stopByName("errored-autorestart")
+	defer s.StopByName("errored-autorestart")
 
 	// Capture initial PID + ID under RLock.
 	s.RLock()
@@ -1187,10 +1187,10 @@ func TestProcessCleanExit(t *testing.T) {
 		MaxRestarts: 5, // even with budget, clean exit must NOT restart
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.stopByName("clean-exit")
+	defer s.StopByName("clean-exit")
 
 	// Wait for the process to die and watchProcess to update state.
 	var (
@@ -1271,10 +1271,10 @@ func TestCronRestartFiresReboot(t *testing.T) {
 		CronRestart: "@every 1s",
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.stopByName("cron-restart-app")
+	defer s.StopByName("cron-restart-app")
 
 	// Capture initial PID under RLock.
 	s.RLock()
@@ -1384,7 +1384,7 @@ func TestStopProcessKillsChildren(t *testing.T) {
 		Instances: 1,
 	},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
 
@@ -1413,7 +1413,7 @@ func TestStopProcessKillsChildren(t *testing.T) {
 
 	// Stop the parent. The fix must propagate SIGTERM to the whole
 	// process group, so the child sleep dies with the parent.
-	if err := s.stopByName("orphan-test"); err != nil {
+	if err := s.StopByName("orphan-test"); err != nil {
 		t.Fatalf("stopByName: %v", err)
 	}
 
@@ -1456,10 +1456,10 @@ func TestCronNamespaceIsolation(t *testing.T) {
 		CronRestart: "@every 1h", // long interval — we only check EntryCount
 	},
 	}
-	if _, err := s.startApp(req1); err != nil {
+	if _, err := s.StartApp(req1); err != nil {
 		t.Fatalf("start default:api: %v", err)
 	}
-	defer s.stopByName("default:api")
+	defer s.StopByName("default:api")
 
 	if got := s.scheduler.EntryCount(); got != 1 {
 		t.Errorf("after first start: scheduler has %d entries, want 1", got)
@@ -1474,10 +1474,10 @@ func TestCronNamespaceIsolation(t *testing.T) {
 		CronRestart: "@every 1h",
 	},
 	}
-	if _, err := s.startApp(req2); err != nil {
+	if _, err := s.StartApp(req2); err != nil {
 		t.Fatalf("start production:api: %v", err)
 	}
-	defer s.stopByName("production:api")
+	defer s.StopByName("production:api")
 
 	// The critical assertion: BOTH entries must exist.
 	// Before the fix, this was 1 (production:api's Register overwrote
@@ -1505,7 +1505,7 @@ func TestPauseResumeCronTask(t *testing.T) {
 			Cron:      "@every 1h", // cron task: idle between fires
 		},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
 
@@ -1519,7 +1519,7 @@ func TestPauseResumeCronTask(t *testing.T) {
 	}
 
 	// Pause: schedule removed, status becomes paused.
-	if err := s.pauseByName("default:nightly"); err != nil {
+	if err := s.PauseByName("default:nightly"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
 	mp, _ = s.reg.Get("default:nightly")
@@ -1534,7 +1534,7 @@ func TestPauseResumeCronTask(t *testing.T) {
 	}
 
 	// Resume: schedule re-registered, status back to idle stopped.
-	if err := s.resumeByName("default:nightly"); err != nil {
+	if err := s.ResumeByName("default:nightly"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
 	mp, _ = s.reg.Get("default:nightly")
@@ -1564,12 +1564,12 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 			Instances: 1,
 		},
 	}
-	if _, err := s.startApp(req); err != nil {
+	if _, err := s.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
-	defer s.stopByName("default:worker")
+	defer s.StopByName("default:worker")
 
-	if err := s.pauseByName("default:worker"); err != nil {
+	if err := s.PauseByName("default:worker"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
 	mp, _ := s.reg.Get("default:worker")
@@ -1580,7 +1580,7 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 		t.Errorf("after pause: PID=%d, want 0", mp.Info.PID)
 	}
 
-	if err := s.resumeByName("default:worker"); err != nil {
+	if err := s.ResumeByName("default:worker"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
 	mp, _ = s.reg.Get("default:worker")
