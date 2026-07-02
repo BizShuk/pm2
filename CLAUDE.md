@@ -75,11 +75,25 @@ pm2/
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
 └── tui/
-    ├── model.go              Bubbletea Model — two-pane TUI: process list + detail/logs
-    │                         doRefresh(), readLogs(), doAction() as tea.Cmd
-    ├── formatter.go          string formatting helpers for the TUI
-    ├── metrics.go            CPU and memory metrics display logic
-    ├── renderer.go           Bubbletea view rendering logic
+    ├── model.go              Bubbletea Model — controller: Update event branches,
+    │                         Cmd dispatch, View() delegates to tui/views
+    ├── theme.go              Re-exports the palette from tui/theme as clXxx vars
+    ├── theme/                tui/theme sub-package: single source of truth for
+    │   └── palette.go        lipgloss.AdaptiveColor palette (Online/Stopped/...)
+    ├── views/                Stateless renderers; pure functions of ViewContext
+    │   ├── context.go        ViewContext struct (Width/Height/Procs/Logs/...)
+    │   ├── header.go         RenderHeader — title bar (count, time, notice)
+    │   ├── footer.go         RenderFooter (key hints) + RenderHostMetricsLines
+    │   ├── detail.go         RenderDetail — right-panel param table
+    │   ├── logs.go           RenderLogs — right-panel log tail
+    │   ├── list.go           RenderWideTable + RenderLeftPane (two-pane list)
+    │   ├── layout.go         RenderLayout — single entry point; orchestrates
+    │   │                     header + body + footer, decides single vs two-pane
+    │   └── format.go         Pure formatters: shortUptime, fullUptime, fmtTime,
+    │                         cronExpr/Next/LastRunStyled, Crop/CropRight,
+    │                         formatBytes, formatWatching, secHeader,
+    │                         dotFor, statusLabel, getStatusColor
+    ├── metrics.go            CPU and memory metrics background collector
     └── model_test.go         Unit tests for TUI layout and logic
 ```
 
@@ -187,3 +201,15 @@ else `CmdPause`), so the same key suspends and reactivates a cron task.
 - Log file paths are resolved once at launch time and stored in `ProcessInfo`.
   Do not re-derive them from name at read time.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
+- All TUI view rendering lives in `tui/views/` as pure functions. Every
+  exported renderer takes a `views.ViewContext` (or the specific primitive
+  it needs) and returns a `string`. Views never mutate state, never reach
+  into the controller, and never hold references to `tui.Model`. Add a new
+  view by writing a new function in the relevant `views/*.go` file and
+  wiring it into `RenderLayout`; do not reintroduce member methods on
+  `Model`.
+- Colour values come from `tui/theme/palette.go` only. The `clXxx`
+  re-exports in `tui/theme.go` exist for backwards compatibility inside
+  the tui package; new code outside the tui/views subtree should
+  import `tui/theme` directly. Never declare new `lipgloss.AdaptiveColor`
+  literals inside view code.

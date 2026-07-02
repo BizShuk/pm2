@@ -8,10 +8,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/tui/views"
 )
 
 func TestBuildDetailScriptArgsCombined(t *testing.T) {
-	m := New("mock_socket", true)
+	_ = New("mock_socket", true)
 	p := process.ProcessInfo{
 		AppConfig: process.AppConfig{
 			Name:   "test-app",
@@ -23,7 +24,7 @@ func TestBuildDetailScriptArgsCombined(t *testing.T) {
 		StartedAt: time.Now(),
 	}
 
-	detail := m.buildDetail(p, 100)
+	detail := views.RenderDetail(p, 100)
 
 	expected := "/path/to/script.sh --foo bar -v"
 	if !strings.Contains(detail, expected) {
@@ -32,7 +33,7 @@ func TestBuildDetailScriptArgsCombined(t *testing.T) {
 }
 
 func TestBuildDetailScriptNoArgs(t *testing.T) {
-	m := New("mock_socket", true)
+	_ = New("mock_socket", true)
 	p := process.ProcessInfo{
 		AppConfig: process.AppConfig{
 			Name:   "test-app",
@@ -43,7 +44,7 @@ func TestBuildDetailScriptNoArgs(t *testing.T) {
 		StartedAt: time.Now(),
 	}
 
-	detail := m.buildDetail(p, 100)
+	detail := views.RenderDetail(p, 100)
 
 	expected := "/path/to/script.sh"
 	if !strings.Contains(detail, expected) {
@@ -224,7 +225,7 @@ func TestDetailTuiStability(t *testing.T) {
 	}
 
 	// 4. Verify buildLogs shows loading... when logs is nil
-	logsOutputNil := newModel3.buildLogs("proc-2", 40, 5)
+	logsOutputNil := views.RenderLogs("proc-2", nil, 40, 5)
 	if !strings.Contains(logsOutputNil, "loading...") {
 		t.Errorf("Expected log output to contain 'loading...', but got: %q", logsOutputNil)
 	}
@@ -239,16 +240,19 @@ func TestDetailTuiStability(t *testing.T) {
 	if newModel4.logs == nil || len(newModel4.logs) != 0 {
 		t.Errorf("Expected logs to be empty slice, got: %v", newModel4.logs)
 	}
-	logsOutputEmpty := newModel4.buildLogs("proc-2", 40, 5)
+	logsOutputEmpty := views.RenderLogs("proc-2", []string{}, 40, 5)
 	if !strings.Contains(logsOutputEmpty, "(no log entries)") {
 		t.Errorf("Expected log output to contain '(no log entries)', but got: %q", logsOutputEmpty)
 	}
 }
 
 func TestCroppingUTF8AndRunewidth(t *testing.T) {
+	// crop / cropRight are pure helpers that live in tui/views/format.go
+	// since the view layer is the only consumer. We exercise them
+	// here to lock in the runewidth behaviour the renderer depends on.
 	// 1. Test crop (left crop, keep suffix)
 	// ASCII string
-	res1 := crop("abcdefghij", 6) // maxLen 6 -> "…fghij" (width 1 + 5 = 6)
+	res1 := views.Crop("abcdefghij", 6) // maxLen 6 -> "…fghij" (width 1 + 5 = 6)
 	if res1 != "…fghij" {
 		t.Errorf("Expected '…fghij', got %q", res1)
 	}
@@ -257,14 +261,14 @@ func TestCroppingUTF8AndRunewidth(t *testing.T) {
 	// "一二三四五" (visual width 10)
 	// maxLen 6 -> targetWidth = 5.
 	// suffix "四五" has width 4. Plus "…" (width 1) = 5 <= 6.
-	res2 := crop("一二三四五", 6)
+	res2 := views.Crop("一二三四五", 6)
 	if res2 != "…四五" {
 		t.Errorf("Expected '…四五', got %q", res2)
 	}
 
 	// 2. Test cropRight (right crop, keep prefix)
 	// ASCII string
-	res3 := cropRight("abcdefghij", 6) // maxLen 6 -> "abcde…" (width 5 + 1 = 6)
+	res3 := views.CropRight("abcdefghij", 6) // maxLen 6 -> "abcde…" (width 5 + 1 = 6)
 	if res3 != "abcde…" {
 		t.Errorf("Expected 'abcde…', got %q", res3)
 	}
@@ -273,7 +277,7 @@ func TestCroppingUTF8AndRunewidth(t *testing.T) {
 	// "一二三四五"
 	// maxLen 6 -> targetWidth = 5.
 	// prefix "一二" has width 4. Plus "…" (width 1) = 5 <= 6.
-	res4 := cropRight("一二三四五", 6)
+	res4 := views.CropRight("一二三四五", 6)
 	if res4 != "一二…" {
 		t.Errorf("Expected '一二…', got %q", res4)
 	}
@@ -313,7 +317,10 @@ func TestActionNoticeSurfacesAndClears(t *testing.T) {
 	if m.notice == "" {
 		t.Fatal("notice not recorded on actionMsg")
 	}
-	if title := m.buildTitle(); !strings.Contains(title, "pause failed") {
+	if title := views.RenderHeader(views.ViewContext{
+		Width:  m.width,
+		Notice: m.notice,
+	}); !strings.Contains(title, "pause failed") {
 		t.Errorf("title bar did not show the action notice, got: %q", title)
 	}
 

@@ -113,22 +113,35 @@ pm2/
 本重構將完全遵循絞殺榕模式 (Strangler-Fig Pattern) 的演進方向，每一小步均可獨立編譯、測試並可隨時回滾：
 
 ### 第一階段：抽離主題配色 (Extract Theme Colors)
-* 步驟 1：建立 `tui/theme.go`，將所有 `cl*` 的 `lipgloss.AdaptiveColor` 與常用的風格樣式移入。
-* 步驟 2：修改 `tui/model.go`、`tui/renderer.go` 與 `tui/formatter.go`，使其引用 `theme.go` 內的樣式變數。
-* 驗證命令：`go test -v ./tui/...`
+* [x] 步驟 1：建立 `tui/theme.go`，將所有 `cl*` 的 `lipgloss.AdaptiveColor` 與常用的風格樣式移入。
+* [x] 步驟 2：修改 `tui/model.go`、`tui/renderer.go` 與 `tui/formatter.go`，使其引用 `theme.go` 內的樣式變數。
+* [x] 驗證命令：`go test -v ./tui/...` → `ok  github.com/bizshuk/pm2/tui`
 
 ### 第二階段：實作無狀態視圖模組 (Extract Stateless Views)
-* 步驟 1：建立 `tui/views/` 目錄。
-* 步驟 2：建立 `views/header.go`、`views/footer.go`、`views/logs.go`、`views/detail.go`，將原本 `renderer.go` 中的對應 `build*` 成員方法重構為純函數，傳入參數僅為 `ViewContext` 或其渲染所需之具體參數。
-* 步驟 3：在 `tui/model_test.go` 中，將對 `m.buildDetail` 的測試改為直接對 `views.RenderDetail` 進行測試，不再依賴 `Model` 實例。
-* 驗證命令：`go test -v ./tui/...`
+* [x] 步驟 1：建立 `tui/views/` 目錄。
+* [x] 步驟 2：建立 `views/header.go`、`views/footer.go`、`views/logs.go`、`views/detail.go`，將原本 `renderer.go` 中的對應 `build*` 成員方法重構為純函數，傳入參數僅為 `ViewContext` 或其渲染所需之具體參數。
+* [x] 步驟 3：在 `tui/model_test.go` 中，將對 `m.buildDetail` 的測試改為直接對 `views.RenderDetail` 進行測試，不再依賴 `Model` 實例。
+* [x] 驗證命令：`go test -v ./tui/...` → `ok  github.com/bizshuk/pm2/tui`
 
 ### 第三階段：重構列表與佈局管理器 (Reconstruct List and Layout)
-* 步驟 1：建立 `views/list.go`，遷移並統合 `buildLeft` 與 `buildListTUI`，將其重構為無狀態函數。
-* 步驟 2：建立 `views/layout.go`，將雙欄與單欄的佈局拼裝邏輯寫入。
-* 步驟 3：修改 `tui/model.go` 中的 `View()` 方法，使其直接調用 `views.RenderLayout(ctx)`。
-* 步驟 4：刪除原本龐大的 `tui/renderer.go` 檔案。
-* 驗證命令：`go test -v ./tui/...` 且 `go build -o /dev/null ./...` 正常。
+* [x] 步驟 1：建立 `views/list.go`，遷移並統合 `buildLeft` 與 `buildListTUI`，將其重構為無狀態函數。
+* [x] 步驟 2：建立 `views/layout.go`，將雙欄與單欄的佈局拼裝邏輯寫入。
+* [x] 步驟 3：修改 `tui/model.go` 中的 `View()` 方法，使其直接調用 `views.RenderLayout(ctx)`。
+* [x] 步驟 4：刪除原本龐大的 `tui/renderer.go` 檔案。
+* [x] 驗證命令：`go test -v ./tui/...` 且 `go build -o /dev/null ./...` 正常。
+
+### 完成結果 (Results 2026-07-03)
+
+* 套件結構：
+  * `tui/theme/palette.go` 為色彩唯一來源
+  * `tui/theme.go` 將 `clXxx` 別名 re-export 出來，保持向後相容
+  * `tui/views/{context,header,footer,detail,logs,list,layout,format}.go` 為無狀態視圖
+  * `tui/model.go` 的 `View()` 簡化為「組裝 `ViewContext` → `views.RenderLayout(ctx)`」
+  * `tui/renderer.go` 與 `tui/formatter.go` 已刪除
+* 驗證：
+  * `go test -race ./tui/...` 全綠
+  * `go build ./tui/...` 編譯通過
+  * 視覺煙霧測試：直接呼叫 `views.RenderLayout(ctx)` 在三種狀態（寬表 / 雙欄 / 空狀態）下渲染輸出與原始碼完全一致
 
 ## 7. 風險與回滾策略 (Risks & Rollback)
 

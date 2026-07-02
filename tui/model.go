@@ -6,38 +6,19 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/tui/views"
 )
 
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
 	detailRows = 17 // rows in detail section (excluding header)
-)
-
-// ─── colors ──────────────────────────────────────────────────────────────────
-
-var (
-	clOnline  = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#3fb950"}
-	clStopped = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#6e7681"}
-	clErrored = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f85149"}
-	clWarn    = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#e3b341"}
-	clCron    = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#d2a8ff"}
-	clPath    = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#388bfd"}
-	clMuted   = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#8b949e"}
-	clSelBg   = lipgloss.AdaptiveColor{Light: "#e0e7ff", Dark: "#2e3440"}
-	clSelName = lipgloss.AdaptiveColor{Light: "#0891b2", Dark: "#06b6d4"}
-	clSelText = lipgloss.AdaptiveColor{Light: "#0f172a", Dark: "#ffffff"}
-	clHdrBg   = lipgloss.AdaptiveColor{Light: "#f1f5f9", Dark: "#161b22"}
-	clBorder  = lipgloss.AdaptiveColor{Light: "#cbd5e1", Dark: "#30363d"}
-	clText    = lipgloss.AdaptiveColor{Light: "#0f172a", Dark: "#e6edf3"}
 )
 
 type SortField string
@@ -382,29 +363,23 @@ func doAction(socket string, req model.Request) tea.Cmd {
 
 // ─── view ────────────────────────────────────────────────────────────────────
 
+// View builds a ViewContext from the controller state and delegates
+// the actual rendering to the tui/views package. No presentation
+// logic lives here any more.
 func (m Model) View() string {
-	if m.width < 50 {
-		return "terminal too narrow (min 50 cols)"
-	}
-
-	if !m.Detail {
-		return m.buildListTUI()
-	}
-
-	contentH := m.height - 2 // subtract title + footer rows
-	leftW := m.getLeftColW()
-	rw := m.width - leftW - 1
-
-	left := lipgloss.NewStyle().Width(leftW).Height(contentH).
-		Render(m.buildLeft(leftW, contentH))
-
-	div := lipgloss.NewStyle().Width(1).Height(contentH).Foreground(clBorder).
-		Render(strings.Repeat("│\n", contentH-1) + "│")
-
-	right := lipgloss.NewStyle().Width(rw).Height(contentH).
-		Render(m.buildRight(rw, contentH))
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, div, right)
-	return lipgloss.JoinVertical(lipgloss.Left, m.buildTitle(), body, buildFooter(m.width, m.SortBy))
+	return views.RenderLayout(views.ViewContext{
+		Width:    m.width,
+		Height:   m.height,
+		Selected: m.selected,
+		Procs:    m.procs,
+		Logs:     m.logs,
+		Updated:  m.updated,
+		HostCPU:  m.hostCPU,
+		HostMem:  m.hostMem,
+		SortBy:   string(m.SortBy),
+		Err:      m.err,
+		Notice:   m.notice,
+		Detail:   m.Detail,
+	})
 }
 
