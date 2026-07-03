@@ -204,7 +204,15 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 	status := process.StatusOnline
 
 	isCronTask := req.Cron != "" && !req.CronTriggered
-	if isCronTask {
+	isPaused := req.Paused
+	if isPaused {
+		// Paused entries come back from save/resurrect carrying the
+		// user's deliberate suspension. They are status Paused with no
+		// process running and (crucially) NO scheduler entry — that
+		// is exactly what makes "paused" different from "idle cron
+		// task" (which sits at StatusStopped but is still registered).
+		status = process.StatusPaused
+	} else if isCronTask {
 		status = process.StatusStopped
 	} else {
 		startedAt = time.Now()
@@ -281,18 +289,29 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 
 	// Watch for process exit in background. The Executor owns the
 	// cmd.Wait + file-close + done-close + onExit lifecycle; we only
-	// supply the state-update closure.
-	if !isCronTask {
+	// supply the state-update closure. Paused entries have no process,
+	// so there is nothing to wait for — skip the goroutine entirely.
+	// (A paused cron task also has no process; that path was already
+	// handled by the !isCronTask check.)
+	if !isCronTask && !isPaused {
 		go s.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(waitErr error) {
 			s.onProcessExit(mp, waitErr)
 		})
 	}
 
+	// Mark the registry entry paused. The flag drives `pm2 pause` /
+	// `pm2 resume` semantics and must round-trip through save/resurrect
+	// — see SnapshotAppConfigs and Resurrect in persistence.go.
+	mp.paused = isPaused
+
 	// Register cron restart if configured. The scheduler keys entries
 	// by "namespace:name" (composite) so that two processes sharing a
 	// name across namespaces don't overwrite each other's cron job.
+	// Paused entries deliberately do NOT register: the user suspended
+	// this schedule, so resurrecting it active would silently undo
+	// `pm2 pause`.
 	cronKey := ns + ":" + name
-	if req.CronRestart != "" {
+	if req.CronRestart != "" && !isPaused {
 		if err := s.scheduler.Register(cronKey, req.CronRestart, func() {
 			firedAt := time.Now()
 			restartErr := s.RestartByName(cronKey)
@@ -308,8 +327,9 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 		}
 	}
 
-	// Register cron schedule if configured
-	if req.Cron != "" {
+	// Register cron schedule if configured. Same pause-exempt rule as
+	// cron_restart above.
+	if req.Cron != "" && !isPaused {
 		if err := s.scheduler.Register(cronKey, req.Cron, func() {
 			s.triggerCron(ns, name, req)
 		}); err != nil {

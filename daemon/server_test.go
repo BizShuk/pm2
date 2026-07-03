@@ -1549,6 +1549,75 @@ func TestPauseResumeCronTask(t *testing.T) {
 	}
 }
 
+// TestPausedCronTaskSurvivesResurrect is the regression test for the bug
+// "paused cron job is not resurrected": before the fix, paused state lived
+// only on ManagedProcess.paused (runtime memory) and was dropped on
+// daemon restart, so a cron task that was deliberately suspended came
+// back with its scheduler entry registered and would fire on schedule.
+//
+// After the fix, the paused flag must round-trip through save/resurrect:
+//   - resurrected entry starts at StatusPaused (not StatusStopped)
+//   - mp.paused is true on the new server
+//   - the cron scheduler has NO entry for the resurrected process
+func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
+	testDir := testDir(t)
+	s1 := NewServer(testDir)
+
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace: "default",
+			Name:      "nightly-paused",
+			Script:    "/bin/echo",
+			Args:      []string{"hi"},
+			Cron:      "@every 1h",
+		},
+	}
+	if _, err := s1.StartApp(req); err != nil {
+		t.Fatalf("startApp: %v", err)
+	}
+	if got := s1.scheduler.EntryCount(); got != 1 {
+		t.Fatalf("baseline: scheduler has %d entries, want 1", got)
+	}
+
+	// Pause the cron task — this is the state we expect to preserve.
+	if err := s1.PauseByName("default:nightly-paused"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if got := s1.scheduler.EntryCount(); got != 0 {
+		t.Fatalf("after pause: scheduler has %d entries, want 0", got)
+	}
+
+	// Persist the paused state. Before the fix, this drops the paused flag.
+	if err := s1.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Simulate a daemon restart: fresh server, same home dir.
+	s2 := NewServer(testDir)
+	if err := s2.Resurrect(); err != nil {
+		t.Fatalf("resurrect: %v", err)
+	}
+
+	mp, ok := s2.reg.Get("default:nightly-paused")
+	if !ok {
+		t.Fatalf("resurrect: process missing from registry")
+	}
+
+	// Critical assertions — all three must hold after the fix.
+	if mp.Info.Status != process.StatusPaused {
+		t.Errorf("after resurrect: status=%s, want %s (paused state must survive)",
+			mp.Info.Status, process.StatusPaused)
+	}
+	if !mp.paused {
+		t.Errorf("after resurrect: paused flag is false, want true")
+	}
+	if got := s2.scheduler.EntryCount(); got != 0 {
+		t.Errorf("after resurrect: scheduler has %d entries, want 0 (cron must NOT fire)", got)
+	}
+
+	_ = s2.StopByName("default:nightly-paused")
+}
+
 // TestPauseResumeRunningProcess verifies pause stops a live process (PID
 // cleared, status paused) and resume brings it back online.
 func TestPauseResumeRunningProcess(t *testing.T) {

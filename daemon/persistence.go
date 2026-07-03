@@ -61,6 +61,12 @@ func (s *Server) Resurrect() error {
 	for i := range entries {
 		entries[i].Normalize("")
 		req := &model.AppStartReq{AppConfig: entries[i]}
+		// AppConfig.Paused is part of the persistent snapshot — we set
+		// it on the request explicitly so launchProcess sees it through
+		// its req.Paused branch. (The field is promoted via embedding,
+		// so it would round-trip through AppConfig too, but plumbing it
+		// here keeps the wiring obvious at the call site.)
+		req.Paused = entries[i].Paused
 		if _, err := s.StartApp(req); err != nil {
 			slog.Info("resurrect error", "name", entries[i].Name, "err", err)
 		}

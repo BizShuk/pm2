@@ -139,12 +139,20 @@ func (r *ProcessRegistry) Snapshot() []process.ProcessInfo {
 
 // SnapshotAppConfigs returns the AppConfig half of every ProcessInfo — the
 // persistent fields. Used by persistence.save (dump.json serialisation).
+//
+// The Paused bit is copied from ManagedProcess.paused onto each emitted
+// AppConfig so that `pm2 pause` survives save/resurrect. Without this hook
+// (regression test: TestPausedCronTaskSurvivesResurrect), a cron task that
+// was deliberately suspended would come back with its scheduler entry
+// re-registered and fire on schedule after a daemon restart.
 func (r *ProcessRegistry) SnapshotAppConfigs() []process.AppConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]process.AppConfig, 0, len(r.processes))
 	for _, mp := range r.processes {
-		out = append(out, mp.Info.AppConfig)
+		cfg := mp.Info.AppConfig
+		cfg.Paused = mp.paused
+		out = append(out, cfg)
 	}
 	return out
 }

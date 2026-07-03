@@ -162,8 +162,12 @@ entry, so it will not fire until resumed.
 `pm2 resume <target>` re-launches via `launchProcess()` with `CronTriggered =
 false`, which re-registers the cron schedule and returns a cron task to idle
 `StatusStopped` (or a regular process to `StatusOnline`). Resume on a
-non-paused process is a no-op. The `paused` flag lives only in runtime state
-(not persisted to dump.json).
+non-paused process is a no-op. The `paused` flag round-trips through
+`dump.json` via `process.AppConfig.Paused` — `SnapshotAppConfigs` copies it
+from `ManagedProcess.paused` at save time, and `Resurrect` re-applies it via
+`AppStartReq.Paused`. A paused cron task resurrects without its cron schedule
+being re-registered, so a daemon restart does not silently undo `pm2 pause`
+(regression test: `TestPausedCronTaskSurvivesResurrect`).
 
 ### Relative path resolution
 

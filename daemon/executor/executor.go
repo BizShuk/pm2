@@ -116,9 +116,15 @@ func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func
 	}
 
 	isCronTask := req.Cron != "" && !req.CronTriggered
-	if isCronTask {
-		// Cron task: do not fork a child. Close log files now so they
-		// do not stay held open while idle between fires.
+	isPaused := req.Paused
+	if isCronTask || isPaused {
+		// Cron task (idle between fires) and Paused entry (cron schedule
+		// deliberately suspended — see regression test
+		// TestPausedCronTaskSurvivesResurrect) both share the same
+		// launch shape: no child to fork, no watch to wire up, but the
+		// log file paths must still be present on mp.Info so `pm2 logs`
+		// resolves them. Close outF/errF so they do not stay held
+		// open while idle.
 		outF.Close()
 		errF.Close()
 		return &StartResult{LogFile: logFile, ErrFile: errFile}, nil
