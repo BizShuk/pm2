@@ -102,7 +102,7 @@
     - 驗證：拉起含 cron 重啟 / 日誌 / watch 的多進程，停止後無孤兒進程且 `pm2 list` 狀態正常。
     - 結果（2026-07-03）：提交 `684ed77 refactor(daemon): extract Executor into daemon/executor subpackage`，新建 `daemon/executor/{executor.go, builder.go, watcher.go, metrics.go}`。`Executor` 持有 `cmdBuilders`/`fileWatcher`/`metricsCollector` 等依賴；`daemon.Server` 持 `*Executor`，所有 spawn/watch/stop 委派至 Executor。`stopProcess` 沿用先前診斷 1.3 修復（`kill(2)` 對負 pid 即 process group 發送 SIGTERM/SIGKILL），builder 直接 `Setpgid: true` 確保進程組語意。**鎖方向檢查**：`Executor` 本身不持 `s.reg` 鎖，所有狀態回寫透過 `onStopping`/`onStopped`/`onExit`/`onFileChanged` 回呼，呼叫端以 `s.reg.UpdateInfo(key, fn)` 走 `ProcessRegistry` 內部鎖，無跨持鎖阻塞。`go list -deps ./daemon/executor/... | grep 'pm2/daemon$'` 為空，executor 子包完全獨立。`go build ./...` 與 `go test -race -count=2 ./daemon/...` 全綠；`TestStopProcessKillsChildren`、`TestCronNamespaceIsolation`、`TestRefreshMetricsParallelSpeedup` 等既有回歸測試穩定通過。
 
-- [x] `第五階段：抽離網路傳輸層 (Extract network layer)`
+- [x] `第五階段：抽離網路傳輸層 (Extract network layer)` — 規格 [docs/specs/extract-network-layer.md](./docs/specs/extract-network-layer.md)
     - 將 `Listen`/`handleConn` 遷至 `daemon/network/listener.go` 與 `handler.go`，僅依賴 `Manager` 的主動介面路由，網路與業務完全隔離。
     - 嚴守由外向內單向依賴，`executor`/`manager` 不得引用 `network`，防 `import cycle not allowed`。
     - 驗證：`go test -race ./...` + E2E 確認 CLI/TUI 行為與重構前一致。
