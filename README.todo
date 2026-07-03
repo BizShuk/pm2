@@ -1,5 +1,7 @@
 # pm2 待辦清單 (TODO)
 
+- [ ] implmenet daemon start and combine kill into daemon kill
+- [ ] pasued cron job is not resurrect
 - [ ] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。
 
 `plans/` 審查後尚未完成或需後續處理的項目。已完成並驗證 (build + `go test ./...` 全綠) 的計畫已移至 `docs/specs/`。
