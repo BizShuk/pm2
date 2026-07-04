@@ -1,8 +1,8 @@
 # pm2 待辦清單 (TODO)
 
-- [ ] implmenet daemon start and combine kill into daemon kill
-- [ ] pasued cron job is not resurrect
-- [ ] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。
+- [x] implmenet daemon start and combine kill into daemon kill
+- [x] pasued cron job is not resurrect
+- [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。
 
 `plans/` 審查後尚未完成或需後續處理的項目。已完成並驗證 (build + `go test ./...` 全綠) 的計畫已移至 `docs/specs/`。
 
@@ -52,7 +52,18 @@
     - 驗證：沙箱環境執行 `go test -v ./daemon`，無權限錯誤且不污染家目錄。
     - 結果（2026-07-01）：`TestStartAppOutFileHomeExpansion` 加上 `t.Setenv("HOME", testDir)` 並斷言 LogFile/ErrorFile 路徑不以 `realHome` 開頭。注意踩坑：`realHome` 必須用 `os.Getenv("HOME")` 而**非** `homedir.Dir()` — 後者有 package-level cache，第一次呼叫就把值鎖住，後續 `t.Setenv` 完全無效（`homedir.Expand` 仍用 cached 值）。已用「暫時移除 Setenv → 測試 fail → 恢復 → 測試 pass」驗證。
 
-## 守護進程解耦重構 (Daemon Decoupling Refactor)
+## 生態配置精靈解耦 (Ecosystem Wizard Decoupling)
+
+- [ ] `生態配置精靈與渲染器抽離 (Extract Ecosystem Wizard and Renderer)` — 來源 [plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
+    - 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
+    - 驗證：`go test -race ./...` 與 `go build` 通過。
+
+## Archive
+
+- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
+    - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。
+
+### 守護進程解耦重構 (Daemon Decoupling Refactor)
 
 > 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、[docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)（原 `plans/architecture-daemon-decoupling-phase2.md`）、[docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md)（原 `plans/architecture-extract-registry.md`）、[docs/specs/daemon-decoupling-phase3.md](./docs/specs/daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 已內含 `state.go::ProcessRegistry`（扁平結構），尚無 `daemon/executor/`、`daemon/network/`、`tui/views/`、`config/wizard/`。
 
@@ -112,14 +123,3 @@
     - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
     - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
     - 結果（2026-07-03）：提交 `4ed9e89 refactor(tui): split renderer into stateless views under tui/views/`，新建 `tui/views/{context.go, header.go, footer.go, detail.go, logs.go, list.go, layout.go, format.go}` 八個檔案。`context.go` 定義 `ViewContext` 結構（`Width`/`Height`/`Procs`/`Logs`/`MetricsLines`/`Cursor`/`Watching`/`Time`/`Notice` 等）；`layout.go` 提供 `RenderLayout` 單一入口，依終端寬度決定 single-pane 或 two-pane 編排。各 View 函式僅接受 `ViewContext` 或所需 primitive、回傳 `string`，**無狀態、無 callback、無 `tui.Model` 引用** — 純函式，便於測試。色彩 token 改由 `tui/theme/palette.go` 統一輸出，`tui/theme.go` 之 `clXxx` re-export 僅作向後相容，新程式碼直接 import `tui/theme`。`tui.Model::View()` 簡化為委派 `views.RenderLayout(ctx)`，`Update()` 仍負責事件分支與 `doRefresh()` 派發。`go test -race ./tui/...` 全綠；`go list -deps ./tui/views/... | grep 'pm2/daemon$'` 為空，TUI views 完全不依賴 daemon 套件。
-
-## 生態配置精靈解耦 (Ecosystem Wizard Decoupling)
-
-- [ ] `生態配置精靈與渲染器抽離 (Extract Ecosystem Wizard and Renderer)` — 來源 [plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
-    - 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
-    - 驗證：`go test -race ./...` 與 `go build` 通過。
-
-## Archive
-
-- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
-    - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。
