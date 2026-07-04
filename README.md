@@ -68,6 +68,36 @@ pm2 stop all
 
 Sends `SIGTERM`; escalates to `SIGKILL` after 5 seconds. A deliberately stopped process is never auto-restarted.
 
+The daemon itself keeps running — to stop it, use `pm2 daemon kill` (see below).
+
+---
+
+### `pm2 daemon` — manage the daemon
+
+The daemon is the long-running process that owns the socket, the registry, and the cron scheduler. Lifecycle is a two-verb command group:
+
+```bash
+pm2 daemon start           # spawn the daemon (background by default)
+pm2 daemon start --foreground   # run in foreground (blocking; Ctrl+C stops it)
+pm2 daemon kill            # gracefully stop every process, then exit the daemon
+```
+
+Bare `pm2 daemon` (no subcommand) errors out — pick a verb. The internal auto-start paths (`pm2 start` on a fresh install) call `pm2 daemon start --foreground` via `exec`, so the verb is always present in argv.
+
+#### `stop` vs `daemon kill` — which one do I want?
+
+These two look similar but operate on different layers of the system:
+
+| Aspect | `pm2 stop <name\|id\|all>` | `pm2 daemon kill` |
+| ------ | -------------------------- | ----------------- |
+| Operates on | a managed process | the daemon itself |
+| Daemon afterwards | still running, still accepting RPC | exited (process count drops to zero) |
+| Signal path | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path, applied to every mp, then `os.Exit(0)` |
+| Restartability | re-launchable with `pm2 start` | requires `pm2 daemon start` to bring it back |
+| When the daemon is unreachable | error: cannot dial socket | idempotent: prints "PM2 daemon is not running." and returns nil |
+
+> **Removed in this revision:** the legacy top-level `pm2 kill` command has been deleted. It was always equivalent to `pm2 daemon kill` plus a `Deprecated:` marker; the canonical entry point is now exclusively under the `daemon` group. Scripts calling `pm2 kill` will see `Error: unknown command "kill" for "pm2"`.
+
 ---
 
 ### `pm2 restart`

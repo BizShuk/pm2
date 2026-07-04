@@ -387,33 +387,31 @@ func (s *Server) onProcessExit(mp *ManagedProcess, waitErr error) {
 		go func() {
 			time.Sleep(s.RestartDelay)
 
+			// Snapshot the AppConfig AND verify identity inside the same
+			// UpdateInfo callback so the snapshot is race-free against
+			// stopProcess's writes to mp.Info (Status / PID). Without
+			// this, the goroutine would read mp.Info.* AFTER the lock
+			// is released, racing with stopProcess.
+			var (
+				appCfg  process.AppConfig
+				procNS  string
+				procNm  string
+			)
 			ok := s.reg.UpdateInfo(key, func(current *ManagedProcess) {
 				if current != mp || current.stopping {
 					shouldRestart = false
+					return
 				}
+				appCfg = current.Info.AppConfig
+				procNS = current.Info.Namespace
+				procNm = current.Info.Name
 			})
 			if !ok || !shouldRestart {
 				return
 			}
-
-			req := &model.AppStartReq{
-				AppConfig: process.AppConfig{
-					Namespace:   mp.Info.Namespace,
-					Name:        mp.Info.Name,
-					Script:      mp.Info.Script,
-					Args:        mp.Info.Args,
-					Env:         mp.Info.Env,
-					CronRestart: mp.Info.CronRestart,
-					Watch:       mp.Info.Watch,
-					MaxRestarts: mp.Info.MaxRestarts,
-					LogFile:     mp.Info.LogFile,
-					ErrorFile:   mp.Info.ErrorFile,
-					ConfigFile:  mp.Info.ConfigFile,
-					CWD:         mp.Info.CWD,
-					BaseEnv:     mp.Info.BaseEnv,
-				},
-			}
-			_, _ = s.launchProcess(mp.Info.Name, req)
+			_ = procNS // reserved for future multi-key dispatch
+			req := &model.AppStartReq{AppConfig: appCfg}
+			_, _ = s.launchProcess(procNm, req)
 		}()
 	}
 }
@@ -492,28 +490,29 @@ func (s *Server) RestartByName(name string) error {
 		return fmt.Errorf("process or namespace not found: %s", name)
 	}
 	for _, mp := range targets {
+		// Snapshot the AppConfig under the registry lock so the
+		// struct copy is race-free against watchProcess's writes
+		// to mp.Info (PID / Status / Restarts) and against any
+		// concurrent stopProcess call. Without this, the field-by-
+		// field reads below race with another goroutine mutating
+		// adjacent fields on the same mp.Info struct.
+		key := mp.Info.Namespace + ":" + mp.Info.Name
+		var (
+			appCfg process.AppConfig
+			pname  string
+		)
+		if !s.reg.UpdateInfo(key, func(current *ManagedProcess) {
+			appCfg = current.Info.AppConfig
+			pname = current.Info.Name
+		}) {
+			continue // process vanished between findProcesses and UpdateInfo
+		}
 		req := &model.AppStartReq{
-			AppConfig: process.AppConfig{
-				Namespace:     mp.Info.Namespace,
-				Name:          mp.Info.Name,
-				Script:        mp.Info.Script,
-				Args:          mp.Info.Args,
-				Env:           mp.Info.Env,
-				CronRestart:   mp.Info.CronRestart,
-				Cron:          mp.Info.Cron,
-				Watch:         mp.Info.Watch,
-				MaxRestarts:   mp.Info.MaxRestarts,
-				LogFile:       mp.Info.LogFile,
-				ErrorFile:     mp.Info.ErrorFile,
-				Version:       mp.Info.Version,
-				ConfigFile:    mp.Info.ConfigFile,
-				CWD:           mp.Info.CWD,
-				BaseEnv:       mp.Info.BaseEnv,
-			},
+			AppConfig:     appCfg,
 			CronTriggered: true,
 		}
 		_ = s.stopProcess(mp)
-		_, _ = s.launchProcess(mp.Info.Name, req)
+		_, _ = s.launchProcess(pname, req)
 	}
 	return nil
 }

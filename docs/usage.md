@@ -14,8 +14,12 @@ go build -buildvcs=false -o /usr/local/bin/pm2 .
 The daemon starts automatically on first `pm2 start`. Alternatively start it explicitly:
 
 ```bash
-pm2 daemon   # runs in foreground; use pm2 startup to daemonize on boot
+pm2 daemon start                # background (detached)
+pm2 daemon start --foreground   # foreground (blocking; Ctrl+C stops it)
+pm2 daemon kill                 # gracefully stop all processes and exit the daemon
 ```
+
+> **Lifecycle verbs are split:** `pm2 stop <name|id|all>` operates on a managed process (daemon keeps running). `pm2 daemon kill` operates on the daemon itself (everything exits). They share the same `executor.Stop` signal path (SIGTERM → 5s → SIGKILL); the only difference is the post-response `os.Exit(0)` hook in `daemon/network/handler.go:36-42`. The legacy top-level `pm2 kill` command has been removed; use `pm2 daemon kill`.
 
 State directory: `~/.pm2/`
 

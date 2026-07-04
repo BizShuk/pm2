@@ -4,20 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/config/wizard"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
-)
-
-const (
-	ecoDefaultOutput  = "ecosystem.config.js"
-	ecoFormatJS       = "js"
-	ecoFormatJSON     = "json"
-	ecoMaxApps        = 64
-	ecoDefaultScript  = "app.js"
-	ecoDefaultName    = "app"
-	ecoDefaultNS      = "default"
-	ecoDefaultVersion = "-"
 )
 
 // isTerminalFunc is the terminal-detection function used by the wizard.
@@ -36,6 +25,9 @@ type interactiveFlags struct {
 	noMerge bool
 }
 
+// newEcoCmd returns the `pm2 wizard` command. It only wires Cobra
+// flags + I/O streams and delegates every behavioural step to
+// config/wizard (see plans/architecture-wizard-decoupling.md).
 func newEcoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "wizard",
@@ -55,7 +47,7 @@ func newEcoCmd() *cobra.Command {
 }
 
 func defaultInteractiveFlags() interactiveFlags {
-	return interactiveFlags{format: ecoFormatJS}
+	return interactiveFlags{format: wizard.FormatJS}
 }
 
 func bindInteractiveFlags(cmd *cobra.Command, f *interactiveFlags) {
@@ -92,44 +84,34 @@ func runEcoInteractive(cmd *cobra.Command, _ []string) error {
 	return runInteractive(cmd, &flags)
 }
 
+// runInteractive is the thin Cobra shell around wizard.RunInteractive.
+// Two responsibilities that DO NOT belong in the wizard package:
+//
+//  1. TTY gate: refuse to read prompts from a non-terminal stdin
+//     unless --yes is set. The wizard never touches os.Stdin
+//     directly so it cannot tell — we pass the verdict in via
+//     WizardContext.YesAll.
+//  2. Stream binding: pull cobra's In/Out/Err into a WizardContext
+//     so the wizard never reaches into cobra or os types.
 func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
-	if flags.format != ecoFormatJS && flags.format != ecoFormatJSON {
-		return fmt.Errorf("invalid --format %q (want js|json)", flags.format)
-	}
-	if flags.output == "" {
-		if flags.format == ecoFormatJSON {
-			flags.output = "ecosystem.config.json"
-		} else {
-			flags.output = ecoDefaultOutput
-		}
-	}
-
-	in := cmd.InOrStdin()
-	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-
 	tty := isTerminalFunc(os.Stdin.Fd())
 	if !tty && !flags.yesAll {
-		fmt.Fprintln(errOut,
+		fmt.Fprintln(cmd.ErrOrStderr(),
 			"pm2 eco requires an interactive terminal. "+
 				"Re-run with --yes to generate a config with all defaults.")
 		return fmt.Errorf("non-interactive mode requires --yes")
 	}
 
-	var apps []process.AppConfig
-	if flags.yesAll {
-		apps = []process.AppConfig{defaultApp()}
-	} else {
-		var err error
-		apps, err = collectAnswers(in, out)
-		if err != nil {
-			return err
-		}
+	ctx := wizard.WizardContext{
+		In:     cmd.InOrStdin(),
+		Out:    cmd.OutOrStdout(),
+		ErrOut: cmd.ErrOrStderr(),
+		YesAll: flags.yesAll,
 	}
-
-	return writeEcosystemFile(apps, flags.output, flags.force, flags.noMerge, flags.format, in, out, errOut, flags.yesAll)
+	return wizard.RunInteractive(ctx, wizard.RunOptions{
+		Output:  flags.output,
+		Format:  flags.format,
+		Force:   flags.force,
+		NoMerge: flags.noMerge,
+	})
 }
-
-// writeEcosystemFile is the shared merge-or-replace-then-write step
-// used by both the interactive wizard and the `install` subcommand.
-// `yesAll=true` skips the interactive "Write?" confirm prompt (used

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bizshuk/pm2/config/wizard"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,14 @@ const (
 // (currently) just writes the ecosystem file. Daemon RPC startup is
 // left to the existing `pm2 start` flow so the install command stays
 // synchronous and inspectable.
+//
+// The wizard shell (config/wizard) owns the merge-vs-replace decision
+// and the rendering — this command only:
+//
+//   - wires the two planner flags + the standard write flags,
+//   - assembles the AppConfig from a script + planner prefix +
+//     optional user_prompt, and
+//   - delegates the write step to wizard.RunInstall.
 func newEcoInstallCmd() *cobra.Command {
 	var (
 		systemPlanner   bool
@@ -65,12 +74,20 @@ func newEcoInstallCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			errOut := cmd.ErrOrStderr()
-			if output == "" {
-				output = ecoDefaultOutput
-			}
-			if err := writeEcosystemFile(
-				[]process.AppConfig{app}, output, force, noMerge,
-				ecoFormatJS, cmd.InOrStdin(), out, errOut, true /* yesAll */); err != nil {
+			if err := wizard.RunInstall(
+				wizard.WizardContext{
+					In:     cmd.InOrStdin(),
+					Out:    out,
+					ErrOut: errOut,
+				},
+				app,
+				wizard.InstallOptions{
+					Output:  output,
+					Format:  wizard.FormatJS,
+					Force:   force,
+					NoMerge: noMerge,
+				},
+			); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "Installed %s -> %s\n", app.Name, output)
@@ -98,7 +115,7 @@ func newEcoInstallCmd() *cobra.Command {
 // so multiple installs of the same script in different folders don't
 // collide.
 func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
-	name := deriveName(script)
+	name := wizard.DeriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
 	}
@@ -119,7 +136,7 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 		Args:      args,
 		Instances: 1,
 		Namespace: namespace,
-		Version:   ecoDefaultVersion,
+		Version:   wizard.DefaultVersion,
 		CWD:       cwd,
 	}
 	a.Normalize("")

@@ -189,6 +189,44 @@ list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
 
+### Daemon lifecycle: `stop` vs `daemon kill`
+
+Two verbs that look superficially similar but operate on different
+layers of the system. Conflating them is a common source of bugs and
+user confusion, so the distinction is encoded in the command tree,
+the wire protocol, and the dispatcher.
+
+| Aspect | `pm2 stop <name\|id\|all>` | `pm2 daemon kill` |
+| ------ | -------------------------- | ----------------- |
+| Operates on | a managed process | the daemon itself |
+| Daemon afterwards | still running, accepting RPC | exited |
+| Wire code | `model.CmdStop` (+ `Name`) | `model.CmdKill` (no payload) |
+| Manager method | `StopByName(name)` (returns error) | `KillAll()` (no return value) |
+| Signal path | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path applied to every mp, then `os.Exit(0)` |
+| CLI verb location | top-level `stop` group | nested `daemon` group |
+
+The `KillAll` RPC carries no payload and `KillAll()` has no return
+value: it is an idempotent "please shut down" request, not a
+query. The daemon's `Handle` function in
+`daemon/network/handler.go:36-42` schedules a `go func() { sleep(150ms); os.Exit(0) }()`
+after the response flushes. The 150 ms grace lets `WriteJSON`
+complete on its own goroutine context so the CLI sees `ok=true` before
+the socket vanishes. The actual process-stop work is identical to
+`StopByName("all")` — `KillAll` loops `s.findProcesses("all")` and
+calls the same `stopProcess` per entry.
+
+Because both verbs share `executor.Stop`, they share the SIGTERM →
+SIGKILL escalation and the `stopping` flag that suppresses
+auto-restart. The interface contract is **explicit** in
+`daemon/network/manager.go` (`CmdKill — graceful stop of every
+managed process (does NOT exit the daemon — handleConn's dispatcher
+schedules os.Exit separately)`) so future contributors do not
+move the `os.Exit` into `KillAll` itself.
+
+**Removed alias:** the legacy top-level `pm2 kill` command has been
+deleted; use `pm2 daemon kill`. Bare `pm2 daemon` errors out so the
+caller always picks an explicit verb.
+
 ## Dependencies
 
 | Package                              | Purpose                               |

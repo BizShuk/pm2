@@ -3,94 +3,47 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"syscall"
-	"time"
 
-	"github.com/bizshuk/pm2/daemon"
-	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
 
-func newKillCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "kill",
-		Short: "Stop all processes and shut down the PM2 daemon",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdKill})
-			if err != nil {
-				// No reachable daemon — nothing to kill.
-				fmt.Println("PM2 daemon is not running.")
-				return nil
-			}
-			if !resp.OK {
-				return fmt.Errorf("%s", resp.Error)
-			}
-			fmt.Println("PM2 daemon stopped, all processes killed.")
-			return nil
-		},
-	}
-}
-
+// newDaemonCmd returns the `pm2 daemon` parent command with `start`
+// and `kill` subcommands. Bare `pm2 daemon` errors out so the caller
+// always picks an explicit verb; the internal auto-spawn paths use
+// `daemon start --foreground` directly.
+//
+// The two subcommands live in their own files:
+//
+//   - daemon_start.go — newDaemonStartCmd + startDaemonAsBackground +
+//     autoStartDaemon
+//   - daemon_kill.go  — newDaemonKillCmd + runDaemonKill
+//
+// This file keeps the parent itself plus `startup` (OS-specific
+// boot-time daemon launch), which is its own concern.
 func newDaemonCmd() *cobra.Command {
-	var foreground bool
 	cmd := &cobra.Command{
-		Use:    "daemon",
-		Short:  "Start the PM2 daemon (internal use)",
-		Hidden: true,
+		Use:   "daemon",
+		Short: "Manage the PM2 daemon",
+		Long: "Start or stop the PM2 daemon. Subcommands: start, kill.\n" +
+			"`pm2 daemon start` spawns the daemon in the background (or in\n" +
+			"the foreground with --foreground). `pm2 daemon kill` asks the\n" +
+			"running daemon to shut down all managed processes and exit.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if foreground {
-				srv := daemon.NewServer(pm2Home)
-				return srv.Listen(socketPath())
-			}
-			return startDaemonAsBackground()
+			return fmt.Errorf("pm2 daemon requires a subcommand (start | kill)")
 		},
 	}
-	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "Run the daemon in the foreground")
+	cmd.AddCommand(newDaemonStartCmd())
+	cmd.AddCommand(newDaemonKillCmd())
 	return cmd
 }
 
-func startDaemonAsBackground() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	logDir := pm2Home
-	_ = os.MkdirAll(logDir, 0o755)
-	logFile := filepath.Join(logDir, "daemon.log")
-	errFile := filepath.Join(logDir, "daemon-err.log")
-
-	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer outF.Close()
-
-	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer errF.Close()
-
-	cmd := exec.Command(exe, "daemon", "--foreground")
-	cmd.Stdout = outF
-	cmd.Stderr = errF
-	cmd.Stdin = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn daemon background: %w", err)
-	}
-	_ = cmd.Process.Release()
-
-	fmt.Println("PM2 daemon started in the background.")
-	return nil
-}
-
+// newStartupCmd generates an OS-specific init script so the daemon
+// launches on login/boot. The generated unit always re-execs the
+// current binary with `daemon start --foreground` — same single
+// source of truth as the user-facing start path.
 func newStartupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "startup",
@@ -121,22 +74,23 @@ func generateLaunchd(exe string) error {
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>%s</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>%s</string>
-    <string>daemon</string>
-    <string>--foreground</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>%s</string>
-  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>%s/daemon.log</string>
-  <key>StandardErrorPath</key><string>%s/daemon-err.log</string>
+	<key>Label</key><string>%s</string>
+	<key>ProgramArguments</key>
+	<array>
+	<string>%s</string>
+	<string>daemon</string>
+	<string>start</string>
+	<string>--foreground</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+	<key>PATH</key>
+	<string>%s</string>
+	</dict>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>StandardOutPath</key><string>%s/daemon.log</string>
+	<key>StandardErrorPath</key><string>%s/daemon-err.log</string>
 </dict>
 </plist>
 `, label, exe, os.Getenv("PATH"), pm2Home, pm2Home)
@@ -157,7 +111,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s daemon --foreground
+ExecStart=%s daemon start --foreground
 Environment="PATH=%s"
 Restart=always
 
@@ -173,33 +127,4 @@ WantedBy=default.target
 	fmt.Printf("Created: %s\n", unitPath)
 	fmt.Println("Enable with: systemctl --user enable pm2 && systemctl --user start pm2")
 	return nil
-}
-
-// autoStartDaemon spawns the daemon as a detached background process
-func autoStartDaemon() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(exe, "daemon", "--foreground")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn daemon: %w", err)
-	}
-	_ = cmd.Process.Release()
-
-	// Wait until daemon is ready (up to 3 seconds)
-	sock := socketPath()
-	for i := 0; i < 30; i++ {
-		time.Sleep(100 * time.Millisecond)
-		resp, err := model.SendRequest(sock, model.Request{Command: model.CmdPing})
-		if err == nil && resp.OK {
-			return nil
-		}
-	}
-	return fmt.Errorf("daemon did not start in time")
 }

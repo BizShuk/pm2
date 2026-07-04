@@ -1,10 +1,9 @@
-package cmd
+package wizard
 
 import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,21 +13,72 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
-// writeEcosystemFile is the shared merge-or-replace-then-write step
-// used by both the interactive wizard and the `install` subcommand.
-// `yesAll=true` skips the interactive "Write?" confirm prompt (used
-// by non-interactive callers like `install`). Returns the list of
-// names that were actually written to the file.
-func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge bool, format string, in io.Reader, out, errOut io.Writer, yesAll bool) error {
+// Default file names and limits used by the wizard's interactive
+// prompts and rendering helpers. Kept unexported so external callers
+// don't bind to specific magic values — they only see the public
+// RunInteractive / RunInstall entry points and the Format* constants.
+const (
+	defaultOutput    = "ecosystem.config.js"
+	defaultFormat    = FormatJS
+	maxApps          = 64
+	defaultScript    = "app.js"
+	defaultName      = "app"
+	defaultNamespace = "default"
+)
+
+// WriteOptions controls how WriteEcosystemFile decides whether to
+// merge, replace, or refuse an existing output file. Field semantics
+// match the former CLI flags 1:1.
+type WriteOptions struct {
+	// Force replaces the entire output file with the newly collected
+	// apps, bypassing both the merge step and the parse check on the
+	// existing file.
+	Force bool
+	// NoMerge aborts when the output file already exists. Combine
+	// with Force to force-replace.
+	NoMerge bool
+	// Format is "js" or "json". When the output file already exists
+	// its extension wins on merge; Format only governs brand-new
+	// files or --force replacement.
+	Format string
+}
+
+// DefaultWriteOptions returns sane defaults: JS format, no force, no
+// no-merge. Callers that need different behaviour override fields.
+func DefaultWriteOptions() WriteOptions {
+	return WriteOptions{Format: defaultFormat}
+}
+
+// WriteEcosystemFile is the shared merge-or-replace-then-write step
+// used by both the interactive wizard and the install subcommand.
+//
+// Flow:
+//
+//  1. If output does not exist -> write apps verbatim.
+//  2. If output exists and Force -> replace.
+//  3. If output exists and NoMerge -> error.
+//  4. Otherwise: load existing apps, merge by name (existing wins),
+//     emit a preview to ctx.ErrOut, prompt for confirmation unless
+//     ctx.YesAll is set, then write.
+//
+// The "Write?" confirmation reads from ctx.In via a bufio.Reader; if
+// the caller pre-set ctx.YesAll (non-interactive install, or
+// --yes/--format pipes) the prompt is skipped and the file is
+// written unconditionally.
+func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, output string, opts WriteOptions) error {
+	if opts.Format == "" {
+		opts.Format = defaultFormat
+	}
+
 	var (
 		mergedApps []process.AppConfig
 		skipped    int
-		writeFmt   = format
+		writeFmt   = opts.Format
 	)
 	if _, statErr := os.Stat(output); statErr == nil {
-		if force {
+		if opts.Force {
 			mergedApps = apps
-		} else if noMerge {
+		} else if opts.NoMerge {
 			return fmt.Errorf(
 				"refusing to overwrite existing %s; use --force to replace "+
 					"or remove --no-merge to merge", output)
@@ -49,7 +99,7 @@ func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge 
 
 	var data []byte
 	switch writeFmt {
-	case ecoFormatJSON:
+	case FormatJSON:
 		s, err := renderEcosystemJSON(mergedApps)
 		if err != nil {
 			return err
@@ -60,7 +110,7 @@ func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge 
 	}
 
 	summary := fmt.Sprintf("%d app(s) to write", len(mergedApps))
-	if force {
+	if opts.Force {
 		summary = fmt.Sprintf("replace with %d app(s)", len(mergedApps))
 	} else if _, statErr := os.Stat(output); statErr == nil {
 		summary = fmt.Sprintf(
@@ -68,17 +118,17 @@ func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge 
 			len(mergedApps)-len(apps)+skipped, len(apps)-skipped,
 			len(mergedApps), skipped)
 	}
-	fmt.Fprintf(errOut, "\n--- preview of %s ---\n%s\n--- end preview (%s) ---\n",
+	fmt.Fprintf(ctx.ErrOut, "\n--- preview of %s ---\n%s\n--- end preview (%s) ---\n",
 		output, data, summary)
 
-	if !yesAll {
-		rdr := bufio.NewReader(in)
-		ok, err := promptYesNo(rdr, out, fmt.Sprintf("Write %s?", output), true)
+	if !ctx.YesAll {
+		rdr := bufio.NewReader(ctx.In)
+		ok, err := promptYesNo(rdr, ctx.Out, fmt.Sprintf("Write %s?", output), true)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			fmt.Fprintln(out, "Aborted.")
+			fmt.Fprintln(ctx.Out, "Aborted.")
 			return nil
 		}
 	}
@@ -87,7 +137,7 @@ func writeEcosystemFile(apps []process.AppConfig, output string, force, noMerge 
 		return fmt.Errorf("write %s: %w", output, err)
 	}
 	abs, _ := filepath.Abs(output)
-	fmt.Fprintf(out, "Wrote %s\n", abs)
+	fmt.Fprintf(ctx.Out, "Wrote %s\n", abs)
 	return nil
 }
 
@@ -116,8 +166,8 @@ func loadExistingApps(path string) ([]process.AppConfig, error) {
 
 // mergeAppsByName returns the union of existing + new apps, deduped by
 // the AppConfig.Name field. Existing apps win on name collision.
-// Names are compared after Normalize() so "api" and "" both map to the
-// derived form consistently.
+// Names are compared after Normalize() so "api" and "" both map to
+// the derived form consistently.
 func mergeAppsByName(existing, newApps []process.AppConfig) (merged []process.AppConfig, skipped int) {
 	seen := make(map[string]struct{}, len(existing))
 	merged = make([]process.AppConfig, 0, len(existing)+len(newApps))
@@ -146,15 +196,15 @@ func mergeAppsByName(existing, newApps []process.AppConfig) (merged []process.Ap
 	return merged, skipped
 }
 
-// detectFormatFromExt returns "js" or "json" based on the file extension.
-// Unrecognized extensions yield ("", false) so the caller can fall back
-// to the user-supplied --format.
+// detectFormatFromExt returns FormatJS or FormatJSON based on the
+// file extension. Unrecognized extensions yield ("", false) so the
+// caller can fall back to the user-supplied --format.
 func detectFormatFromExt(path string) (string, bool) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".json":
-		return ecoFormatJSON, true
+		return FormatJSON, true
 	case ".js", ".cjs", ".mjs":
-		return ecoFormatJS, true
+		return FormatJS, true
 	}
 	return "", false
 }
@@ -180,7 +230,7 @@ func renderEcosystemJS(apps []process.AppConfig) string {
 func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	ns := a.Namespace
 	if ns == "" {
-		ns = ecoDefaultNS
+		ns = defaultNamespace
 	}
 	fmt.Fprintf(b, "        // %s (%s)\n", a.Name, ns)
 
@@ -242,7 +292,7 @@ func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	b.WriteString("        }")
 }
 
-// renderEcosystemJSON is the JSON counterpart for --format json.
+// renderEcosystemJSON is the JSON counterpart for FormatJSON.
 func renderEcosystemJSON(apps []process.AppConfig) (string, error) {
 	cfg := config.EcosystemConfig{Apps: apps}
 	data, err := json.MarshalIndent(cfg, "", "    ")

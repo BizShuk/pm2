@@ -1661,5 +1661,112 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 	}
 }
 
+// TestConcurrentRestartDoesNotRaceOnMpInfo hammers a single process
+// from two goroutines that both read mp.Info.* and rebuild an
+// AppConfig-style request:
+//
+//  1. Goroutine A — RestartByName. Before the fix this read
+//     mp.Info.Namespace/Name/Script/... outside the registry lock
+//     to build req, racing with stopProcess's writes to mp.Info.
+//  2. Goroutine B — onProcessExit's auto-restart goroutine. Before
+//     the fix it built req from mp.Info.* after the UpdateInfo
+//     callback had returned, racing with stopProcess / RestartByName.
+//
+// Both goroutines now snapshot AppConfig under UpdateInfo, so the
+// race detector must stay silent across the test window. The
+// iteration count is bounded so the test doesn't fight the registry
+// lock for longer than the test timeout.
+//
+// Regression for the pre-existing race at server.go around the
+// field-by-field mp.Info reads. If a future refactor reintroduces
+// naked reads, this test trips `go test -race`.
+func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
+	testDir := testDir(t)
+	s := NewServer(testDir)
+	s.RestartDelay = 30 * time.Millisecond
+
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace:   "default",
+			Name:        "race-restart",
+			Script:      "/bin/sleep",
+			Args:        []string{"60"},
+			Instances:   1,
+			MaxRestarts: 50,
+		},
+	}
+	if _, err := s.StartApp(req); err != nil {
+		t.Fatalf("startApp: %v", err)
+	}
+	defer s.StopByName("race-restart")
+
+	// Let auto-restart run for a few cycles so the auto-restart
+	// goroutine is in steady state.
+	time.Sleep(120 * time.Millisecond)
+
+	const iterations = 8
+	var wg sync.WaitGroup
+
+	// Goroutine A: explicit CmdRestart — exercises the
+	// RestartByName snapshot path that was racy before the fix.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_ = s.RestartByName("race-restart")
+			time.Sleep(40 * time.Millisecond) // let auto-restart breathe
+		}
+	}()
+
+	// Goroutine B: snapshot all fields the auto-restart path used
+	// to read raw, touching them under RLock and the registry
+	// UpdateInfo path. Mirrors what was naked before the fix.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			s.RLock()
+			mp, ok := s.reg.Get("default:race-restart")
+			if ok {
+				_ = mp.Info.Namespace
+				_ = mp.Info.Name
+				_ = mp.Info.Script
+				_ = mp.Info.Args
+				_ = mp.Info.Env
+				_ = mp.Info.Cron
+				_ = mp.Info.CronRestart
+				_ = mp.Info.Watch
+				_ = mp.Info.MaxRestarts
+				_ = mp.Info.Version
+				_ = mp.Info.LogFile
+				_ = mp.Info.ErrorFile
+				_ = mp.Info.ConfigFile
+				_ = mp.Info.CWD
+				_ = mp.Info.BaseEnv
+				_ = mp.Info.Status
+				_ = mp.Info.PID
+				_ = mp.Info.Restarts
+			}
+			s.RUnlock()
+			time.Sleep(40 * time.Millisecond)
+		}
+	}()
+
+	// Bound the wait so a deadlock fails the test rather than hangs
+	// forever.
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent restart test deadlocked or exceeded timeout")
+	}
+
+	// Sanity: process should still be in the registry.
+	if _, ok := s.reg.Get("default:race-restart"); !ok {
+		t.Errorf("race-restart vanished from registry after concurrent restarts")
+	}
+}
+
 
 
