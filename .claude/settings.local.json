@@ -1,5 +1,30 @@
 {
   "permissions": {
-    "allow": []
+    "allow": [
+      "Bash(rm -rf /tmp/ph)",
+      "Bash(mkdir -p /tmp/ph/.pm2)",
+      "Bash(cp /private/tmp/claude-501/-Users-shuk-projects-tmp-pm2/f0ef578a-7d7b-408f-94da-0737d8538700/scratchpad/ecosystem.config.json /tmp/ph/)",
+      "Bash(export HOME=/tmp/ph)",
+      "Bash(/tmp/pm2bin daemon *)",
+      "Read(//private/tmp/ph/.pm2/logs/**)",
+      "Bash(echo \"=== wait 5s for fires ===\")",
+      "Bash(sleep 5)",
+      "Bash(echo \"--- out.log \\(before pause\\) ---\")",
+      "Read(//tmp/ph/.pm2/logs/**)",
+      "Bash(echo \"--- logs dir ---\")",
+      "Bash(echo \"--- list ---\")",
+      "Bash(/tmp/pm2bin start *)",
+      "Bash(/tmp/pm2bin monit *)",
+      "Bash(echo \"--- daemon.log tail ---\")",
+      "Bash(/tmp/pm2bin resume *)",
+      "Bash(echo \"=== watch daemon.log + logs dir for 7s ===\")",
+      "Bash(sleep 7)",
+      "Bash(echo \"--- daemon.log new lines ---\")",
+      "Read(//private/tmp/ph/**)",
+      "Bash(xargs -I{} sh -c 'echo \">> {}\"; tail -3 {}')",
+      "Bash(ps -o pid,stat,command)",
+      "Bash(pkill -f pm2bin)",
+      "Bash(rm -f /tmp/ph/.pm2/pm2.sock)"
+    ]
   }
 }

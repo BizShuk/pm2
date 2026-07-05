@@ -226,6 +226,25 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 
 	existing, oldKey, ok := s.reg.findExistingForLaunchUnderLock(ns, name, req.ConfigFile)
 
+	// Pause guard: an automated relaunch (cron fire or file-watch restart,
+	// both flagged CronTriggered) must never resurrect a paused process.
+	// PauseByName removes the schedule entry and sets paused=true, but a
+	// fire that was already in-flight (executor.Start above runs BEFORE this
+	// lock) would otherwise reach the map write + scheduler.Register below
+	// and silently undo the pause — the reported "paused cron still fires"
+	// bug. This check is atomic against PauseByName because both mutate
+	// paused under this same registry write lock. Only an explicit resume /
+	// start (CronTriggered=false) may revive a paused entry.
+	if ok && existing.paused && req.CronTriggered {
+		info := existing.Info
+		// The racing fire already spawned a child (result.Cmd). Reap it in
+		// the background so its log files close and the process is waited
+		// on — never block here while holding the registry lock. We do NOT
+		// touch the paused entry or register any schedule.
+		go s.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, nil, nil)
+		return info, nil
+	}
+
 	var restarts int
 	if ok {
 		id = existing.Info.ID
@@ -557,36 +576,31 @@ func (s *Server) ResumeByName(name string) error {
 	}
 	for _, mp := range targets {
 		key := mp.Info.Namespace + ":" + mp.Info.Name
-		paused := false
-		s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-			paused = mp.paused
+		// Snapshot the paused flag AND the whole AppConfig as one atomic
+		// read under the registry lock — same pattern as RestartByName.
+		// The config that a resume launches with must be the config as it
+		// stands at this instant; reading mp.Info field-by-field outside
+		// the lock would both race with any writer to mp.Info and risk a
+		// torn (half-updated) view. launchProcess then follows this
+		// immutable snapshot.
+		var (
+			paused bool
+			appCfg process.AppConfig
+		)
+		s.reg.UpdateInfo(key, func(current *ManagedProcess) {
+			paused = current.paused
+			appCfg = current.Info.AppConfig
 		})
 		if !paused {
 			continue
 		}
-		req := &model.AppStartReq{
-			AppConfig: process.AppConfig{
-				Namespace:   mp.Info.Namespace,
-				Name:        mp.Info.Name,
-				Script:      mp.Info.Script,
-				Args:        mp.Info.Args,
-				Env:         mp.Info.Env,
-				CronRestart: mp.Info.CronRestart,
-				Cron:        mp.Info.Cron,
-				Watch:       mp.Info.Watch,
-				MaxRestarts: mp.Info.MaxRestarts,
-				LogFile:     mp.Info.LogFile,
-				ErrorFile:   mp.Info.ErrorFile,
-				Version:     mp.Info.Version,
-				ConfigFile:  mp.Info.ConfigFile,
-				CWD:         mp.Info.CWD,
-				BaseEnv:     mp.Info.BaseEnv,
-			},
-			// CronTriggered stays false: a resumed cron task must go
-			// back to scheduled-and-idle, NOT fire immediately.
-		}
-		if _, err := s.launchProcess(mp.Info.Name, req); err != nil {
-			return fmt.Errorf("resume %s: %w", mp.Info.Name, err)
+		// CronTriggered stays false: a resumed cron task must go back to
+		// scheduled-and-idle, NOT fire immediately. appCfg.Paused is always
+		// false at runtime (only the ManagedProcess.paused flag carries the
+		// suspend state), so the resumed launch comes up active.
+		req := &model.AppStartReq{AppConfig: appCfg}
+		if _, err := s.launchProcess(appCfg.Name, req); err != nil {
+			return fmt.Errorf("resume %s: %w", appCfg.Name, err)
 		}
 	}
 	return nil

@@ -8,14 +8,25 @@
 
 ## 未實作的優化選項 (Pending Options)
 
-- [ ] `動態路徑包裝腳本 (Dynamic PATH Wrapper Script)` — 來源 `plans/backlog.md`
+- [ ] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
+    - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
+    - 目標：將進程管理的核心協調與控制邏輯（包含進程註冊表、生命週期管理、排程器管理與存檔機制）從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
+    - 做法：新增 `daemon/process_manager.go` 檔案，宣告 `ProcessManager` 結構體並實現 `network.Manager` 介面，`Server` 簡化為僅持有 `ProcessManager` 與負責 Socket 的生命週期管理與定時協程的啟動。
+
+- [ ] `architecture-dynamic-path-wrapper`: 讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
+    - 來源：[plans/architecture-dynamic-path-wrapper.md](./plans/architecture-dynamic-path-wrapper.md)
     - 目標：讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
     - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
-    - 備註：目前 daemon 已透過 `AppStartReq.BaseEnv`（CLI `os.Environ()` 快照）攜帶完整 `PATH`，此選項僅針對「daemon 由 launchd 直接拉起」的場景，屬補強性質。
 
-- [ ] `CLI 列表命令與跨平台指標採集 (CLI List Command & Cross-platform Metrics)` — 來源 [plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
+- [ ] `architecture-cli-list-and-metrics`: 實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
+    - 來源：[plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
     - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
     - 做法：新增 `cmd/list.go` 表格渲染、將 RPC 連線邏輯收攏至 `cmd/client.go` 的 `CLIClient`，並將 `tui/metrics.go` 解耦為具備多平台實現的 `HostMetricsCollector`。
+
+- [ ] `architecture-extensibility-interfaces`: 為 `pm2` 核心模組定義標準的擴充介面，隔離外部與底層依賴。
+    - 來源：[plans/architecture-extensibility-interfaces.md](./plans/architecture-extensibility-interfaces.md)
+    - 目標：為 `pm2` 核心模組定義標準的擴充介面（狀態儲存、排程管理、指標收集與系統日誌），隔離外部與底層依賴，提升可測試性。
+    - 做法：定義 `StateStore`、`Scheduler`、`MetricsProvider` 與 `DaemonLogger` 介面，並將具體實作以依賴注入方式傳入 `Server` 與 `Executor`。
 
 ## 核心缺陷修復 (Critical Bug Fixes)
 
@@ -54,9 +65,9 @@
 
 ## 生態配置精靈解耦 (Ecosystem Wizard Decoupling)
 
-- [ ] `生態配置精靈與渲染器抽離 (Extract Ecosystem Wizard and Renderer)` — 來源 [plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
-    - 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
-    - 驗證：`go test -race ./...` 與 `go build` 通過。
+- [x] `architecture-wizard-decoupling`: 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
+    - 來源：[plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
+    - 結果（2026-07-04）：已重構並解耦至 `config/wizard` 套件，完全移除 `cmd/eco_wizard.go` 與 `cmd/eco_renderer.go`，且 `go test ./...` 全綠通過。
 
 ## Archive
 

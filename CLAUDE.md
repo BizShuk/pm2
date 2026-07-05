@@ -169,6 +169,18 @@ from `ManagedProcess.paused` at save time, and `Resurrect` re-applies it via
 being re-registered, so a daemon restart does not silently undo `pm2 pause`
 (regression test: `TestPausedCronTaskSurvivesResurrect`).
 
+Pause vs. an in-flight fire (race guard): `executor.Start` (fork/exec) runs
+*before* `launchProcess` takes the registry lock, so a cron fire already
+in-flight when `PauseByName` runs could reach the map-write + `scheduler.Register`
+and silently re-arm the schedule — the "paused cron still fires" bug.
+`launchProcess` guards against this: under the registry write lock, if the
+existing entry is `paused` and this launch is `CronTriggered` (a cron fire or
+file-watch restart — never an explicit resume/start), it aborts before
+replacing the entry or registering any schedule, and reaps the racing child in
+the background. Because both the guard and `PauseByName`'s `paused=true` mutate
+under the same lock, the decision is atomic (regression test:
+`TestPauseDuringCronFireLeavesNoSchedule`).
+
 ### Relative path resolution
 
 `config.Load()` resolves relative `script` paths relative to the config file's directory
