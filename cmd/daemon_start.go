@@ -49,6 +49,18 @@ func newDaemonStartCmd() *cobra.Command {
 // daemon is its own process group leader (so `pm2 daemon kill` can
 // later signal the whole tree if needed).
 func startDaemonAsBackground() error {
+	// Clear the stop marker so future CLI invocations can auto-respawn
+	// again. The user just explicitly asked for a daemon — the
+	// auto-spawn opt-out from a previous `pm2 daemon stop` is no
+	// longer in effect. Tolerate a missing marker (start may be the
+	// first daemon command run on a fresh install).
+	if err := removeStopMarker(); err != nil {
+		// Best-effort: a marker we can't remove is a permission
+		// problem the user needs to know about, since otherwise
+		// their `daemon start` would race with auto-spawn refusal.
+		fmt.Fprintf(os.Stderr, "warning: could not remove stop marker: %v\n", err)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -98,6 +110,17 @@ func startDaemonAsBackground() error {
 // "spawn the daemon binary" helper, just with different I/O and a
 // readiness wait.
 func autoStartDaemon() error {
+	// Honour `pm2 daemon stop`: if the user wrote the stop marker,
+	// refuse to silently respawn. Auto-spawn is a UX shortcut for the
+	// happy path; when the user has explicitly opted out, surface a
+	// clear error pointing them at `pm2 daemon start`.
+	if hasStopMarker() {
+		return fmt.Errorf(
+			"daemon was stopped via 'pm2 daemon stop'; " +
+				"auto-respawn is suppressed. Run 'pm2 daemon start' to re-enable",
+		)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return err

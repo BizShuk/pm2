@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/bizshuk/pm2/process"
 )
@@ -48,4 +49,20 @@ func (s *Server) DeleteByName(name string) error {
 func (s *Server) Ping() {
 	// No-op for now — the dispatcher returns OK without inspecting any
 	// state. Override behavior here if a richer health check is added.
+}
+
+// Status returns a snapshot of the daemon's identity + light runtime
+// counters (PID, started_at, version, home_dir, managed-process count).
+// Designed for `pm2 daemon status` — cheap to compute (one Len() read
+// under the registry lock) so it can safely be polled.
+//
+// Satisfies network.Manager (CmdStatus).
+func (s *Server) Status() process.DaemonInfo {
+	return process.DaemonInfo{
+		PID:          os.Getpid(),
+		StartedAt:    s.startedAt,
+		Version:      PM2Version,
+		HomeDir:      s.homeDir,
+		ProcessCount: s.reg.Len(),
+	}
 }

@@ -9,16 +9,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newDaemonCmd returns the `pm2 daemon` parent command with `start`
-// and `kill` subcommands. Bare `pm2 daemon` errors out so the caller
-// always picks an explicit verb; the internal auto-spawn paths use
-// `daemon start --foreground` directly.
+// newDaemonCmd returns the `pm2 daemon` parent command with `start`,
+// `kill`, `stop`, and `status` subcommands. Bare `pm2 daemon` errors
+// out so the caller always picks an explicit verb; the internal
+// auto-spawn paths use `daemon start --foreground` directly.
 //
-// The two subcommands live in their own files:
+// The four subcommands live in their own files:
 //
-//   - daemon_start.go — newDaemonStartCmd + startDaemonAsBackground +
+//   - daemon_start.go  — newDaemonStartCmd + startDaemonAsBackground +
 //     autoStartDaemon
-//   - daemon_kill.go  — newDaemonKillCmd + runDaemonKill
+//   - daemon_kill.go   — newDaemonKillCmd + runDaemonKill
+//   - daemon_stop.go   — newDaemonStopCmd + runDaemonStop +
+//     writeStopMarker / removeStopMarker / hasStopMarker
+//   - daemon_status.go — newDaemonStatusCmd + runDaemonStatus
 //
 // This file keeps the parent itself plus `startup` (OS-specific
 // boot-time daemon launch), which is its own concern.
@@ -26,17 +29,26 @@ func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Manage the PM2 daemon",
-		Long: "Start or stop the PM2 daemon. Subcommands: start, kill.\n" +
+		Long: "Start or stop the PM2 daemon. Subcommands: start, kill, stop, status.\n" +
 			"`pm2 daemon start` spawns the daemon in the background (or in\n" +
 			"the foreground with --foreground). `pm2 daemon kill` asks the\n" +
-			"running daemon to shut down all managed processes and exit.",
+			"running daemon to shut down all managed processes and exit\n" +
+			"(subsequent CLI commands may still auto-respawn it).\n" +
+			"`pm2 daemon stop` does the same teardown as `kill` AND writes a\n" +
+			"marker that suppresses the silent auto-respawn path used by other\n" +
+			"CLI commands. Run `pm2 daemon start` to clear the marker.\n" +
+			"`pm2 daemon status` reports the daemon's PID, version, and\n" +
+			"runtime counters (read-only; works whether or not the daemon\n" +
+			"is currently running).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("pm2 daemon requires a subcommand (start | kill)")
+			return fmt.Errorf("pm2 daemon requires a subcommand (start | kill | stop | status)")
 		},
 	}
 	cmd.AddCommand(newDaemonStartCmd())
 	cmd.AddCommand(newDaemonKillCmd())
+	cmd.AddCommand(newDaemonStopCmd())
+	cmd.AddCommand(newDaemonStatusCmd())
 	return cmd
 }
 

@@ -51,6 +51,11 @@ func dispatch(req model.Request, m Manager) model.Response {
 		m.Ping()
 		return model.Response{OK: true}
 
+	case model.CmdStatus:
+		info := m.Status()
+		payload, _ := json.Marshal(info)
+		return model.Response{OK: true, Payload: payload}
+
 	case model.CmdStart:
 		if req.App == nil {
 			return model.Response{Error: "missing app config"}

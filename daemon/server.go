@@ -21,6 +21,12 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// PM2Version is the version string the running daemon reports via
+// CmdStatus. Kept as a package-level const so Status() doesn't need
+// to read a magic value from anywhere; release tooling can grep for
+// this symbol to bump the version.
+const PM2Version = "1.0.0"
+
 // Server is the PM2 daemon
 type Server struct {
 	reg          *ProcessRegistry
@@ -28,6 +34,7 @@ type Server struct {
 	nextID       int
 	homeDir      string
 	scheduler    *cron.Scheduler
+	startedAt    time.Time // recorded by NewServer; surfaced via Status()
 	RestartDelay time.Duration
 }
 
@@ -63,6 +70,7 @@ func NewServer(homeDir string) *Server {
 		homeDir:   homeDir,
 		executor:  executor.NewExecutor(homeDir),
 		scheduler: cron.New(),
+		startedAt: time.Now(),
 		RestartDelay: 30 * time.Second,
 	}
 }

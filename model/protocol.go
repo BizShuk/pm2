@@ -35,6 +35,7 @@ const (
 	CmdResurrect CommandType = "resurrect"
 	CmdKill     CommandType = "kill"
 	CmdPing     CommandType = "ping"
+	CmdStatus   CommandType = "status"
 )
 
 // Request is a CLI → daemon message

@@ -59,4 +59,8 @@ type Manager interface {
 
 	// CmdPing — health check
 	Ping()
+
+	// CmdStatus — daemon identity + light runtime snapshot (PID,
+	// started_at, version, home_dir, process_count)
+	Status() process.DaemonInfo
 }
