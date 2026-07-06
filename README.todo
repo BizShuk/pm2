@@ -1,5 +1,6 @@
 # pm2 待辦清單 (TODO)
 
+- [ ] [Bug] some cron tasks has last run , some cron doesn't
 - [x] implmenet daemon start and combine kill into daemon kill
 - [x] pasued cron job is not resurrect
 - [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。

@@ -2,7 +2,7 @@
 
 ## 1. 目標與範圍 (Goal & Scope)
 
-`開發者 (Developer)` 使用 `ProcessManager` 結構體來管理進程的 `生命週期 (lifecycle)`、`持久化 (persistence)` 與 `定時任務 (periodic task)`。本計畫旨在將進程管理的核心 `協調與控制逻辑 (coordination and control logic)`（包含 `進程註冊表 (process registry)`、`生命週期管理 (lifecycle management)`、`排程器管理 (scheduler management)` 與 `存檔機制 (persistence mechanism)`）從 `Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體，使 `網路監聽 (network listening)` 與業務核心邏輯徹底分離，以提升 `單元測試 (unit testing)` 與 `進程狀態模擬 (process state simulation)` 的獨立性。
+`開發者 (Developer)` 使用 `ProcessManager` 結構體來管理進程的 `生命週期 (lifecycle)`、`持久化 (persistence)` 與 `定時任務 (periodic task)`。本計畫旨在將進程管理的核心 `協調與控制邏輯 (coordination and control logic)`（包含 `進程註冊表 (process registry)`、`生命週期管理 (lifecycle management)`、`排程器管理 (scheduler management)` 與 `存檔機制 (persistence mechanism)`）從 `Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體，使 `網路監聽 (network listening)` 與業務核心邏輯徹底分離，以提升 `單元測試 (unit testing)` 與 `進程狀態模擬 (process state simulation)` 的獨立性。
 
 不做什麼 (out of scope)：
 - 不修改命令列介面 `cmd/` 與用戶介面 `tui/` 的遠端調用邏輯與 `Bubbletea` 元件。
@@ -86,6 +86,6 @@ flowchart TD
 
 ## 7. 風險與假設 (Risks & Assumptions)
 
-- 資訊不足之最簡假設：由於使用者在特徵選擇步驟中選擇了跳過，我們採用最簡假設，選擇待辦清單 `README.todo` 中的第一項 Pending Option `architecture-manager-decoupling` 作為本次系統架構規劃的目標，且假定該規劃與既有的絞殺榕模組化模式完全相容。
+- 資訊不足之最簡假設：由於啟動規劃時未指定特定特徵，我們採用最簡假設，選擇待辦清單 `README.todo` 中的第一項 Pending Option `architecture-manager-decoupling` 作為本次系統架構規劃的目標，且假定該規劃與既有的絞殺榕模組化模式完全相容。
 - 進程狀態競爭假設：我們假設在重構過程中，原本 `Server` 特有的 `RLock`/`Lock`/`RUnlock`/`Unlock` 代理方法仍需在過渡期保留或轉移至 `ProcessManager`，以避免大量修改測試代碼。我們在 `ProcessManager` 中也實現這些 `RLock`/`Lock` 代理，確保與 `server_test.go` 中既有測試案例的相容性。
 - `auto-save` 與 `auto-resurrect` 協程之生命週期：假設這兩個背景定時任務之生命週期由 `Server` 擁有，因為它們與守護進程伺服器 (daemon socket runtime) 的啟動與關閉密切相關，這樣能保持 `ProcessManager` 的定時任務潔淨度。
