@@ -14,6 +14,7 @@ import (
 func RenderFooter(w int, sortBy string) string {
 	keys := [][2]string{
 		{"↑↓ / jk", "navigate"},
+		{"←/→", "ns"},
 		{"r", "restart"},
 		{"p", "pause/resume"},
 		{"d", "delete"},

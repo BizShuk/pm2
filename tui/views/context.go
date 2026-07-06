@@ -23,18 +23,20 @@ import (
 // stays decoupled from tui.SortField. The controller converts once per
 // frame.
 type ViewContext struct {
-	Width    int                   // total terminal width
-	Height   int                   // total terminal height
-	Selected int                   // index of the highlighted row
-	Procs    []process.ProcessInfo // current process snapshot
-	Logs     []string              // tail of the selected process's log
-	Updated  time.Time             // last successful refresh
-	HostCPU  float64               // host CPU % (latest sample)
-	HostMem  float64               // host memory % (latest sample)
-	SortBy   string                // active sort label for the footer
-	Err      error                 // last refresh / RPC error
-	Notice   string                // transient action failure notice
-	Detail   bool                  // two-pane (true) vs wide-table (false)
+	Width      int                   // total terminal width
+	Height     int                   // total terminal height
+	Selected   int                   // index of the highlighted row
+	Procs      []process.ProcessInfo // current process snapshot (already filtered by namespace)
+	Namespaces []string              // ["All"] + unique sorted namespaces; index 0 == All
+	NsCursor   int                   // index into Namespaces for the active filter chip
+	Logs       []string              // tail of the selected process's log
+	Updated    time.Time             // last successful refresh
+	HostCPU    float64               // host CPU % (latest sample)
+	HostMem    float64               // host memory % (latest sample)
+	SortBy     string                // active sort label for the footer
+	Err        error                 // last refresh / RPC error
+	Notice     string                // transient action failure notice
+	Detail     bool                  // two-pane (true) vs wide-table (false)
 }
 
 // Detail rows — kept here so layout / detail / logs can agree without

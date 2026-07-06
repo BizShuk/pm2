@@ -1,13 +1,8 @@
 # pm2 待辦清單 (TODO)
 
-- [ ] [Bug] some cron tasks has last run , some cron doesn't
-- [x] implmenet daemon start and combine kill into daemon kill
-- [x] pasued cron job is not resurrect
-- [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。
-
 `plans/` 審查後尚未完成或需後續處理的項目。已完成並驗證 (build + `go test ./...` 全綠) 的計畫已移至 `docs/specs/`。
 
-## 未實作的優化選項 (Pending Options)
+## Architecture
 
 - [ ] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
     - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
@@ -29,77 +24,33 @@
     - 目標：為 `pm2` 核心模組定義標準的擴充介面（狀態儲存、排程管理、指標收集與系統日誌），隔離外部與底層依賴，提升可測試性。
     - 做法：定義 `StateStore`、`Scheduler`、`MetricsProvider` 與 `DaemonLogger` 介面，並將具體實作以依賴注入方式傳入 `Server` 與 `Executor`。
 
-## 核心缺陷修復 (Critical Bug Fixes)
+## Bug
 
-> 來源 `plans/architecture-pm2-modularization.md` 與 `plans/architecture-pm2-reorganization.md` 第 1 節診斷。皆已對照當前程式碼確認 `仍未修復`，優先級高於下方結構重整。
+## Wizard
 
-- [x] `修復 concurrent map 競態 (Fix concurrent map iteration/write)` — 診斷 1.1
-      現況：`daemon/persistence.go:16` 的 `save()` 遍歷 `s.processes` 全程無鎖；由 `daemon/server.go:82`（`startAutoSave` 背景協程）與 `daemon/server.go:168`（RPC `CmdSave`）並發呼叫。
-      做法：在 `save()` 開頭先持 `s.mu.RLock()` 取得進程列表 `快照 (snapshot)`，於鎖外組裝 `DumpEntry` 與寫檔，避免 `fatal error: concurrent map iteration and map write`。
-      驗證：`go test -race ./daemon/...` 搭配並發啟動 + 連續存檔壓測。
-      結果（2026-06-30）：`save()` 改為內部持 `s.mu.RLock`，對應 `listAll`/`findProcesses` 既有的「內部持鎖」慣例。新增 `daemon/server_test.go::TestSaveConcurrentWithMapMutation`（4 saver + 1 writer × 80ms 壓測），`go test -race ./daemon/...` 下穩定通過 3/3 次。其餘 `TestBaseEnvSurvivesRestartAndResurrect`、`TestWatchStateInheritance`、`TestVersionStateInheritance` 等既有測試在 `-race` 下亦全綠。
-
-- [x] `修復孤兒進程 (Fix orphan child processes)` — 診斷 1.3
-    - 現況：`daemon/server.go:571` 的 `stopProcess` 僅 `mp.Cmd.Process.Signal(syscall.SIGTERM)`，信號只送到父層 `bash`，未傳播至 `Setpgid` 建立的子進程。
-    - 做法：改以 `syscall.Kill(-pid, syscall.SIGTERM)` 對整個進程組發送信號。
-    - 驗證：啟動含子行程的 shell 指令後停止，`ps -ef` 確認無殘留孤兒進程。
-    - 結果（2026-07-01）：`daemon/server.go::stopProcess` 改用 `syscall.Kill(-pid, syscall.SIGTERM)` 對整個 process group 發信號（kill(2) 的負 pid 即 pgrp），5s 超時後同樣用 `Kill(-pid, syscall.SIGKILL)` 升級。新增 `TestStopProcessKillsChildren`：寫一個 `spawn_child.sh` 至 t.TempDir()，裡面跑 `sleep 60 & echo $! > child.pid; wait`，啟動後用 `syscall.Kill(childPID, 0)` 驗證 child 還活著；stopByName 後再次驗證 child PID 收到 ESRCH（已死）。已用「暫時 revert fix → 測試 fail → 恢復 fix → 測試 pass」驗證測試有效捕捉 bug。
-
-- [x] `修復指標收集鎖阻塞 (Fix metrics lock contention)` — 診斷 1.2
-      現況：`daemon/metrics.go:44` 在持有 `s.mu.Lock()` 期間於迴圈內同步呼叫 `getProcessMetrics`（內部 `exec.Command("ps", …)`），進程數多時長時間鎖定伺服器、阻塞所有 RPC。
-      做法：先於讀鎖內快照各進程 `PID`，於鎖外執行 `ps` 採集，最後再以寫鎖（或 channel）回寫 `CPU`/`Memory`。
-      驗證：拉起 30 個虛擬進程同時連續 `pm2 list`，RPC 回應不應因 `ps` 耗時阻塞超過 50ms。
-      結果（2026-06-30）：`daemon/metrics.go` 重構為三階段 `refreshMetrics()`：phase 1 RLock 快照 `(key, pid, online)`、phase 2 **完全解鎖**跑 `ps`、phase 3 Lock 回寫並比對 PID 防止重啟後舊樣本洩漏到新實例。`getProcessMetrics` 改為 package-level `var` 以利測試注入。新增兩個回歸測試：(1) `TestRefreshMetricsDoesNotBlockRPC` 用 100ms-stub 驗證 `listAll` 在 5-stub 並發期間仍 < 50ms；(2) `TestRefreshMetricsSkipsRestartedProcess` 驗證 phase 3 的 `mp.Info.PID != t.pid` 檢查有效阻擋 stale 樣本。兩個測試 `-race -count=3` 穩定通過；無 `-race` 下整個 daemon 套件全綠。
-      平行化增量（2026-06-30）：phase 2 改用 `metricsWorkers=8` 的 worker pool（`wg.Go()` Go 1.24+ API），每個 worker 寫入 `samples[i]` 獨立 slot — 不需額外同步。32-stub × 50ms 壓測：實測 203ms vs ideal-parallel 200ms vs sequential 1.6s。新增 `TestRefreshMetricsParallelSpeedup` 驗證 wall-clock 上限（3× ideal）並順手驗證並行 writeback 無 sample 錯位/遺失。`go test -race -count=3 -run TestRefreshMetrics` 全部穩定通過。
-
-- [x] `修復排程命名空間衝突 (Fix cron namespace collision)` — 診斷 1.4
-    - 現況：`cron/scheduler.go:28` 的 `Register` 以進程 `name` 為鍵；`daemon/server.go:470/492` 呼叫時亦僅傳 `name`，不同命名空間同名進程（`default:api` vs `production:api`）會互相覆蓋。
-    - 做法：將排程鍵升級為 `namespace:name` 複合鍵，並同步調整 `Register`/`Remove` 的呼叫端與 `cron` 生命週期。
-    - 驗證：於兩個命名空間啟動同名 cron 進程，確認排程各自獨立觸發不互相覆蓋。
-    - 結果（2026-07-01）：`cron/scheduler.go` 新增 `EntryCount()` 方法（測試用）；`daemon/server.go::launchProcess` 把 cron Register key 改為 `ns+":"+name` 複合鍵，callback 改呼叫 `restartByName(cronKey)`；`stopProcess` 改呼叫 `scheduler.Remove(ns+":"+name)`；`daemon/manager.go::findProcesses` 新增 exact-key match 讓 namespaced 查詢直通 map。新增 `TestCronNamespaceIsolation`：default:api + production:api 各帶 `CronRestart="@every 1h"`，驗證 `s.scheduler.EntryCount() == 2`（修復前為 1，後者覆蓋前者）。
-
-- [x] `驗證測試家目錄隔離 (Verify test home isolation)` — 診斷 1.5
-    - 現況：`daemon/server_test.go:477` 的 `TestStartAppOutFileHomeExpansion` 已改用 `testDir(t)` 建立 Server，但 `OutFile:"~/…"` 仍會展開至 `真實家目錄` 並寫檔污染主機。
-    - 做法：將測試輸出路徑改指向 `t.TempDir()`，或於測試中覆寫 `HOME` 環境變數後再驗證展開結果。
-    - 驗證：沙箱環境執行 `go test -v ./daemon`，無權限錯誤且不污染家目錄。
-    - 結果（2026-07-01）：`TestStartAppOutFileHomeExpansion` 加上 `t.Setenv("HOME", testDir)` 並斷言 LogFile/ErrorFile 路徑不以 `realHome` 開頭。注意踩坑：`realHome` 必須用 `os.Getenv("HOME")` 而**非** `homedir.Dir()` — 後者有 package-level cache，第一次呼叫就把值鎖住，後續 `t.Setenv` 完全無效（`homedir.Expand` 仍用 cached 值）。已用「暫時移除 Setenv → 測試 fail → 恢復 → 測試 pass」驗證。
-
-## 生態配置精靈解耦 (Ecosystem Wizard Decoupling)
-
-- [x] `architecture-wizard-decoupling`: 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。
-    - 來源：[plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
-    - 結果（2026-07-04）：已重構並解耦至 `config/wizard` 套件，完全移除 `cmd/eco_wizard.go` 與 `cmd/eco_renderer.go`，且 `go test ./...` 全綠通過。
+## Daemon
 
 ## Archive
 
-- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
-    - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。
-
-### 守護進程解耦重構 (Daemon Decoupling Refactor)
-
-> 來源 [plans/architecture-pm2-refactor.md](./plans/architecture-pm2-refactor.md)、`plans/architecture-pm2-decoupling.md`、`plans/architecture-pm2-modularization.md`、`plans/architecture-pm2-reorganization.md`、`plans/architecture-decouple-daemon.md`、[docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)（原 `plans/architecture-daemon-decoupling-phase2.md`）、[docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md)（原 `plans/architecture-extract-registry.md`）、[docs/specs/daemon-decoupling-phase3.md](./docs/specs/daemon-decoupling-phase3.md)。採 `絞殺榕模式 (Strangler-Fig)` 分階段、每階段可獨立編譯與回滾。現況：`daemon/` 已內含 `state.go::ProcessRegistry`（扁平結構），尚無 `daemon/executor/`、`daemon/network/`、`tui/views/`、`config/wizard/`。
-
-- [x] `第一階段：補強特徵測試 (Characterization tests)`
-    - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
-    - 驗證：`go test -v ./...` 與 `go test -race ./...` 綠燈。
-    - 結果（2026-06-30）：新增 5 個特徵測試至 `daemon/server_test.go`：
-        - `TestHighConcurrencyStartup` — 20 goroutine 並行 `startApp`，驗證所有 PID/ID 唯一且 status=online
-        - `TestProcessErroredExitNoRestart` — `Script="false"` + MaxRestarts=0 → status=errored、PID=0、無重啟
-        - `TestProcessErroredExitAutoRestart` — `Script="sleep 0.1 && false"` + MaxRestarts=5 → 輪詢到 Restarts≥1、ID 保留、新 PID 不同
-        - `TestProcessCleanExit` — `Script="true"` + MaxRestarts=5 → status=stopped、PID=0、無重啟（即使有 budget）
-        - `TestCronRestartFiresReboot` — `CronRestart="@every 1s"` + `Script="/bin/sleep 60"` → 觀察兩個 tick 都重啟且 PID 不同，驗證 `scheduler.Register` 在 launchProcess 中有重新呼叫
-    - 同步修復 `daemon/server.go:499` 的 pre-existing race：`return mp.Info` 改為 RLock 內做 struct copy，否則 watchProcess 在 Lock 內的寫入會與 struct copy 競爭。先前測試（`TestBaseEnvSnapshotReachesProcess`、`TestCWDInjectedAsPWD`、`TestDeleteDuringRestartSleep`）在 `-race` 下原本會觸發此 race，本次一併解除。
-    - 測試本身的所有 `mp.Info.*` 欄位讀取都在 `s.mu.RLock` 範圍內，避免在 release-after-RUnlock 後裸讀欄位引發 race detector 誤判。
-    - 驗證結果：`go test -race ./...` 全綠（cmd/config/daemon/tui 4 個 package 全部 stable），`-count=3` 壓測亦穩定通過。
-
-- [x] `統一進程配置定義 (Unified Process Configuration)` — 來源 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md)
-      目標：於 `process/types.go` 建立統一的 `AppConfig` 結構，重構 `config.AppConfig` 與 `daemon.AppStartReq`，使其複用 `process.AppConfig`，消除重複定義。
-      做法：依照 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq`、`DumpEntry` 與 `ProcessInfo` 的定義與映射程式碼。
-      驗證：`go test -race -v ./...`。
-      規格：[docs/specs/unified-config-refactor.md](./docs/specs/unified-config-refactor.md)
-      結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`process.DumpEntry` 標記 Deprecated，`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
-
-- [x] `第二階段：抽離 RPC 協定包 (Extract protocol package)` — 規格 [docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md)
+- [x] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 規格 [docs/specs/tui-decoupling.md](./docs/specs/tui-decoupling.md) @2026-07-06_22:21:06 @Completed @Daemon
+    - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
+    - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
+    - 結果（2026-07-03）：提交 `4ed9e89 refactor(tui): split renderer into stateless views under tui/views/`，新建 `tui/views/{context.go, header.go, footer.go, detail.go, logs.go, list.go, layout.go, format.go}` 八個檔案。`context.go` 定義 `ViewContext` 結構（`Width`/`Height`/`Procs`/`Logs`/`MetricsLines`/`Cursor`/`Watching`/`Time`/`Notice` 等）；`layout.go` 提供 `RenderLayout` 單一入口，依終端寬度決定 single-pane 或 two-pane 編排。各 View 函式僅接受 `ViewContext` 或所需 primitive、回傳 `string`，**無狀態、無 callback、無 `tui.Model` 引用** — 純函式，便於測試。色彩 token 改由 `tui/theme/palette.go` 統一輸出，`tui/theme.go` 之 `clXxx` re-export 僅作向後相容，新程式碼直接 import `tui/theme`。`tui.Model::View()` 簡化為委派 `views.RenderLayout(ctx)`，`Update()` 仍負責事件分支與 `doRefresh()` 派發。`go test -race ./tui/...` 全綠；`go list -deps ./tui/views/... | grep 'pm2/daemon$'` 為空，TUI views 完全不依賴 daemon 套件。
+- [x] `第五階段：抽離網路傳輸層 (Extract network layer)` — 規格 [docs/specs/extract-network-layer.md](./docs/specs/extract-network-layer.md) @2026-07-06_22:21:05 @Completed @Daemon
+    - 將 `Listen`/`handleConn` 遷至 `daemon/network/listener.go` 與 `handler.go`，僅依賴 `Manager` 的主動介面路由，網路與業務完全隔離。
+    - 嚴守由外向內單向依賴，`executor`/`manager` 不得引用 `network`，防 `import cycle not allowed`。
+    - 驗證：`go test -race ./...` + E2E 確認 CLI/TUI 行為與重構前一致。
+    - 結果（2026-07-03）：提交 `31b36bc refactor(daemon): extract network listener into daemon/network subpackage`，新建 `daemon/network/{listener.go, handler.go, manager.go}`。`manager.go` 定義 `Manager` interface 契約（`StartApp`/`StopByName`/`RestartByName`/`PauseByName`/`ResumeByName`/`DeleteByName`/`ListAll`/`Save`/`Resurrect`/`KillAll`/`Ping`），`daemon.Server` 透過既有 public methods 隱式實作。`listener.go` 僅依賴此介面，`handler.go` 解析 `model.Request` → 介面呼叫 → 序列化 `model.Response`，post-`CmdKill` 觸發退出 hook。**單向依賴驗證**：`go list -deps ./daemon/network/... | grep 'pm2/daemon$'` 為空、`go list -deps ./daemon/executor/... | grep 'pm2/daemon$'` 為空，雙向皆無 import cycle。`daemon.Server::Listen()` 委派至 `network.Listen(socketPath, s)`，業務層與傳輸層徹底隔離。`go build ./...` 與 `go test -race -count=2 ./...` 全綠；`cmd/{start,stop,monitor,logs}.go` 與 `tui/model.go` 透過 `model.SendRequest` 通訊，行為與重構前一致。
+- [x] `第四階段：抽離進程執行器 (Extract executor)` — 規格 [docs/specs/extract-process-executor.md](./docs/specs/extract-process-executor.md) @2026-07-06_22:21:03 @Completed @Daemon
+    - 將 `launchProcess`/`watchProcess`/`stopProcess` 及 `builder.go`/`watcher.go`/`metrics.go` 遷至 `daemon/executor/`，封裝單一進程生命週期與進程組信號。
+    - 鎖方向約束：僅 `Manager` 呼叫 `Registry` 時加狀態鎖，`Executor` 不持狀態鎖，避免循環等待死鎖。
+    - 驗證：拉起含 cron 重啟 / 日誌 / watch 的多進程，停止後無孤兒進程且 `pm2 list` 狀態正常。
+    - 結果（2026-07-03）：提交 `684ed77 refactor(daemon): extract Executor into daemon/executor subpackage`，新建 `daemon/executor/{executor.go, builder.go, watcher.go, metrics.go}`。`Executor` 持有 `cmdBuilders`/`fileWatcher`/`metricsCollector` 等依賴；`daemon.Server` 持 `*Executor`，所有 spawn/watch/stop 委派至 Executor。`stopProcess` 沿用先前診斷 1.3 修復（`kill(2)` 對負 pid 即 process group 發送 SIGTERM/SIGKILL），builder 直接 `Setpgid: true` 確保進程組語意。**鎖方向檢查**：`Executor` 本身不持 `s.reg` 鎖，所有狀態回寫透過 `onStopping`/`onStopped`/`onExit`/`onFileChanged` 回呼，呼叫端以 `s.reg.UpdateInfo(key, fn)` 走 `ProcessRegistry` 內部鎖，無跨持鎖阻塞。`go list -deps ./daemon/executor/... | grep 'pm2/daemon$'` 為空，executor 子包完全獨立。`go build ./...` 與 `go test -race -count=2 ./daemon/...` 全綠；`TestStopProcessKillsChildren`、`TestCronNamespaceIsolation`、`TestRefreshMetricsParallelSpeedup` 等既有回歸測試穩定通過。
+- [x] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 規格 [docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md) @2026-07-06_22:21:02 @Completed @Daemon
+      將 `s.processes` 與其鎖操作封裝至 `ProcessRegistry` 結構，提供 `Add()`/`Get()`/`Remove()`/`List()`/`FindByTarget()`/`Snapshot()`/`UpdateInfo()`/`UpdateMetrics()`/`UpdateCronStatus()` 等線程安全方法，收斂手動解鎖風險。
+      驗證：`go test -race ./daemon/...`。
+      結果（2026-07-02）：`daemon.Server` 的 `mu sync.RWMutex` 與 `processes map[string]*ManagedProcess` 兩個直接欄位完全移除，改為單一 `reg *ProcessRegistry` 委派；`Server` 暴露 `Lock/Unlock/RLock/RUnlock` 委派方法（escape hatch）給少數需要跨多次呼叫持鎖的場景。`daemon/manager.go`（listAll/findProcesses/deleteByName）、`daemon/persistence.go`（save）、`daemon/metrics.go`（refreshMetrics phase 1+3）、`daemon/server.go` 5 個函數（startApp/launchProcess/watchProcess/stopProcess/triggerCron + pauseByName/resumeByName）全部改用 Registry 方法。`daemon/server_test.go` 88 處機械式更新（46 處 `s.mu.X()` → `s.X()`、42 處 `s.processes[k]` → `s.reg.Get/Add/Remove`）。**位置偏離計畫**：原計畫將 Registry 放在 `daemon/manager/state.go` 子包，但 Go 不允許子包 import 父包同時父包 import 子包的循環依賴，因此 `ProcessRegistry` 改放在 `daemon/state.go`（同包內，無循環問題），其他 API 與計畫書完全一致。新增 `daemon/state_test.go`：12 個單元測試（TestRegistryBasicCRUD / AddReplacesExisting / SnapshotIsIndependent / FindByTarget / UpdateInfo / UpdateMetricsPIDCheck / UpdateCronStatus / ConcurrentReadWrite / EscapeHatchLocks 等）含 50 goroutine × 200 iter 的並發讀寫壓測，全部穩定通過。`go test -race -count=2 ./...` 全綠；`daemon` 套件 33 個測試 count=3 穩定。
+- [x] `第二階段：抽離 RPC 協定包 (Extract protocol package)` — 規格 [docs/specs/extract-protocol-package.md](./docs/specs/extract-protocol-package.md) @2026-07-06_22:21:00 @Completed @Daemon
     - 將 `daemon/protocol.go`（`Request`/`Response`/`SendRequest`）獨立為 `model/protocol.go`，讓 `cmd` 與 `tui` 不再導入整個 `daemon` 包。
     - 保持 struct JSON tag 完全一致，避免新舊 CLI/TUI 通訊不相容。
     - 驗證：`go test -v ./cmd/... ./tui/...`。
@@ -113,25 +64,56 @@
         - `cmd/daemon.go` 保留 `daemon.NewServer` 引用（這是 daemon 套件實際 API，非 protocol 符號），其餘 protocol 符號切換到 `model`
         - `tui/model.go` 完全切換到 `model` 套件
         - 驗證：`go list -deps ./tui/... | grep -c pm2/daemon` = 0（TUI 已完全不再依賴 daemon 套件）；`go test -race ./...` 全綠；`go test -count=1 -race ./model/... ./cmd/... ./tui/... ./daemon/...` 全部 PASS
-
-- [x] `第三階段：抽離進程註冊表 (Extract ProcessRegistry)` — 規格 [docs/specs/extract-process-registry.md](./docs/specs/extract-process-registry.md)
-      將 `s.processes` 與其鎖操作封裝至 `ProcessRegistry` 結構，提供 `Add()`/`Get()`/`Remove()`/`List()`/`FindByTarget()`/`Snapshot()`/`UpdateInfo()`/`UpdateMetrics()`/`UpdateCronStatus()` 等線程安全方法，收斂手動解鎖風險。
-      驗證：`go test -race ./daemon/...`。
-      結果（2026-07-02）：`daemon.Server` 的 `mu sync.RWMutex` 與 `processes map[string]*ManagedProcess` 兩個直接欄位完全移除，改為單一 `reg *ProcessRegistry` 委派；`Server` 暴露 `Lock/Unlock/RLock/RUnlock` 委派方法（escape hatch）給少數需要跨多次呼叫持鎖的場景。`daemon/manager.go`（listAll/findProcesses/deleteByName）、`daemon/persistence.go`（save）、`daemon/metrics.go`（refreshMetrics phase 1+3）、`daemon/server.go` 5 個函數（startApp/launchProcess/watchProcess/stopProcess/triggerCron + pauseByName/resumeByName）全部改用 Registry 方法。`daemon/server_test.go` 88 處機械式更新（46 處 `s.mu.X()` → `s.X()`、42 處 `s.processes[k]` → `s.reg.Get/Add/Remove`）。**位置偏離計畫**：原計畫將 Registry 放在 `daemon/manager/state.go` 子包，但 Go 不允許子包 import 父包同時父包 import 子包的循環依賴，因此 `ProcessRegistry` 改放在 `daemon/state.go`（同包內，無循環問題），其他 API 與計畫書完全一致。新增 `daemon/state_test.go`：12 個單元測試（TestRegistryBasicCRUD / AddReplacesExisting / SnapshotIsIndependent / FindByTarget / UpdateInfo / UpdateMetricsPIDCheck / UpdateCronStatus / ConcurrentReadWrite / EscapeHatchLocks 等）含 50 goroutine × 200 iter 的並發讀寫壓測，全部穩定通過。`go test -race -count=2 ./...` 全綠；`daemon` 套件 33 個測試 count=3 穩定。
-
-- [x] `第四階段：抽離進程執行器 (Extract executor)` — 規格 [docs/specs/extract-process-executor.md](./docs/specs/extract-process-executor.md)
-    - 將 `launchProcess`/`watchProcess`/`stopProcess` 及 `builder.go`/`watcher.go`/`metrics.go` 遷至 `daemon/executor/`，封裝單一進程生命週期與進程組信號。
-    - 鎖方向約束：僅 `Manager` 呼叫 `Registry` 時加狀態鎖，`Executor` 不持狀態鎖，避免循環等待死鎖。
-    - 驗證：拉起含 cron 重啟 / 日誌 / watch 的多進程，停止後無孤兒進程且 `pm2 list` 狀態正常。
-    - 結果（2026-07-03）：提交 `684ed77 refactor(daemon): extract Executor into daemon/executor subpackage`，新建 `daemon/executor/{executor.go, builder.go, watcher.go, metrics.go}`。`Executor` 持有 `cmdBuilders`/`fileWatcher`/`metricsCollector` 等依賴；`daemon.Server` 持 `*Executor`，所有 spawn/watch/stop 委派至 Executor。`stopProcess` 沿用先前診斷 1.3 修復（`kill(2)` 對負 pid 即 process group 發送 SIGTERM/SIGKILL），builder 直接 `Setpgid: true` 確保進程組語意。**鎖方向檢查**：`Executor` 本身不持 `s.reg` 鎖，所有狀態回寫透過 `onStopping`/`onStopped`/`onExit`/`onFileChanged` 回呼，呼叫端以 `s.reg.UpdateInfo(key, fn)` 走 `ProcessRegistry` 內部鎖，無跨持鎖阻塞。`go list -deps ./daemon/executor/... | grep 'pm2/daemon$'` 為空，executor 子包完全獨立。`go build ./...` 與 `go test -race -count=2 ./daemon/...` 全綠；`TestStopProcessKillsChildren`、`TestCronNamespaceIsolation`、`TestRefreshMetricsParallelSpeedup` 等既有回歸測試穩定通過。
-
-- [x] `第五階段：抽離網路傳輸層 (Extract network layer)` — 規格 [docs/specs/extract-network-layer.md](./docs/specs/extract-network-layer.md)
-    - 將 `Listen`/`handleConn` 遷至 `daemon/network/listener.go` 與 `handler.go`，僅依賴 `Manager` 的主動介面路由，網路與業務完全隔離。
-    - 嚴守由外向內單向依賴，`executor`/`manager` 不得引用 `network`，防 `import cycle not allowed`。
-    - 驗證：`go test -race ./...` + E2E 確認 CLI/TUI 行為與重構前一致。
-    - 結果（2026-07-03）：提交 `31b36bc refactor(daemon): extract network listener into daemon/network subpackage`，新建 `daemon/network/{listener.go, handler.go, manager.go}`。`manager.go` 定義 `Manager` interface 契約（`StartApp`/`StopByName`/`RestartByName`/`PauseByName`/`ResumeByName`/`DeleteByName`/`ListAll`/`Save`/`Resurrect`/`KillAll`/`Ping`），`daemon.Server` 透過既有 public methods 隱式實作。`listener.go` 僅依賴此介面，`handler.go` 解析 `model.Request` → 介面呼叫 → 序列化 `model.Response`，post-`CmdKill` 觸發退出 hook。**單向依賴驗證**：`go list -deps ./daemon/network/... | grep 'pm2/daemon$'` 為空、`go list -deps ./daemon/executor/... | grep 'pm2/daemon$'` 為空，雙向皆無 import cycle。`daemon.Server::Listen()` 委派至 `network.Listen(socketPath, s)`，業務層與傳輸層徹底隔離。`go build ./...` 與 `go test -race -count=2 ./...` 全綠；`cmd/{start,stop,monitor,logs}.go` 與 `tui/model.go` 透過 `model.SendRequest` 通訊，行為與重構前一致。
-
-- [x] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 規格 [docs/specs/tui-decoupling.md](./docs/specs/tui-decoupling.md)
-    - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
-    - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
-    - 結果（2026-07-03）：提交 `4ed9e89 refactor(tui): split renderer into stateless views under tui/views/`，新建 `tui/views/{context.go, header.go, footer.go, detail.go, logs.go, list.go, layout.go, format.go}` 八個檔案。`context.go` 定義 `ViewContext` 結構（`Width`/`Height`/`Procs`/`Logs`/`MetricsLines`/`Cursor`/`Watching`/`Time`/`Notice` 等）；`layout.go` 提供 `RenderLayout` 單一入口，依終端寬度決定 single-pane 或 two-pane 編排。各 View 函式僅接受 `ViewContext` 或所需 primitive、回傳 `string`，**無狀態、無 callback、無 `tui.Model` 引用** — 純函式，便於測試。色彩 token 改由 `tui/theme/palette.go` 統一輸出，`tui/theme.go` 之 `clXxx` re-export 僅作向後相容，新程式碼直接 import `tui/theme`。`tui.Model::View()` 簡化為委派 `views.RenderLayout(ctx)`，`Update()` 仍負責事件分支與 `doRefresh()` 派發。`go test -race ./tui/...` 全綠；`go list -deps ./tui/views/... | grep 'pm2/daemon$'` 為空，TUI views 完全不依賴 daemon 套件。
+- [x] `統一進程配置定義 (Unified Process Configuration)` — 來源 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) @2026-07-06_22:20:58 @Completed @Daemon
+      目標：於 `process/types.go` 建立統一的 `AppConfig` 結構，重構 `config.AppConfig` 與 `daemon.AppStartReq`，使其複用 `process.AppConfig`，消除重複定義。
+      做法：依照 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq`、`DumpEntry` 與 `ProcessInfo` 的定義與映射程式碼。
+      驗證：`go test -race -v ./...`。
+      規格：[docs/specs/unified-config-refactor.md](./docs/specs/unified-config-refactor.md)
+      結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`process.DumpEntry` 標記 Deprecated，`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
+- [x] `第一階段：補強特徵測試 (Characterization tests)` @2026-07-06_22:20:57 @Completed @Daemon
+    - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
+    - 驗證：`go test -v ./...` 與 `go test -race ./...` 綠燈。
+    - 結果（2026-06-30）：新增 5 個特徵測試至 `daemon/server_test.go`：
+        - `TestHighConcurrencyStartup` — 20 goroutine 並行 `startApp`，驗證所有 PID/ID 唯一且 status=online
+        - `TestProcessErroredExitNoRestart` — `Script="false"` + MaxRestarts=0 → status=errored、PID=0、無重啟
+        - `TestProcessErroredExitAutoRestart` — `Script="sleep 0.1 && false"` + MaxRestarts=5 → 輪詢到 Restarts≥1、ID 保留、新 PID 不同
+        - `TestProcessCleanExit` — `Script="true"` + MaxRestarts=5 → status=stopped、PID=0、無重啟（即使有 budget）
+        - `TestCronRestartFiresReboot` — `CronRestart="@every 1s"` + `Script="/bin/sleep 60"` → 觀察兩個 tick 都重啟且 PID 不同，驗證 `scheduler.Register` 在 launchProcess 中有重新呼叫
+    - 同步修復 `daemon/server.go:499` 的 pre-existing race：`return mp.Info` 改為 RLock 內做 struct copy，否則 watchProcess 在 Lock 內的寫入會與 struct copy 競爭。先前測試（`TestBaseEnvSnapshotReachesProcess`、`TestCWDInjectedAsPWD`、`TestDeleteDuringRestartSleep`）在 `-race` 下原本會觸發此 race，本次一併解除。
+    - 測試本身的所有 `mp.Info.*` 欄位讀取都在 `s.mu.RLock` 範圍內，避免在 release-after-RUnlock 後裸讀欄位引發 race detector 誤判。
+    - 驗證結果：`go test -race ./...` 全綠（cmd/config/daemon/tui 4 個 package 全部 stable），`-count=3` 壓測亦穩定通過。
+- [x] [Bug] some cron tasks has last run , some cron doesn't @2026-07-06_22:16:44 @Completed
+- [x] `architecture-wizard-decoupling`: 將與問答精靈 (`cmd/eco_wizard.go`) 及渲染器 (`cmd/eco_renderer.go`) 抽離至獨立套件 `config/wizard`，使 `cmd` 僅作為薄 CLI 殼。 @2026-07-06*20:06:51 @Completed @生態配置精靈解耦*(Ecosystem_Wizard_Decoupling)
+    - 來源：[plans/architecture-wizard-decoupling.md](./plans/architecture-wizard-decoupling.md)
+    - 結果（2026-07-04）：已重構並解耦至 `config/wizard` 套件，完全移除 `cmd/eco_wizard.go` 與 `cmd/eco_renderer.go`，且 `go test ./...` 全綠通過。
+- [x] `驗證測試家目錄隔離 (Verify test home isolation)` — 診斷 1.5 @2026-07-06\*20:06:49 @Completed @Bug
+    - 現況：`daemon/server_test.go:477` 的 `TestStartAppOutFileHomeExpansion` 已改用 `testDir(t)` 建立 Server，但 `OutFile:"~/…"` 仍會展開至 `真實家目錄` 並寫檔污染主機。
+    - 做法：將測試輸出路徑改指向 `t.TempDir()`，或於測試中覆寫 `HOME` 環境變數後再驗證展開結果。
+    - 驗證：沙箱環境執行 `go test -v ./daemon`，無權限錯誤且不污染家目錄。
+    - 結果（2026-07-01）：`TestStartAppOutFileHomeExpansion` 加上 `t.Setenv("HOME", testDir)` 並斷言 LogFile/ErrorFile 路徑不以 `realHome` 開頭。注意踩坑：`realHome` 必須用 `os.Getenv("HOME")` 而**非** `homedir.Dir()` — 後者有 package-level cache，第一次呼叫就把值鎖住，後續 `t.Setenv` 完全無效（`homedir.Expand` 仍用 cached 值）。已用「暫時移除 Setenv → 測試 fail → 恢復 → 測試 pass」驗證。
+- [x] `修復排程命名空間衝突 (Fix cron namespace collision)` — 診斷 1.4 @2026-07-06\*20:06:47 @Completed @Bug
+    - 現況：`cron/scheduler.go:28` 的 `Register` 以進程 `name` 為鍵；`daemon/server.go:470/492` 呼叫時亦僅傳 `name`，不同命名空間同名進程（`default:api` vs `production:api`）會互相覆蓋。
+    - 做法：將排程鍵升級為 `namespace:name` 複合鍵，並同步調整 `Register`/`Remove` 的呼叫端與 `cron` 生命週期。
+    - 驗證：於兩個命名空間啟動同名 cron 進程，確認排程各自獨立觸發不互相覆蓋。
+    - 結果（2026-07-01）：`cron/scheduler.go` 新增 `EntryCount()` 方法（測試用）；`daemon/server.go::launchProcess` 把 cron Register key 改為 `ns+":"+name` 複合鍵，callback 改呼叫 `restartByName(cronKey)`；`stopProcess` 改呼叫 `scheduler.Remove(ns+":"+name)`；`daemon/manager.go::findProcesses` 新增 exact-key match 讓 namespaced 查詢直通 map。新增 `TestCronNamespaceIsolation`：default:api + production:api 各帶 `CronRestart="@every 1h"`，驗證 `s.scheduler.EntryCount() == 2`（修復前為 1，後者覆蓋前者）。
+- [x] `修復指標收集鎖阻塞 (Fix metrics lock contention)` — 診斷 1.2 @2026-07-06\*20:06:45 @Completed @Bug
+      現況：`daemon/metrics.go:44` 在持有 `s.mu.Lock()` 期間於迴圈內同步呼叫 `getProcessMetrics`（內部 `exec.Command("ps", …)`），進程數多時長時間鎖定伺服器、阻塞所有 RPC。
+      做法：先於讀鎖內快照各進程 `PID`，於鎖外執行 `ps` 採集，最後再以寫鎖（或 channel）回寫 `CPU`/`Memory`。
+      驗證：拉起 30 個虛擬進程同時連續 `pm2 list`，RPC 回應不應因 `ps` 耗時阻塞超過 50ms。
+      結果（2026-06-30）：`daemon/metrics.go` 重構為三階段 `refreshMetrics()`：phase 1 RLock 快照 `(key, pid, online)`、phase 2 **完全解鎖**跑 `ps`、phase 3 Lock 回寫並比對 PID 防止重啟後舊樣本洩漏到新實例。`getProcessMetrics` 改為 package-level `var` 以利測試注入。新增兩個回歸測試：(1) `TestRefreshMetricsDoesNotBlockRPC` 用 100ms-stub 驗證 `listAll` 在 5-stub 並發期間仍 < 50ms；(2) `TestRefreshMetricsSkipsRestartedProcess` 驗證 phase 3 的 `mp.Info.PID != t.pid` 檢查有效阻擋 stale 樣本。兩個測試 `-race -count=3` 穩定通過；無 `-race` 下整個 daemon 套件全綠。
+      平行化增量（2026-06-30）：phase 2 改用 `metricsWorkers=8` 的 worker pool（`wg.Go()` Go 1.24+ API），每個 worker 寫入 `samples[i]` 獨立 slot — 不需額外同步。32-stub × 50ms 壓測：實測 203ms vs ideal-parallel 200ms vs sequential 1.6s。新增 `TestRefreshMetricsParallelSpeedup` 驗證 wall-clock 上限（3× ideal）並順手驗證並行 writeback 無 sample 錯位/遺失。`go test -race -count=3 -run TestRefreshMetrics` 全部穩定通過。
+- [x] `修復孤兒進程 (Fix orphan child processes)` — 診斷 1.3 @2026-07-06\*20:06:43 @Completed @Bug
+    - 現況：`daemon/server.go:571` 的 `stopProcess` 僅 `mp.Cmd.Process.Signal(syscall.SIGTERM)`，信號只送到父層 `bash`，未傳播至 `Setpgid` 建立的子進程。
+    - 做法：改以 `syscall.Kill(-pid, syscall.SIGTERM)` 對整個進程組發送信號。
+    - 驗證：啟動含子行程的 shell 指令後停止，`ps -ef` 確認無殘留孤兒進程。
+    - 結果（2026-07-01）：`daemon/server.go::stopProcess` 改用 `syscall.Kill(-pid, syscall.SIGTERM)` 對整個 process group 發信號（kill(2) 的負 pid 即 pgrp），5s 超時後同樣用 `Kill(-pid, syscall.SIGKILL)` 升級。新增 `TestStopProcessKillsChildren`：寫一個 `spawn_child.sh` 至 t.TempDir()，裡面跑 `sleep 60 & echo $! > child.pid; wait`，啟動後用 `syscall.Kill(childPID, 0)` 驗證 child 還活著；stopByName 後再次驗證 child PID 收到 ESRCH（已死）。已用「暫時 revert fix → 測試 fail → 恢復 fix → 測試 pass」驗證測試有效捕捉 bug。
+- [x] `修復 concurrent map 競態 (Fix concurrent map iteration/write)` — 診斷 1.1 @2026-07-06\*20:06:41 @Completed @Bug
+      現況：`daemon/persistence.go:16` 的 `save()` 遍歷 `s.processes` 全程無鎖；由 `daemon/server.go:82`（`startAutoSave` 背景協程）與 `daemon/server.go:168`（RPC `CmdSave`）並發呼叫。
+      做法：在 `save()` 開頭先持 `s.mu.RLock()` 取得進程列表 `快照 (snapshot)`，於鎖外組裝 `DumpEntry` 與寫檔，避免 `fatal error: concurrent map iteration and map write`。
+      驗證：`go test -race ./daemon/...` 搭配並發啟動 + 連續存檔壓測。
+      結果（2026-06-30）：`save()` 改為內部持 `s.mu.RLock`，對應 `listAll`/`findProcesses` 既有的「內部持鎖」慣例。新增 `daemon/server_test.go::TestSaveConcurrentWithMapMutation`（4 saver + 1 writer × 80ms 壓測），`go test -race ./daemon/...` 下穩定通過 3/3 次。其餘 `TestBaseEnvSurvivesRestartAndResurrect`、`TestWatchStateInheritance`、`TestVersionStateInheritance` 等既有測試在 `-race` 下亦全綠。
+- [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。 @2026-07-06_20:06:36 @Completed
+- [x] pasued cron job is not resurrect @2026-07-06_20:06:34 @Completed
+- [x] implmenet daemon start and combine kill into daemon kill @2026-07-06_20:06:32 @Completed
+- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
+    - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。

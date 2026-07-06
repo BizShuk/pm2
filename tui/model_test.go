@@ -331,3 +331,231 @@ func TestActionNoticeSurfacesAndClears(t *testing.T) {
 		t.Errorf("notice not cleared on tick, got %q", m.notice)
 	}
 }
+
+// TestRecomputeNamespaces checks that the chip strip is built from the
+// unfiltered process list: "All" prepended at index 0, every distinct
+// namespace present, sorted, and an empty Namespace field normalised
+// to "default" (matches process.AppConfig.Normalize).
+func TestRecomputeNamespaces(t *testing.T) {
+	m := New("sock", false)
+	m.allProcs = []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}},
+		{AppConfig: process.AppConfig{Name: "c", Namespace: "prod"}},
+		{AppConfig: process.AppConfig{Name: "d", Namespace: "staging"}},
+		{AppConfig: process.AppConfig{Name: "e"}}, // empty namespace → "default"
+	}
+	m.recomputeNamespaces()
+
+	want := []string{"All", "default", "dev", "prod", "staging"}
+	if len(m.namespaces) != len(want) {
+		t.Fatalf("namespaces = %v, want %v", m.namespaces, want)
+	}
+	for i, n := range want {
+		if m.namespaces[i] != n {
+			t.Errorf("namespaces[%d] = %q, want %q (full: %v)", i, m.namespaces[i], n, m.namespaces)
+		}
+	}
+	if m.nsCursor != 0 {
+		t.Errorf("nsCursor = %d, want 0 (All)", m.nsCursor)
+	}
+}
+
+// TestApplyNamespaceFilter confirms that switching the chip restricts
+// the visible list to the selected namespace, and "All" restores the
+// full set.
+func TestApplyNamespaceFilter(t *testing.T) {
+	m := New("sock", false)
+	m.SortBy = SortByName
+	m.allProcs = []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "c", Namespace: "prod"}, ID: 3},
+		{AppConfig: process.AppConfig{Name: "d", Namespace: "staging"}, ID: 4},
+	}
+	m.recomputeNamespaces()
+	// ["All", "dev", "prod", "staging"]
+
+	// 1. "All" (cursor 0) shows everything, sorted by name.
+	m.applyNamespaceFilter()
+	if len(m.procs) != 4 {
+		t.Errorf("All: got %d procs, want 4", len(m.procs))
+	}
+
+	// 2. "prod" (cursor 2) filters to a-app and c-app only.
+	m.nsCursor = 2
+	m.applyNamespaceFilter()
+	if len(m.procs) != 2 {
+		t.Errorf("prod: got %d procs, want 2", len(m.procs))
+	}
+	for _, p := range m.procs {
+		if p.Namespace != "prod" {
+			t.Errorf("prod filter leaked %q (ns=%q)", p.Name, p.Namespace)
+		}
+	}
+
+	// 3. "dev" (cursor 1) filters to one row.
+	m.nsCursor = 1
+	m.applyNamespaceFilter()
+	if len(m.procs) != 1 || m.procs[0].Name != "b" {
+		t.Errorf("dev: got %v, want [b]", m.procs)
+	}
+
+	// 4. Cursor that no longer maps to a valid chip falls back to 0.
+	m.nsCursor = 99
+	m.applyNamespaceFilter()
+	if m.nsCursor != 0 || len(m.procs) != 4 {
+		t.Errorf("fallback: nsCursor=%d procs=%d, want 0 / 4", m.nsCursor, len(m.procs))
+	}
+}
+
+// TestCycleNamespaceWraps verifies that moving the cursor right past
+// the last chip loops back to "All", and left from "All" loops to the
+// last chip.
+func TestCycleNamespaceWraps(t *testing.T) {
+	m := New("sock", false)
+	m.SortBy = SortByName
+	m.allProcs = []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+	}
+	m.recomputeNamespaces() // ["All", "dev", "prod"]
+	if len(m.namespaces) != 3 {
+		t.Fatalf("setup: namespaces = %v, want 3 entries", m.namespaces)
+	}
+
+	m.cycleNamespace(+1)
+	if m.nsCursor != 1 || m.namespaces[m.nsCursor] != "dev" {
+		t.Errorf("right 1: cursor=%d (%q), want 1 (dev)", m.nsCursor, m.namespaces[m.nsCursor])
+	}
+	m.cycleNamespace(+1)
+	if m.nsCursor != 2 || m.namespaces[m.nsCursor] != "prod" {
+		t.Errorf("right 2: cursor=%d (%q), want 2 (prod)", m.nsCursor, m.namespaces[m.nsCursor])
+	}
+	m.cycleNamespace(+1)
+	if m.nsCursor != 0 {
+		t.Errorf("right wrap: cursor=%d, want 0 (All)", m.nsCursor)
+	}
+	m.cycleNamespace(-1)
+	if m.nsCursor != len(m.namespaces)-1 {
+		t.Errorf("left wrap: cursor=%d, want %d (last)", m.nsCursor, len(m.namespaces)-1)
+	}
+}
+
+// TestLeftRightArrowSwitchesNamespace sends bubble tea key events for
+// the actual ←/→ arrow keys and confirms nsCursor + m.procs both
+// update. Uses the same KeyMsg shape the runtime produces.
+func TestLeftRightArrowSwitchesNamespace(t *testing.T) {
+	m := New("sock", false)
+	m.SortBy = SortByName
+	m.allProcs = []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+	}
+	m.recomputeNamespaces()
+	m.applyNamespaceFilter() // nsCursor=0, "All", 2 procs
+
+	if len(m.procs) != 2 {
+		t.Fatalf("setup: All-view should show 2 procs, got %d", len(m.procs))
+	}
+
+	// Press Right → "dev"
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = res.(Model)
+	if m.namespaces[m.nsCursor] != "dev" {
+		t.Errorf("after →: cursor=%d (%q), want dev", m.nsCursor, m.namespaces[m.nsCursor])
+	}
+	if len(m.procs) != 1 || m.procs[0].Name != "b" {
+		t.Errorf("after →: procs=%v, want [b]", m.procs)
+	}
+
+	// Press Right again → "prod"
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = res.(Model)
+	if m.namespaces[m.nsCursor] != "prod" {
+		t.Errorf("after →: cursor=%q, want prod", m.namespaces[m.nsCursor])
+	}
+	if len(m.procs) != 1 || m.procs[0].Name != "a" {
+		t.Errorf("after →: procs=%v, want [a]", m.procs)
+	}
+
+	// Press Left → "dev"
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = res.(Model)
+	if m.namespaces[m.nsCursor] != "dev" {
+		t.Errorf("after ←: cursor=%q, want dev", m.namespaces[m.nsCursor])
+	}
+}
+
+// TestRefreshPreservesNamespaceCursor checks that the cursor follows
+// the namespace by name across a refresh, and falls back to 0 when
+// the active namespace disappears (last process in it exited).
+func TestRefreshPreservesNamespaceCursor(t *testing.T) {
+	m := New("sock", false)
+	m.SortBy = SortByName
+	m.allProcs = []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "c", Namespace: "prod"}, ID: 3},
+	}
+	m.recomputeNamespaces()
+	m.applyNamespaceFilter()
+	m.nsCursor = 2 // "prod"
+
+	// Refresh with the same namespaces — cursor must stay on "prod".
+	res, _ := m.Update(refreshMsg{procs: []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "x", Namespace: "staging"}, ID: 9},
+	}})
+	m = res.(Model)
+	if m.namespaces[m.nsCursor] != "prod" {
+		t.Errorf("stable ns: cursor=%q, want prod", m.namespaces[m.nsCursor])
+	}
+	if len(m.procs) != 1 || m.procs[0].Name != "a" {
+		t.Errorf("stable ns: procs=%v, want [a]", m.procs)
+	}
+
+	// Refresh with no prod left — cursor must fall back to 0 ("All").
+	res, _ = m.Update(refreshMsg{procs: []process.ProcessInfo{
+		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "x", Namespace: "staging"}, ID: 9},
+	}})
+	m = res.(Model)
+	if m.nsCursor != 0 {
+		t.Errorf("lost ns: cursor=%d, want 0 (All)", m.nsCursor)
+	}
+	if m.namespaces[m.nsCursor] != "All" {
+		t.Errorf("lost ns: chip=%q, want All", m.namespaces[m.nsCursor])
+	}
+	if len(m.procs) != 2 {
+		t.Errorf("lost ns: procs=%d, want 2 (All-view)", len(m.procs))
+	}
+}
+
+// TestArrowKeysWorkOnEmptyFilteredList confirms the user can escape
+// an empty filter (e.g. landed on a namespace with no procs) using
+// the arrow keys, even though r/p/d remain no-ops on an empty list.
+func TestArrowKeysWorkOnEmptyFilteredList(t *testing.T) {
+	m := New("sock", false)
+	m.SortBy = SortByName
+	m.procs = nil // force an empty filtered view
+
+	// r/p/d on empty filtered list must be no-ops (the existing
+	// empty-procs guard stays intact for action keys).
+	for _, key := range []string{"r", "p", "d"} {
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if cmd != nil {
+			t.Errorf("%s on empty filtered list should not produce a command, got %T", key, cmd)
+		}
+	}
+
+	// ←/→ must be safe to call even with no namespaces yet — the
+	// handler should not crash and should not produce a command.
+	for _, k := range []tea.KeyType{tea.KeyLeft, tea.KeyRight} {
+		_, cmd := m.Update(tea.KeyMsg{Type: k})
+		if cmd != nil {
+			t.Errorf("arrow on empty namespaces should not produce a command, got %T", cmd)
+		}
+	}
+}

@@ -172,12 +172,15 @@ func getColVal(p process.ProcessInfo, colName string) string {
 // off. Pure function — see ViewContext.
 func RenderWideTable(ctx ViewContext) string {
 	if len(ctx.Procs) == 0 {
-		body := lipgloss.NewStyle().Width(ctx.Width).Height(ctx.Height-2).
+		body := lipgloss.NewStyle().Width(ctx.Width).Height(ctx.Height-3).
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(theme.Muted).
 			Render("No processes running\nstart one: pm2 start <script>")
 		return lipgloss.JoinVertical(lipgloss.Left,
-			RenderHeader(ctx), body, RenderFooter(ctx.Width, ctx.SortBy))
+			RenderHeader(ctx),
+			RenderNamespaceBar(ctx, ctx.Width),
+			body,
+			RenderFooter(ctx.Width, ctx.SortBy))
 	}
 
 	width := ctx.Width
@@ -323,12 +326,15 @@ func RenderWideTable(ctx ViewContext) string {
 	cpuMemLine, diskNetLine := RenderHostMetricsLines(ctx)
 	lines = append(lines, cpuMemLine, diskNetLine)
 
-	contentH := ctx.Height - 2
+	contentH := ctx.Height - 3
 	for len(lines) < contentH {
 		lines = append(lines, strings.Repeat(" ", ctx.Width))
 	}
 	body := strings.Join(lines[:contentH], "\n")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		RenderHeader(ctx), body, RenderFooter(ctx.Width, ctx.SortBy))
+		RenderHeader(ctx),
+		RenderNamespaceBar(ctx, ctx.Width),
+		body,
+		RenderFooter(ctx.Width, ctx.SortBy))
 }

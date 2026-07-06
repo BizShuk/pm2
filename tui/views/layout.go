@@ -21,7 +21,7 @@ func RenderLayout(ctx ViewContext) string {
 		return RenderWideTable(ctx)
 	}
 
-	contentH := ctx.Height - 2 // subtract title + footer rows
+	contentH := ctx.Height - 3 // subtract title + namespace bar + footer rows
 	leftW := leftColumnWidth(ctx)
 	rw := ctx.Width - leftW - 1
 
@@ -36,7 +36,10 @@ func RenderLayout(ctx ViewContext) string {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, div, right)
 	return lipgloss.JoinVertical(lipgloss.Left,
-		RenderHeader(ctx), body, RenderFooter(ctx.Width, ctx.SortBy))
+		RenderHeader(ctx),
+		RenderNamespaceBar(ctx, ctx.Width),
+		body,
+		RenderFooter(ctx.Width, ctx.SortBy))
 }
 
 // RenderRightPane renders the right panel: detail + logs (when height

@@ -57,19 +57,22 @@ type actionMsg struct {
 // ─── model ───────────────────────────────────────────────────────────────────
 
 type Model struct {
-	socket   string
-	procs    []process.ProcessInfo
-	selected int
-	logs     []string
-	width    int
-	height   int
-	err      error
-	updated  time.Time
-	Detail   bool
-	hostCPU  float64
-	hostMem  float64
-	SortBy   SortField
-	notice   string // transient message from the last action (e.g. a failure)
+	socket    string
+	procs     []process.ProcessInfo
+	allProcs  []process.ProcessInfo // unfiltered list — drives the namespace strip
+	namespaces []string            // ["All"] + unique sorted namespaces from allProcs
+	nsCursor   int                 // index into namespaces; 0 == All
+	selected  int
+	logs      []string
+	width     int
+	height    int
+	err       error
+	updated   time.Time
+	Detail    bool
+	hostCPU   float64
+	hostMem   float64
+	SortBy    SortField
+	notice    string // transient message from the last action (e.g. a failure)
 }
 
 func New(socket string, detail bool) Model {
@@ -152,7 +155,9 @@ func (m Model) applyRefresh(msg refreshMsg) (tea.Model, tea.Cmd) {
 		if m.selected >= 0 && m.selected < len(m.procs) {
 			selectedID = m.procs[m.selected].ID
 		}
-		m.procs = msg.procs
+		m.allProcs = msg.procs
+		m.recomputeNamespaces()
+		m.applyNamespaceFilter()
 		m.sortProcs(selectedID)
 		m.updated = time.Now()
 		if m.selected >= len(m.procs) {
@@ -165,6 +170,99 @@ func (m Model) applyRefresh(msg refreshMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// recomputeNamespaces rebuilds the chip strip from the unfiltered
+// process list. The "All" chip is always prepended (index 0). If the
+// previously-selected namespace still exists after the rebuild, the
+// cursor stays on it; otherwise the cursor falls back to "All".
+//
+// Empty namespaces (processes with AppConfig.Namespace unset) are
+// normalised to "default" so the chip strip matches the daemon's
+// Normalize behaviour and tests don't end up with a blank chip.
+func (m *Model) recomputeNamespaces() {
+	prev := ""
+	if m.nsCursor >= 0 && m.nsCursor < len(m.namespaces) {
+		prev = m.namespaces[m.nsCursor]
+	}
+	seen := make(map[string]struct{})
+	for _, p := range m.allProcs {
+		ns := p.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+		seen[ns] = struct{}{}
+	}
+	rest := make([]string, 0, len(seen))
+	for k := range seen {
+		rest = append(rest, k)
+	}
+	sort.Strings(rest)
+	m.namespaces = append([]string{"All"}, rest...)
+
+	if prev == "" {
+		m.nsCursor = 0
+		return
+	}
+	for i, n := range m.namespaces {
+		if n == prev {
+			m.nsCursor = i
+			return
+		}
+	}
+	m.nsCursor = 0
+}
+
+// applyNamespaceFilter rewrites m.procs as the subset of m.allProcs
+// matching the currently-selected namespace chip. With nsCursor == 0
+// ("All") the slice is a copy of the full list. The filtered list is
+// sorted via sortProcs to preserve the controller's existing ordering
+// guarantees, and m.selected is clamped so it stays in bounds.
+func (m *Model) applyNamespaceFilter() {
+	if len(m.namespaces) == 0 {
+		m.procs = nil
+		return
+	}
+	if m.nsCursor < 0 || m.nsCursor >= len(m.namespaces) {
+		m.nsCursor = 0
+	}
+	if m.namespaces[m.nsCursor] == "All" {
+		m.procs = make([]process.ProcessInfo, len(m.allProcs))
+		copy(m.procs, m.allProcs)
+		m.selected = max(0, min(m.selected, len(m.procs)-1))
+		return
+	}
+	target := m.namespaces[m.nsCursor]
+	filtered := m.procs[:0]
+	for _, p := range m.allProcs {
+		ns := p.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+		if ns == target {
+			filtered = append(filtered, p)
+		}
+	}
+	m.procs = filtered
+	m.selected = max(0, min(m.selected, len(m.procs)-1))
+}
+
+// cycleNamespace moves the namespace cursor by delta (positive =
+// right, negative = left), wrapping at both ends, then re-applies the
+// filter. The cursor is clamped defensively even though recomputeNamespaces
+// keeps it in bounds under normal flow.
+func (m *Model) cycleNamespace(delta int) {
+	if len(m.namespaces) == 0 {
+		return
+	}
+	n := len(m.namespaces)
+	m.nsCursor = (m.nsCursor + delta) % n
+	if m.nsCursor < 0 {
+		m.nsCursor += n
+	}
+	m.applyNamespaceFilter()
+	m.sortProcs()
+	m.selected = max(0, min(m.selected, len(m.procs)-1))
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -173,6 +271,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "s" {
 		m.cycleSort()
 		m.sortProcs()
+		return m, nil
+	}
+	// Namespace switching is intentionally available even when the
+	// current filter has zero rows — otherwise a user could get stuck
+	// on an empty namespace with no way back.
+	switch msg.String() {
+	case "left":
+		m.cycleNamespace(-1)
+		return m, nil
+	case "right":
+		m.cycleNamespace(+1)
 		return m, nil
 	}
 	if len(m.procs) == 0 {
@@ -368,18 +477,20 @@ func doAction(socket string, req model.Request) tea.Cmd {
 // logic lives here any more.
 func (m Model) View() string {
 	return views.RenderLayout(views.ViewContext{
-		Width:    m.width,
-		Height:   m.height,
-		Selected: m.selected,
-		Procs:    m.procs,
-		Logs:     m.logs,
-		Updated:  m.updated,
-		HostCPU:  m.hostCPU,
-		HostMem:  m.hostMem,
-		SortBy:   string(m.SortBy),
-		Err:      m.err,
-		Notice:   m.notice,
-		Detail:   m.Detail,
+		Width:      m.width,
+		Height:     m.height,
+		Selected:   m.selected,
+		Procs:      m.procs,
+		Namespaces: m.namespaces,
+		NsCursor:   m.nsCursor,
+		Logs:       m.logs,
+		Updated:    m.updated,
+		HostCPU:    m.hostCPU,
+		HostMem:    m.hostMem,
+		SortBy:     string(m.SortBy),
+		Err:        m.err,
+		Notice:     m.notice,
+		Detail:     m.Detail,
 	})
 }
 
