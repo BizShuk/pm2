@@ -264,11 +264,6 @@ func (s *Server) launchProcess(name string, req *model.AppStartReq) (process.Pro
 		s.nextID++
 	}
 
-	if (req.Cron != "" || req.CronRestart != "") && !isCronTask {
-		lastCronAt = startedAt
-		lastCronStatus = "ok"
-	}
-
 	currentUser := "unknown"
 	if u, err := user.Current(); err == nil {
 		currentUser = u.Username
