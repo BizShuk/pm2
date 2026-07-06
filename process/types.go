@@ -89,7 +89,7 @@ func (a *AppConfig) Normalize(baseDir string) {
 		} else if a.ErrorFile != "" {
 			a.ConfigDir = filepath.Dir(a.ErrorFile)
 		} else {
-			a.ConfigDir = "~/.config/" + a.Name
+			a.ConfigDir = "~/.config/" + NormalizeName(a.Name) + "/"
 		}
 	}
 	if a.ConfigDir != "" {
@@ -175,6 +175,14 @@ type DumpEntry struct {
 	ConfigFile  string            `json:"config_file"`
 	CWD         string            `json:"cwd"`
 	BaseEnv     []string          `json:"base_env,omitempty"`
+}
+
+// NormalizeName returns a filesystem-safe form of a process name for
+// use as a path component: lowercased with spaces rewritten to hyphens.
+// Used as the default ConfigDir segment when the user does not supply
+// one (e.g. process "My App" → "my-app" → "~/.config/my-app/").
+func NormalizeName(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 }
 
 // ResolveScriptPath resolves a possibly-relative script path against
