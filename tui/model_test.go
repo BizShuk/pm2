@@ -533,6 +533,118 @@ func TestRefreshPreservesNamespaceCursor(t *testing.T) {
 	}
 }
 
+// TestEnterTogglesLogFocus verifies that in two-pane (Detail) mode the
+// Enter key flips log-focus on and off, and produces no command (it's
+// pure local UI state).
+func TestEnterTogglesLogFocus(t *testing.T) {
+	m := New("sock", true)
+	m.procs = []process.ProcessInfo{{AppConfig: process.AppConfig{Name: "p"}, ID: 1}}
+
+	res, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = res.(Model)
+	if !m.logFocus {
+		t.Errorf("after first Enter: logFocus = false, want true")
+	}
+	if cmd != nil {
+		t.Errorf("first Enter produced a command, want nil; got %T", cmd)
+	}
+
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = res.(Model)
+	if m.logFocus {
+		t.Errorf("after second Enter: logFocus = true, want false (toggle)")
+	}
+}
+
+// TestEscExitsLogFocus verifies Esc only acts when log-focus is on and
+// never changes the Detail flag.
+func TestEscExitsLogFocus(t *testing.T) {
+	m := New("sock", true)
+	m.procs = []process.ProcessInfo{{AppConfig: process.AppConfig{Name: "p"}, ID: 1}}
+	m.logFocus = true
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = res.(Model)
+	if m.logFocus {
+		t.Errorf("Esc in log-focus: logFocus = true, want false")
+	}
+	if !m.Detail {
+		t.Errorf("Esc clobbered Detail: Detail = false, want true")
+	}
+
+	// Esc from non-log-focus state is a no-op.
+	m.logFocus = false
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = res.(Model)
+	if m.logFocus {
+		t.Errorf("Esc on logFocus=false flipped it to true")
+	}
+}
+
+// TestEnterIsNoopInWideTable confirms log-focus is a sub-mode of the
+// two-pane layout and is inert in wide-table mode.
+func TestEnterIsNoopInWideTable(t *testing.T) {
+	m := New("sock", false) // wide-table
+	m.procs = []process.ProcessInfo{{AppConfig: process.AppConfig{Name: "p"}, ID: 1}}
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = res.(Model)
+	if m.logFocus {
+		t.Errorf("Enter in wide-table set logFocus = true, want false")
+	}
+}
+
+// TestRenderRightPaneLogFocusHidesDetail confirms the renderer drops the
+// detail block and uses the full right-pane height when LogFocus is on.
+func TestRenderRightPaneLogFocusHidesDetail(t *testing.T) {
+	ctx := views.ViewContext{
+		Width:    60,
+		Height:   20,
+		Selected: 0,
+		Procs: []process.ProcessInfo{{
+			AppConfig: process.AppConfig{Name: "p", Script: "/tmp/script.sh"},
+			ID:        1,
+		}},
+		Logs:     []string{"line 1"},
+		LogFocus: true,
+	}
+	out := views.RenderRightPane(ctx, 50, 18)
+	if strings.Contains(out, "detail —") {
+		t.Errorf("log-focus output should not contain 'detail —', got: %q", out)
+	}
+	if strings.Contains(out, "DETAIL —") {
+		t.Errorf("log-focus output should not contain 'DETAIL —', got: %q", out)
+	}
+	if strings.Contains(out, "script") {
+		t.Errorf("log-focus output should not contain 'script' (detail row), got: %q", out)
+	}
+	if !strings.Contains(out, "LOGS —") {
+		t.Errorf("log-focus output should contain 'LOGS —', got: %q", out)
+	}
+	if !strings.Contains(out, "line 1") {
+		t.Errorf("log-focus output should contain the log line, got: %q", out)
+	}
+
+	// Control: with LogFocus off, the detail block is present.
+	ctx.LogFocus = false
+	out2 := views.RenderRightPane(ctx, 50, 18)
+	if !strings.Contains(out2, "DETAIL —") {
+		t.Errorf("control: non-log-focus output should contain 'DETAIL —', got: %q", out2)
+	}
+}
+
+// TestFooterIncludesLogFocusHint confirms the footer advertises the
+// new Enter/Esc binding so the user can discover it.
+func TestFooterIncludesLogFocusHint(t *testing.T) {
+	out := views.RenderFooter(120, "name")
+	if !strings.Contains(out, "⏎/esc") {
+		t.Errorf("footer missing '⏎/esc' hint, got: %q", out)
+	}
+	if !strings.Contains(out, "logs only") {
+		t.Errorf("footer missing 'logs only' hint, got: %q", out)
+	}
+}
+
 // TestArrowKeysWorkOnEmptyFilteredList confirms the user can escape
 // an empty filter (e.g. landed on a namespace with no procs) using
 // the arrow keys, even though r/p/d remain no-ops on an empty list.

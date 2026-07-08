@@ -37,7 +37,7 @@ func testDir(t *testing.T) string {
 // writes the value to the daemon's stdout (captured via logFile).
 func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	const marker = "PM2_BASEENV_MARKER"
 	const want = "from_cli_snapshot"
@@ -59,7 +59,7 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	},
 	}
 
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	const want = "snapshot_value"
 	snapshot := append(os.Environ(), marker+"="+want)
 
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
 		Namespace: "default",
@@ -99,46 +99,46 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 		BaseEnv:   snapshot,
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
 	// 1. Stored on the running process.
-	s.RLock()
-	mp, _ := s.reg.Get("default:persistcheck")
-	s.RUnlock()
+	pm.RLock()
+	mp, _ := pm.reg.Get("default:persistcheck")
+	pm.RUnlock()
 	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv not stored on ProcessInfo")
 	}
 
 	// 2. Replayed by restart.
-	if err := s.RestartByName("persistcheck"); err != nil {
+	if err := pm.RestartByName("persistcheck"); err != nil {
 		t.Fatalf("restart failed: %v", err)
 	}
-	s.RLock()
-	mp, _ = s.reg.Get("default:persistcheck")
-	s.RUnlock()
+	pm.RLock()
+	mp, _ = pm.reg.Get("default:persistcheck")
+	pm.RUnlock()
 	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv lost after restart")
 	}
 
 	// 3. Round-trips through save/resurrect into a fresh server.
-	if err := s.Save(); err != nil {
+	if err := pm.Save(); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
-	_ = s.StopByName("persistcheck")
+	_ = pm.StopByName("persistcheck")
 
-	s2 := NewServer(testDir)
-	if err := s2.Resurrect(); err != nil {
+	pm2 := NewProcessManager(testDir)
+	if err := pm2.Resurrect(); err != nil {
 		t.Fatalf("resurrect failed: %v", err)
 	}
-	s2.RLock()
-	mp2, _ := s2.reg.Get("default:persistcheck")
-	s2.RUnlock()
+	pm2.RLock()
+	mp2, _ := pm2.reg.Get("default:persistcheck")
+	pm2.RUnlock()
 	if mp2 == nil || !envHas(mp2.Info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv lost across save/resurrect")
 	}
-	_ = s2.StopByName("persistcheck")
+	_ = pm2.StopByName("persistcheck")
 }
 
 func envHas(env []string, key, val string) bool {
@@ -146,26 +146,26 @@ func envHas(env []string, key, val string) bool {
 }
 
 func TestFindProcesses(t *testing.T) {
-	s := NewServer(testDir(t))
-	s.reg.Add("default:appA", &ManagedProcess{
+	pm := NewProcessManager(testDir(t))
+	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{Name: "appA", Namespace: "default"},
 		ID: 0,
 	},
 })
-	s.reg.Add("Infra:appB", &ManagedProcess{
+	pm.reg.Add("Infra:appB", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{Name: "appB", Namespace: "Infra"},
 		ID: 1,
 	},
 })
-	s.reg.Add("Infra:appC", &ManagedProcess{
+	pm.reg.Add("Infra:appC", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{Name: "appC", Namespace: "Infra"},
 		ID: 2,
 	},
 })
-	s.reg.Add("default:appB", &ManagedProcess{
+	pm.reg.Add("default:appB", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{Name: "appB", Namespace: "default"},
 		ID: 3,
@@ -173,25 +173,25 @@ func TestFindProcesses(t *testing.T) {
 })
 
 	// 1. 測試 ID 匹配
-	res := s.findProcesses("1")
+	res := pm.findProcesses("1")
 	if len(res) != 1 || res[0].Info.Name != "appB" || res[0].Info.Namespace != "Infra" {
 		t.Errorf("ID matching failed")
 	}
 
 	// 2. 測試 Name 匹配
-	res = s.findProcesses("appB")
+	res = pm.findProcesses("appB")
 	if len(res) != 2 {
 		t.Errorf("Name matching failed, got %d", len(res))
 	}
 
 	// 3. 測試 Namespace 匹配
-	res = s.findProcesses("Infra")
+	res = pm.findProcesses("Infra")
 	if len(res) != 2 {
 		t.Errorf("Namespace matching failed, got %d", len(res))
 	}
 
 	// 4. 測試 "all" 匹配
-	res = s.findProcesses("all")
+	res = pm.findProcesses("all")
 	if len(res) != 4 {
 		t.Errorf("All matching failed, got %d", len(res))
 	}
@@ -199,9 +199,9 @@ func TestFindProcesses(t *testing.T) {
 
 func TestWatchStateInheritance(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
-	s.reg.Add("default:watch-app", &ManagedProcess{
+	pm.reg.Add("default:watch-app", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Name:      "watch-app",
@@ -213,7 +213,7 @@ func TestWatchStateInheritance(t *testing.T) {
 	},
 })
 
-	err := s.Save()
+	err := pm.Save()
 	if err != nil {
 		t.Fatalf("Failed to save: %v", err)
 	}
@@ -236,9 +236,9 @@ func TestWatchStateInheritance(t *testing.T) {
 
 func TestVersionStateInheritance(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
-	s.reg.Add("default:version-app", &ManagedProcess{
+	pm.reg.Add("default:version-app", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Name:      "version-app",
@@ -250,7 +250,7 @@ func TestVersionStateInheritance(t *testing.T) {
 	},
 })
 
-	err := s.Save()
+	err := pm.Save()
 	if err != nil {
 		t.Fatalf("Failed to save: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 	workDir := filepath.Join(testDir, "work")
 	_ = os.MkdirAll(workDir, 0o755)
 
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 	outPath := filepath.Join(testDir, "pwd.out")
 	// Bash expands $PWD in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
@@ -293,7 +293,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 		BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
@@ -314,7 +314,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 // processes are stopped and their PIDs cleared.
 func TestKillAllStopsEveryProcess(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	for _, name := range []string{"a", "b", "c"} {
 		req := &model.AppStartReq{
@@ -326,16 +326,16 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 		Instances: 1,
 	},
 	}
-		if _, err := s.StartApp(req); err != nil {
+		if _, err := pm.StartApp(req); err != nil {
 			t.Fatalf("startApp %s failed: %v", name, err)
 		}
 	}
 
-	s.KillAll()
+	pm.KillAll()
 
-	s.RLock()
-	defer s.RUnlock()
-	for key, mp := range s.reg.SnapshotMap() {
+	pm.RLock()
+	defer pm.RUnlock()
+	for key, mp := range pm.reg.SnapshotMap() {
 		if mp.Info.Status != process.StatusStopped {
 			t.Errorf("%s: status=%s, want stopped", key, mp.Info.Status)
 		}
@@ -363,11 +363,11 @@ func TestConfigFileReplacement(t *testing.T) {
 	_ = probe.Wait()
 
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	scriptFile := "/bin/echo"
 
-	s.reg.Add("default:agentmemory", &ManagedProcess{
+	pm.reg.Add("default:agentmemory", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Name:       "agentmemory",
@@ -390,17 +390,17 @@ func TestConfigFileReplacement(t *testing.T) {
 	},
 	}
 
-	_, err := s.StartApp(req)
+	_, err := pm.StartApp(req)
 	if err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
 
 	// 檢查舊的 key 是否被刪除，且新的 key 存在，且 ID 繼承為 42
-	if _, ok := s.reg.Get("default:agentmemory"); ok {
+	if _, ok := pm.reg.Get("default:agentmemory"); ok {
 		t.Errorf("Old process 'default:agentmemory' should have been deleted")
 	}
 
-	mp, ok := s.reg.Get("Agent:agentmemory")
+	mp, ok := pm.reg.Get("Agent:agentmemory")
 	if !ok {
 		t.Fatalf("New process 'Agent:agentmemory' was not found")
 	}
@@ -416,8 +416,8 @@ func TestConfigFileReplacement(t *testing.T) {
 
 func TestDeleteDuringRestartSleep(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
-	s.RestartDelay = 500 * time.Millisecond
+	pm := NewProcessManager(testDir)
+	pm.RestartDelay = 500 * time.Millisecond
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -429,7 +429,7 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	},
 	}
 
-	_, err := s.StartApp(req)
+	_, err := pm.StartApp(req)
 	if err != nil {
 		t.Fatalf("Failed to start app: %v", err)
 	}
@@ -437,23 +437,23 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	// Wait a bit for the process to exit and enter the restart sleep
 	time.Sleep(200 * time.Millisecond)
 
-	s.RLock()
-	mp, exists := s.reg.Get("default:fail-app")
-	s.RUnlock()
+	pm.RLock()
+	mp, exists := pm.reg.Get("default:fail-app")
+	pm.RUnlock()
 	if !exists {
 		t.Fatalf("Process fail-app was not registered")
 	}
 
 	// Verify it's in StatusLaunching or StatusErrored
-	s.RLock()
+	pm.RLock()
 	status := mp.Info.Status
-	s.RUnlock()
+	pm.RUnlock()
 	if status != process.StatusLaunching && status != process.StatusErrored {
 		t.Logf("Process status: %s", status)
 	}
 
 	// Delete it while it's sleeping (or about to restart)
-	err = s.DeleteByName("fail-app")
+	err = pm.DeleteByName("fail-app")
 	if err != nil {
 		t.Fatalf("Failed to delete process: %v", err)
 	}
@@ -462,9 +462,9 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 
 	// Check if it got back
-	s.RLock()
-	_, exists = s.reg.Get("default:fail-app")
-	s.RUnlock()
+	pm.RLock()
+	_, exists = pm.reg.Get("default:fail-app")
+	pm.RUnlock()
 	if exists {
 		t.Errorf("Deleted process got back after restart sleep!")
 	}
@@ -472,9 +472,9 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 
 func TestRestartsInheritance(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
-	s.reg.Add("default:appA", &ManagedProcess{
+	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Name:      "appA",
@@ -495,14 +495,14 @@ func TestRestartsInheritance(t *testing.T) {
 	},
 	}
 
-	_, err := s.StartApp(req)
+	_, err := pm.StartApp(req)
 	if err != nil {
 		t.Fatalf("Failed to start app: %v", err)
 	}
 
-	s.RLock()
-	mp, exists := s.reg.Get("default:appA")
-	s.RUnlock()
+	pm.RLock()
+	mp, exists := pm.reg.Get("default:appA")
+	pm.RUnlock()
 	if !exists {
 		t.Fatalf("Process appA was not registered")
 	}
@@ -531,7 +531,7 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 	// create `~/test-home-expand-out.log` on the host.
 	t.Setenv("HOME", testDir)
 
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -545,11 +545,11 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 	},
 	}
 
-	pi, err := s.StartApp(req)
+	pi, err := pm.StartApp(req)
 	if err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.StopByName("homeexpandcheck")
+	defer pm.StopByName("homeexpandcheck")
 
 	if len(pi) == 0 {
 		t.Fatalf("No process info returned")
@@ -581,14 +581,14 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 // TestSaveConcurrentWithMapMutation is the regression test for the
 // "concurrent map iteration and map write" fatal that occurred when
 // startAutoSave (background ticker) and model.CmdSave (RPC) both called save()
-// while launchProcess / stopProcess were mutating s.processes.
+// while launchProcess / stopProcess were mutating pm.processes.
 //
-// Before the fix: the for-range over s.processes inside save() ran with
+// Before the fix: the for-range over pm.processes inside save() ran with
 // no lock, so any concurrent insertion/deletion would either crash with
 // a Go runtime fatal or, with -race enabled, surface as a DATA RACE.
 //
-// After the fix: save() takes s.RLock itself, so writers using
-// s.Lock() are mutually exclusive with the iteration. Field reads of
+// After the fix: save() takes pm.RLock itself, so writers using
+// pm.Lock() are mutually exclusive with the iteration. Field reads of
 // mp.Info are now also synchronised against the in-place mutations done
 // by stopProcess (Status/PID) and the cron callbacks (LastCronAt/etc.).
 //
@@ -596,7 +596,7 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 // is the actual verification; the assertions inside are sanity checks
 // that save() returns no error.
 func TestSaveConcurrentWithMapMutation(t *testing.T) {
-	s := NewServer(testDir(t))
+	pm := NewProcessManager(testDir(t))
 	stop := make(chan struct{})
 
 	// Writer goroutine: continuously add entries (and mutate an
@@ -616,12 +616,12 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 			name := fmt.Sprintf("app-%d", n%8)
 			key := "default:" + name
 
-			if _, ok := s.reg.Get(key); ok {
-				s.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+			if _, ok := pm.reg.Get(key); ok {
+				pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 					mp.Info.Version = fmt.Sprintf("rev-%d", n)
 				})
 			} else {
-				s.reg.Add(key, &ManagedProcess{
+				pm.reg.Add(key, &ManagedProcess{
 					Info: process.ProcessInfo{
 						AppConfig: process.AppConfig{
 							Namespace: "default",
@@ -651,7 +651,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 					return
 				default:
 				}
-				if err := s.Save(); err != nil {
+				if err := pm.Save(); err != nil {
 					t.Errorf("save failed: %v", err)
 					return
 				}
@@ -668,10 +668,10 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 	// Final save must still produce a valid dump.json containing the
 	// entries we just wrote (sanity check that the fix did not silently
 	// produce empty / truncated output).
-	if err := s.Save(); err != nil {
+	if err := pm.Save(); err != nil {
 		t.Fatalf("final save failed: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(s.homeDir, "dump.json"))
+	data, err := os.ReadFile(filepath.Join(pm.homeDir, "dump.json"))
 	if err != nil {
 		t.Fatalf("read dump: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 
 // TestRefreshMetricsDoesNotBlockRPC is the regression test for the
 // "metrics collection blocks every RPC" issue (診斷 1.2). Before the
-// fix, refreshMetrics held s.Lock() across every `ps` call — fork +
+// fix, refreshMetrics held pm.Lock() across every `ps` call — fork +
 // exec + wait is ~5-50 ms per process, so 30 processes would freeze
 // the daemon for 150-1500 ms and starve every concurrent RPC.
 //
@@ -702,7 +702,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 //   - Wait for refreshMetrics() to complete and verify the samples
 //     were written back correctly.
 func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
-	s := NewServer(testDir(t))
+	pm := NewProcessManager(testDir(t))
 
 	// Barrier signal: the stub fires this on its very first invocation,
 	// guaranteeing the test proceeds only when refreshMetrics has dropped
@@ -725,7 +725,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	const N = 5
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:metric-%d", i)
-		s.reg.Add(key, &ManagedProcess{
+		pm.reg.Add(key, &ManagedProcess{
 			Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Namespace: "default",
@@ -741,7 +741,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	// Run one refreshMetrics pass in a goroutine.
 	refreshDone := make(chan struct{})
 	go func() {
-		s.refreshMetrics()
+		pm.refreshMetrics()
 		close(refreshDone)
 	}()
 
@@ -751,9 +751,9 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 
 	// While the goroutine is still mid-pipeline (sleeping inside the
 	// stub), listAll() must NOT be blocked behind it. The previous
-	// implementation would have held s.Lock() for ~500 ms here.
+	// implementation would have held pm.Lock() for ~500 ms here.
 	start := time.Now()
-	infos := s.ListAll()
+	infos := pm.ListAll()
 	elapsed := time.Since(start)
 
 	if elapsed > 50*time.Millisecond {
@@ -770,9 +770,9 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	// process whose PID still matches the snapshot.
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:metric-%d", i)
-		s.RLock()
-		mp, _ := s.reg.Get(key)
-		s.RUnlock()
+		pm.RLock()
+		mp, _ := pm.reg.Get(key)
+		pm.RUnlock()
 		if mp == nil {
 			t.Fatalf("%s missing from processes map", key)
 		}
@@ -790,7 +790,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 // during the slow ps phase does NOT inherit the stale sample. This
 // guards the "mp.Info.PID != t.pid" check in phase 3.
 func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
-	s := NewServer(testDir(t))
+	pm := NewProcessManager(testDir(t))
 
 	// Save the real implementation and restore on exit so subsequent
 	// tests still get a working `ps` call.
@@ -804,17 +804,17 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	executor.GetProcessMetrics = func(pid int) (float64, uint64) {
 		capturedPID = pid
 		const key = "default:lonely"
-		s.RLock()
-		if mp, ok := s.reg.Get(key); ok {
+		pm.RLock()
+		if mp, ok := pm.reg.Get(key); ok {
 			mp.Info.PID = 5678 // simulate restart while ps is in flight
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		return 99.0, 9999
 	}
 
 	// Seed one process with PID = 1234.
 	const key = "default:lonely"
-	s.reg.Add(key, &ManagedProcess{
+	pm.reg.Add(key, &ManagedProcess{
 		Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Namespace: "default",
@@ -826,7 +826,7 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	},
 })
 
-	s.refreshMetrics()
+	pm.refreshMetrics()
 
 	// Stub was called with the snapshot PID (1234).
 	if capturedPID != 1234 {
@@ -836,9 +836,9 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	// Phase 3 saw the PID had changed to 5678 and skipped the write —
 	// the stale (99, 9999) sample must NOT have leaked onto the new
 	// instance's ProcessInfo.
-	s.RLock()
-	mp, _ := s.reg.Get(key)
-	s.RUnlock()
+	pm.RLock()
+	mp, _ := pm.reg.Get(key)
+	pm.RUnlock()
 	if mp.Info.CPU != 0 || mp.Info.Memory != 0 {
 		t.Errorf("restarted process inherited stale metrics: CPU=%v Memory=%d (want 0/0)",
 			mp.Info.CPU, mp.Info.Memory)
@@ -858,7 +858,7 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 // This is a smoke test, not a precise perf assertion — CI jitter
 // means we only require a clear speedup, not an exact ratio.
 func TestRefreshMetricsParallelSpeedup(t *testing.T) {
-	s := NewServer(testDir(t))
+	pm := NewProcessManager(testDir(t))
 
 	orig := executor.GetProcessMetrics
 	defer func() { executor.GetProcessMetrics = orig }()
@@ -873,7 +873,7 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:speed-%d", i)
-		s.reg.Add(key, &ManagedProcess{
+		pm.reg.Add(key, &ManagedProcess{
 			Info: process.ProcessInfo{
 		AppConfig: process.AppConfig{
 		Namespace: "default",
@@ -888,7 +888,7 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 
 	sequential := time.Duration(N) * stubMs * time.Millisecond
 	start := time.Now()
-	s.refreshMetrics()
+	pm.refreshMetrics()
 	elapsed := time.Since(start)
 
 	// Conservative upper bound: with 8 workers and 32 items the ideal
@@ -909,9 +909,9 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 	// sample lost, no cross-contamination between goroutines.
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:speed-%d", i)
-		s.RLock()
-		mp, _ := s.reg.Get(key)
-		s.RUnlock()
+		pm.RLock()
+		mp, _ := pm.reg.Get(key)
+		pm.RUnlock()
 		wantCPU := float64(1000 + i)
 		wantMem := uint64(1000+i) * 1024
 		if mp.Info.CPU != wantCPU || mp.Info.Memory != wantMem {
@@ -948,7 +948,7 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 // and/or functionally (missing / duplicated entries).
 func TestHighConcurrencyStartup(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	const N = 20
 	var wg sync.WaitGroup
@@ -966,7 +966,7 @@ func TestHighConcurrencyStartup(t *testing.T) {
 		Instances: 1,
 	},
 	}
-			if _, err := s.StartApp(req); err != nil {
+			if _, err := pm.StartApp(req); err != nil {
 				errs <- fmt.Errorf("startApp[%d]: %w", idx, err)
 			}
 		}(i)
@@ -978,20 +978,20 @@ func TestHighConcurrencyStartup(t *testing.T) {
 	}
 	defer func() {
 		for i := 0; i < N; i++ {
-			_ = s.StopByName(fmt.Sprintf("concurrent-%d", i))
+			_ = pm.StopByName(fmt.Sprintf("concurrent-%d", i))
 		}
 	}()
 
 	// All N must be registered. PIDs unique, IDs unique, all online.
-	s.RLock()
-	defer s.RUnlock()
-	if got := s.reg.Len(); got != N {
+	pm.RLock()
+	defer pm.RUnlock()
+	if got := pm.reg.Len(); got != N {
 		t.Errorf("registered %d processes, want %d", got, N)
 	}
 
 	seenPID := make(map[int]bool, N)
 	seenID := make(map[int]bool, N)
-	for key, mp := range s.reg.SnapshotMap() {
+	for key, mp := range pm.reg.SnapshotMap() {
 		if mp.Info.PID == 0 {
 			t.Errorf("%s: PID=0 after start", key)
 			continue
@@ -1020,8 +1020,8 @@ func TestHighConcurrencyStartup(t *testing.T) {
 // Status update non-atomically, this test catches it.
 func TestProcessErroredExitNoRestart(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
-	s.RestartDelay = 100 * time.Millisecond
+	pm := NewProcessManager(testDir)
+	pm.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1032,10 +1032,10 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 		// MaxRestarts defaults to 0 → no auto-restart.
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.StopByName("errored-norestart")
+	defer pm.StopByName("errored-norestart")
 
 	// Wait for the process to die and watchProcess to update state.
 	// All field reads happen under RLock so the race detector sees a
@@ -1048,14 +1048,14 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 	)
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		s.RLock()
-		mp, _ = s.reg.Get("default:errored-norestart")
+		pm.RLock()
+		mp, _ = pm.reg.Get("default:errored-norestart")
 		if mp != nil {
 			status = mp.Info.Status
 			pid = mp.Info.PID
 			rest = mp.Info.Restarts
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		if mp != nil && status == process.StatusErrored {
 			break
 		}
@@ -1087,8 +1087,8 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 // catches it.
 func TestProcessErroredExitAutoRestart(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
-	s.RestartDelay = 200 * time.Millisecond
+	pm := NewProcessManager(testDir)
+	pm.RestartDelay = 200 * time.Millisecond
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1104,17 +1104,17 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 		MaxRestarts: 5,
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.StopByName("errored-autorestart")
+	defer pm.StopByName("errored-autorestart")
 
 	// Capture initial PID + ID under RLock.
-	s.RLock()
-	mp0, _ := s.reg.Get("default:errored-autorestart")
+	pm.RLock()
+	mp0, _ := pm.reg.Get("default:errored-autorestart")
 	initialPID := mp0.Info.PID
 	initialID := mp0.Info.ID
-	s.RUnlock()
+	pm.RUnlock()
 	if initialPID == 0 {
 		t.Fatalf("initial PID is 0")
 	}
@@ -1133,14 +1133,14 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 	)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		s.RLock()
-		mp2, _ = s.reg.Get("default:errored-autorestart")
+		pm.RLock()
+		mp2, _ = pm.reg.Get("default:errored-autorestart")
 		if mp2 != nil {
 			newPID = mp2.Info.PID
 			restarts = mp2.Info.Restarts
 			newID = mp2.Info.ID
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		if mp2 != nil && restarts >= 1 {
 			break
 		}
@@ -1175,8 +1175,8 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 // restart cleanly-exiting processes.
 func TestProcessCleanExit(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
-	s.RestartDelay = 100 * time.Millisecond
+	pm := NewProcessManager(testDir)
+	pm.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1187,10 +1187,10 @@ func TestProcessCleanExit(t *testing.T) {
 		MaxRestarts: 5, // even with budget, clean exit must NOT restart
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.StopByName("clean-exit")
+	defer pm.StopByName("clean-exit")
 
 	// Wait for the process to die and watchProcess to update state.
 	var (
@@ -1201,14 +1201,14 @@ func TestProcessCleanExit(t *testing.T) {
 	)
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		s.RLock()
-		mp, _ = s.reg.Get("default:clean-exit")
+		pm.RLock()
+		mp, _ = pm.reg.Get("default:clean-exit")
 		if mp != nil {
 			status = mp.Info.Status
 			pid = mp.Info.PID
 			rest = mp.Info.Restarts
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		if mp != nil && pid == 0 {
 			break
 		}
@@ -1226,12 +1226,12 @@ func TestProcessCleanExit(t *testing.T) {
 	}
 	// Wait a bit longer to confirm no auto-restart fires.
 	time.Sleep(500 * time.Millisecond)
-	s.RLock()
-	mp, _ = s.reg.Get("default:clean-exit")
+	pm.RLock()
+	mp, _ = pm.reg.Get("default:clean-exit")
 	if mp != nil {
 		rest = mp.Info.Restarts
 	}
-	s.RUnlock()
+	pm.RUnlock()
 	if rest != 0 {
 		t.Errorf("Restarts=%d, want 0 (clean exit must not trigger auto-restart)",
 			rest)
@@ -1256,7 +1256,7 @@ func TestProcessCleanExit(t *testing.T) {
 // idle. The two-tick observation below catches that.
 func TestCronRestartFiresReboot(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1271,16 +1271,16 @@ func TestCronRestartFiresReboot(t *testing.T) {
 		CronRestart: "@every 1s",
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer s.StopByName("cron-restart-app")
+	defer pm.StopByName("cron-restart-app")
 
 	// Capture initial PID under RLock.
-	s.RLock()
-	mp0, _ := s.reg.Get("default:cron-restart-app")
+	pm.RLock()
+	mp0, _ := pm.reg.Get("default:cron-restart-app")
 	initialPID := mp0.Info.PID
-	s.RUnlock()
+	pm.RUnlock()
 	if initialPID == 0 {
 		t.Fatalf("initial PID is 0")
 	}
@@ -1295,12 +1295,12 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	)
 	deadline := time.Now().Add(2500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		s.RLock()
-		mp1, _ = s.reg.Get("default:cron-restart-app")
+		pm.RLock()
+		mp1, _ = pm.reg.Get("default:cron-restart-app")
 		if mp1 != nil {
 			pidAfter1 = mp1.Info.PID
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		if mp1 != nil && pidAfter1 != 0 && pidAfter1 != initialPID {
 			break
 		}
@@ -1324,12 +1324,12 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	)
 	deadline = time.Now().Add(2500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		s.RLock()
-		mp2, _ = s.reg.Get("default:cron-restart-app")
+		pm.RLock()
+		mp2, _ = pm.reg.Get("default:cron-restart-app")
 		if mp2 != nil {
 			pidAfter2 = mp2.Info.PID
 		}
-		s.RUnlock()
+		pm.RUnlock()
 		if mp2 != nil && pidAfter2 != 0 && pidAfter2 != secondInitialPID {
 			break
 		}
@@ -1364,7 +1364,7 @@ func TestCronRestartFiresReboot(t *testing.T) {
 //   - Verify the child PID is GONE — kill(pid, 0) returns ESRCH.
 func TestStopProcessKillsChildren(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 	childFile := filepath.Join(testDir, "child.pid")
 	scriptPath := filepath.Join(testDir, "spawn_child.sh")
 
@@ -1384,7 +1384,7 @@ func TestStopProcessKillsChildren(t *testing.T) {
 		Instances: 1,
 	},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
 
@@ -1413,7 +1413,7 @@ func TestStopProcessKillsChildren(t *testing.T) {
 
 	// Stop the parent. The fix must propagate SIGTERM to the whole
 	// process group, so the child sleep dies with the parent.
-	if err := s.StopByName("orphan-test"); err != nil {
+	if err := pm.StopByName("orphan-test"); err != nil {
 		t.Fatalf("stopByName: %v", err)
 	}
 
@@ -1440,10 +1440,10 @@ func TestStopProcessKillsChildren(t *testing.T) {
 // distinct entries (not 1, which would indicate the bug).
 func TestCronNamespaceIsolation(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	// Sanity: nothing registered yet.
-	if got := s.scheduler.EntryCount(); got != 0 {
+	if got := pm.scheduler.EntryCount(); got != 0 {
 		t.Fatalf("preflight: scheduler has %d entries, want 0", got)
 	}
 
@@ -1456,12 +1456,12 @@ func TestCronNamespaceIsolation(t *testing.T) {
 		CronRestart: "@every 1h", // long interval — we only check EntryCount
 	},
 	}
-	if _, err := s.StartApp(req1); err != nil {
+	if _, err := pm.StartApp(req1); err != nil {
 		t.Fatalf("start default:api: %v", err)
 	}
-	defer s.StopByName("default:api")
+	defer pm.StopByName("default:api")
 
-	if got := s.scheduler.EntryCount(); got != 1 {
+	if got := pm.scheduler.EntryCount(); got != 1 {
 		t.Errorf("after first start: scheduler has %d entries, want 1", got)
 	}
 
@@ -1474,15 +1474,15 @@ func TestCronNamespaceIsolation(t *testing.T) {
 		CronRestart: "@every 1h",
 	},
 	}
-	if _, err := s.StartApp(req2); err != nil {
+	if _, err := pm.StartApp(req2); err != nil {
 		t.Fatalf("start production:api: %v", err)
 	}
-	defer s.StopByName("production:api")
+	defer pm.StopByName("production:api")
 
 	// The critical assertion: BOTH entries must exist.
 	// Before the fix, this was 1 (production:api's Register overwrote
 	// default:api's because both keyed by name="api").
-	if got := s.scheduler.EntryCount(); got != 2 {
+	if got := pm.scheduler.EntryCount(); got != 2 {
 		t.Errorf("scheduler has %d entries, want 2 — namespace:api and "+
 			"production:api must each hold their own cron entry", got)
 	}
@@ -1494,7 +1494,7 @@ func TestCronNamespaceIsolation(t *testing.T) {
 // carries), and resume re-registers the schedule and returns it to idle.
 func TestPauseResumeCronTask(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1505,46 +1505,46 @@ func TestPauseResumeCronTask(t *testing.T) {
 			Cron:      "@every 1h", // cron task: idle between fires
 		},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
 
 	// A cron task boots idle (StatusStopped) with its schedule registered.
-	mp, _ := s.reg.Get("default:nightly")
+	mp, _ := pm.reg.Get("default:nightly")
 	if mp.Info.Status != process.StatusStopped {
 		t.Fatalf("after start: status=%s, want stopped", mp.Info.Status)
 	}
-	if got := s.scheduler.EntryCount(); got != 1 {
+	if got := pm.scheduler.EntryCount(); got != 1 {
 		t.Fatalf("after start: scheduler has %d entries, want 1", got)
 	}
 
 	// Pause: schedule removed, status becomes paused.
-	if err := s.PauseByName("default:nightly"); err != nil {
+	if err := pm.PauseByName("default:nightly"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
-	mp, _ = s.reg.Get("default:nightly")
+	mp, _ = pm.reg.Get("default:nightly")
 	if mp.Info.Status != process.StatusPaused {
 		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
 	}
 	if !mp.paused {
 		t.Errorf("after pause: paused flag not set")
 	}
-	if got := s.scheduler.EntryCount(); got != 0 {
+	if got := pm.scheduler.EntryCount(); got != 0 {
 		t.Errorf("after pause: scheduler has %d entries, want 0 (must not fire)", got)
 	}
 
 	// Resume: schedule re-registered, status back to idle stopped.
-	if err := s.ResumeByName("default:nightly"); err != nil {
+	if err := pm.ResumeByName("default:nightly"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
-	mp, _ = s.reg.Get("default:nightly")
+	mp, _ = pm.reg.Get("default:nightly")
 	if mp.Info.Status != process.StatusStopped {
 		t.Errorf("after resume: status=%s, want stopped (idle)", mp.Info.Status)
 	}
 	if mp.paused {
 		t.Errorf("after resume: paused flag still set")
 	}
-	if got := s.scheduler.EntryCount(); got != 1 {
+	if got := pm.scheduler.EntryCount(); got != 1 {
 		t.Errorf("after resume: scheduler has %d entries, want 1 (re-registered)", got)
 	}
 }
@@ -1561,7 +1561,7 @@ func TestPauseResumeCronTask(t *testing.T) {
 //   - the cron scheduler has NO entry for the resurrected process
 func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 	testDir := testDir(t)
-	s1 := NewServer(testDir)
+	pm1 := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1572,33 +1572,33 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 			Cron:      "@every 1h",
 		},
 	}
-	if _, err := s1.StartApp(req); err != nil {
+	if _, err := pm1.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
-	if got := s1.scheduler.EntryCount(); got != 1 {
+	if got := pm1.scheduler.EntryCount(); got != 1 {
 		t.Fatalf("baseline: scheduler has %d entries, want 1", got)
 	}
 
 	// Pause the cron task — this is the state we expect to preserve.
-	if err := s1.PauseByName("default:nightly-paused"); err != nil {
+	if err := pm1.PauseByName("default:nightly-paused"); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	if got := s1.scheduler.EntryCount(); got != 0 {
+	if got := pm1.scheduler.EntryCount(); got != 0 {
 		t.Fatalf("after pause: scheduler has %d entries, want 0", got)
 	}
 
 	// Persist the paused state. Before the fix, this drops the paused flag.
-	if err := s1.Save(); err != nil {
+	if err := pm1.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
 	// Simulate a daemon restart: fresh server, same home dir.
-	s2 := NewServer(testDir)
-	if err := s2.Resurrect(); err != nil {
+	pm2 := NewProcessManager(testDir)
+	if err := pm2.Resurrect(); err != nil {
 		t.Fatalf("resurrect: %v", err)
 	}
 
-	mp, ok := s2.reg.Get("default:nightly-paused")
+	mp, ok := pm2.reg.Get("default:nightly-paused")
 	if !ok {
 		t.Fatalf("resurrect: process missing from registry")
 	}
@@ -1611,18 +1611,18 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 	if !mp.paused {
 		t.Errorf("after resurrect: paused flag is false, want true")
 	}
-	if got := s2.scheduler.EntryCount(); got != 0 {
+	if got := pm2.scheduler.EntryCount(); got != 0 {
 		t.Errorf("after resurrect: scheduler has %d entries, want 0 (cron must NOT fire)", got)
 	}
 
-	_ = s2.StopByName("default:nightly-paused")
+	_ = pm2.StopByName("default:nightly-paused")
 }
 
 // TestPauseResumeRunningProcess verifies pause stops a live process (PID
 // cleared, status paused) and resume brings it back online.
 func TestPauseResumeRunningProcess(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
+	pm := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1633,15 +1633,15 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 			Instances: 1,
 		},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
-	defer s.StopByName("default:worker")
+	defer pm.StopByName("default:worker")
 
-	if err := s.PauseByName("default:worker"); err != nil {
+	if err := pm.PauseByName("default:worker"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
-	mp, _ := s.reg.Get("default:worker")
+	mp, _ := pm.reg.Get("default:worker")
 	if mp.Info.Status != process.StatusPaused {
 		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
 	}
@@ -1649,10 +1649,10 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 		t.Errorf("after pause: PID=%d, want 0", mp.Info.PID)
 	}
 
-	if err := s.ResumeByName("default:worker"); err != nil {
+	if err := pm.ResumeByName("default:worker"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
-	mp, _ = s.reg.Get("default:worker")
+	mp, _ = pm.reg.Get("default:worker")
 	if mp.Info.Status != process.StatusOnline {
 		t.Errorf("after resume: status=%s, want online", mp.Info.Status)
 	}
@@ -1682,8 +1682,8 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 // naked reads, this test trips `go test -race`.
 func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 	testDir := testDir(t)
-	s := NewServer(testDir)
-	s.RestartDelay = 30 * time.Millisecond
+	pm := NewProcessManager(testDir)
+	pm.RestartDelay = 30 * time.Millisecond
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1695,10 +1695,10 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 			MaxRestarts: 50,
 		},
 	}
-	if _, err := s.StartApp(req); err != nil {
+	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
 	}
-	defer s.StopByName("race-restart")
+	defer pm.StopByName("race-restart")
 
 	// Let auto-restart run for a few cycles so the auto-restart
 	// goroutine is in steady state.
@@ -1713,7 +1713,7 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			_ = s.RestartByName("race-restart")
+			_ = pm.RestartByName("race-restart")
 			time.Sleep(40 * time.Millisecond) // let auto-restart breathe
 		}
 	}()
@@ -1725,8 +1725,8 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			s.RLock()
-			mp, ok := s.reg.Get("default:race-restart")
+			pm.RLock()
+			mp, ok := pm.reg.Get("default:race-restart")
 			if ok {
 				_ = mp.Info.Namespace
 				_ = mp.Info.Name
@@ -1747,7 +1747,7 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 				_ = mp.Info.PID
 				_ = mp.Info.Restarts
 			}
-			s.RUnlock()
+			pm.RUnlock()
 			time.Sleep(40 * time.Millisecond)
 		}
 	}()
@@ -1763,7 +1763,7 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 	}
 
 	// Sanity: process should still be in the registry.
-	if _, ok := s.reg.Get("default:race-restart"); !ok {
+	if _, ok := pm.reg.Get("default:race-restart"); !ok {
 		t.Errorf("race-restart vanished from registry after concurrent restarts")
 	}
 }

@@ -37,6 +37,7 @@ type ViewContext struct {
 	Err        error                 // last refresh / RPC error
 	Notice     string                // transient action failure notice
 	Detail     bool                  // two-pane (true) vs wide-table (false)
+	LogFocus   bool                  // hide detail block; show only log tail at full height
 }
 
 // Detail rows — kept here so layout / detail / logs can agree without

@@ -18,17 +18,19 @@ flowchart TD
     subgraph Daemon ["Daemon Process"]
         direction TB
         N["network/  (Unix socket listener + dispatch)"]
-        S["server.go (Server / Manager)"]
+        S["server.go (Server)"]
+        PM["process_manager.go (ProcessManager)"]
         R["process_registry.go"]
         E["executor/  (fork+exec, watch, stop, fsnotify, metrics)"]
         CR["cron/scheduler.go (robfig/cron)"]
         D["~/.pm2/dump.json (persist)"]
 
-        N -->|"Manager.StartApp / StopByName / ..."| S
-        S -->|"Get / UpdateInfo / SnapshotForMetrics"| R
-        S -->|"Start / Watch / Stop"| E
-        S -->|"Register / Remove"| CR
-        S -->|"Save / Resurrect"| D
+        N -->|"Manager.StartApp / StopByName / ..."| PM
+        S -->|"owns lifecycle"| PM
+        PM -->|"Get / UpdateInfo / SnapshotForMetrics"| R
+        PM -->|"Start / Watch / Stop"| E
+        PM -->|"Register / Remove"| CR
+        PM -->|"Save / Resurrect"| D
     end
 
     C -- "JSON over ~/.pm2/pm2.sock" --> N
@@ -67,14 +69,20 @@ pm2/
 │   │                         relative to config file dir (not CWD)
 │   └── ecosystem_test.go     Unit tests for script path resolution and configuration loading
 ├── daemon/
-│   ├── server.go             Server — thin Manager: owns Registry + Executor + Scheduler
-│   │                         + Cron. Listen() delegates to daemon/network. Lifecycle
-│   │                         methods delegate to daemon/executor.Executor.
+│   ├── server.go             Server — thin daemon wrapper: owns Unix socket
+│   │                         lifecycle + auto-save/auto-resurrect goroutines.
+│   │                         Embeds *ProcessManager for all process logic.
+│   ├── process_manager.go    ProcessManager — core process coordination:
+│   │                         implements network.Manager; owns Registry +
+│   │                         Executor + Scheduler; all lifecycle methods
+│   │                         (StartApp, StopByName, RestartByName,
+│   │                         PauseByName, ResumeByName, DeleteByName,
+│   │                         ListAll, Save, Resurrect, KillAll, Ping,
+│   │                         Status) plus internal helpers (launchProcess,
+│   │                         onProcessExit, stopProcess, triggerCron).
+│   │                         Also defines ManagedProcess.
 │   ├── process_registry.go   ProcessRegistry — sole owner of the process map
 │   │                         and its RWMutex (Add/Get/Remove/UpdateInfo/...)
-│   ├── persistence.go        Save() / Resurrect() — dump.json serialisation
-│   ├── manager.go            ListAll / DeleteByName / Ping — additional Manager
-│   │                         methods (rest are on Server directly)
 │   ├── helpers.go            getAppVersion() — version probe from package.json
 │   ├── server_test.go        daemon server unit tests
 │   ├── process_registry_test.go  ProcessRegistry unit + concurrency tests
@@ -129,7 +137,7 @@ pm2/
 
 ### Process identity
 
-Keyed by `namespace:name` in `Server.reg.processes` map.
+Keyed by `namespace:name` in `ProcessManager.reg.processes` map.
 Override rule in `StartApp()`: same name + same script → stop-and-replace.
 Same name + different script → error (caller must `pm2 delete` first).
 
@@ -224,7 +232,7 @@ query. The daemon's `Handle` function in
 after the response flushes. The 150 ms grace lets `WriteJSON`
 complete on its own goroutine context so the CLI sees `ok=true` before
 the socket vanishes. The actual process-stop work is identical to
-`StopByName("all")` — `KillAll` loops `s.findProcesses("all")` and
+`StopByName("all")` — `KillAll` loops `pm.findProcesses("all")` and
 calls the same `stopProcess` per entry.
 
 Because both verbs share `executor.Stop`, they share the SIGTERM →
@@ -264,8 +272,8 @@ caller always picks an explicit verb.
 ## Conventions
 
 - All process state is owned by `daemon.ProcessRegistry` (defined in
-  `daemon/process_registry.go`). `daemon.Server` holds a `*ProcessRegistry` and delegates
-  lock primitives via `s.Lock()`/`s.Unlock()`/`s.RLock()`/`s.RUnlock()` for
+  `daemon/process_registry.go`). `daemon.ProcessManager` holds a `*ProcessRegistry` and delegates
+  lock primitives via `pm.Lock()`/`pm.Unlock()`/`pm.RLock()`/`pm.RUnlock()` for
   the rare callers that need to hold the registry's lock across multiple
   method calls.
 - Always prefer the high-level `ProcessRegistry` methods (`Get`/`Add`/
@@ -275,7 +283,7 @@ caller always picks an explicit verb.
   for code that genuinely needs cross-method atomicity (e.g. `launchProcess`
   doing lookup + ID increment + map write as one critical section).
 - For atomic field mutations on a single `*ManagedProcess`, use
-  `s.reg.UpdateInfo(key, func(mp *ManagedProcess) { ... })` — never mutate
+  `pm.reg.UpdateInfo(key, func(mp *ManagedProcess) { ... })` — never mutate
   `mp.Info` fields directly from outside the registry. Direct mutation
   races with `onProcessExit`'s own `UpdateInfo` calls and trips the race
   detector (this is what `TestSaveConcurrentWithMapMutation` was originally
@@ -294,19 +302,20 @@ caller always picks an explicit verb.
 - Log file paths are resolved once at launch time and stored in `ProcessInfo`.
   Do not re-derive them from name at read time.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
-- **Executor lock direction (Phase 4 invariant)**: `daemon.Server` may
+- **Executor lock direction (Phase 4 invariant)**: `daemon.ProcessManager` may
   call `executor.Executor` while holding the registry lock, because the
   Executor holds NO lock during its execution. The Executor NEVER calls
   back into the registry — every state update flows through the
   `onStopping` / `onStopped` / `onExit` / `onFileChanged` callbacks the
-  Server passes in. The callback implementations take the registry lock
+  ProcessManager passes in. The callback implementations take the registry lock
   internally via `UpdateInfo` and never hold it across a blocking call.
 - **Network import direction (Phase 5 invariant)**: `daemon/network`
   depends ONLY on the `network.Manager` interface — never on the concrete
-  `*daemon.Server` type. `daemon.Server` implements `Manager` via its
-  existing public methods (`StartApp`, `StopByName`, …). The Executor and
-  Registry packages MUST NOT import `daemon/network`; the import graph
-  is strictly `network → (Manager contract only)` with no cycle.
+  `*daemon.ProcessManager` or `*daemon.Server` type. `daemon.ProcessManager`
+  implements `Manager` via its public methods (`StartApp`, `StopByName`, …).
+  `daemon.Server` embeds `*ProcessManager` and delegates `network.Listen` to it.
+  The Executor and Registry packages MUST NOT import `daemon/network`; the
+  import graph is strictly `network → (Manager contract only)` with no cycle.
   `network/manager.go` is the canonical interface declaration.
 - All TUI view rendering lives in `tui/views/` as pure functions. Every
   exported renderer takes a `views.ViewContext` (or the specific primitive

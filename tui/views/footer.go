@@ -19,6 +19,7 @@ func RenderFooter(w int, sortBy string) string {
 		{"p", "pause/resume"},
 		{"d", "delete"},
 		{"s", "sort: " + sortBy},
+		{"⏎/esc", "logs only"},
 		{"q", "quit"},
 	}
 	ks := lipgloss.NewStyle().Foreground(theme.Text)

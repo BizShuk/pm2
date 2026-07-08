@@ -69,6 +69,7 @@ type Model struct {
 	err       error
 	updated   time.Time
 	Detail    bool
+	logFocus  bool
 	hostCPU   float64
 	hostMem   float64
 	SortBy    SortField
@@ -320,6 +321,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, doAction(m.socket, model.Request{Command: cmd, Name: targetID})
 	case "d":
 		return m, doAction(m.socket, model.Request{Command: model.CmdDelete, Name: targetID})
+	case "enter":
+		// Toggle log-focus: in two-pane mode, hide the detail block and
+		// show the log tail filling the full right pane. Pressing Enter
+		// again restores the detail+logs view. No-op in wide-table mode
+		// (where there's no detail block to hide) and on an empty list.
+		if m.Detail {
+			m.logFocus = !m.logFocus
+		}
+		return m, nil
+	case "esc":
+		// Convenience exit from log-focus. No-op in wide-table mode and
+		// when log-focus is already off, so it never steals Esc from
+		// any other future binding.
+		if m.Detail {
+			m.logFocus = false
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -491,6 +509,7 @@ func (m Model) View() string {
 		Err:        m.err,
 		Notice:     m.notice,
 		Detail:     m.Detail,
+		LogFocus:   m.logFocus,
 	})
 }
 

@@ -50,6 +50,12 @@ func RenderRightPane(ctx ViewContext, w, h int) string {
 			Render("no processes\nstart one: pm2 start <script>")
 	}
 	p := ctx.Procs[ctx.Selected]
+	if ctx.LogFocus {
+		// In log-focus mode the detail block is hidden and the log tail
+		// fills the full right-pane height. RenderLogs already pads
+		// short tails and shows "loading..." for the in-flight state.
+		return RenderLogs(p.Name, ctx.Logs, w, h)
+	}
 	detail := RenderDetail(p, w)
 	if h < 20 {
 		return detail
