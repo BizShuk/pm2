@@ -4,20 +4,12 @@
 
 ## Architecture
 
-- [ ] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
+- [ ] [P1] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
     - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
     - 目標：將進程管理的核心協調與控制邏輯（包含進程註冊表、生命週期管理、排程器管理與存檔機制）從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
     - 做法：新增 `daemon/process_manager.go` 檔案，宣告 `ProcessManager` 結構體並實現 `network.Manager` 介面，`Server` 簡化為僅持有 `ProcessManager` 與負責 Socket 的生命週期管理與定時協程的啟動。
 
-- [ ] `architecture-dynamic-path-wrapper`: 讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
-    - 來源：[plans/architecture-dynamic-path-wrapper.md](./plans/architecture-dynamic-path-wrapper.md)
-    - 目標：讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
-    - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
 
-- [ ] `architecture-cli-list-and-metrics`: 實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
-    - 來源：[plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
-    - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
-    - 做法：新增 `cmd/list.go` 表格渲染、將 RPC 連線邏輯收攏至 `cmd/client.go` 的 `CLIClient`，並將 `tui/metrics.go` 解耦為具備多平台實現的 `HostMetricsCollector`。
 
 - [ ] `architecture-extensibility-interfaces`: 為 `pm2` 核心模組定義標準的擴充介面，隔離外部與底層依賴。
     - 來源：[plans/architecture-extensibility-interfaces.md](./plans/architecture-extensibility-interfaces.md)
@@ -32,6 +24,14 @@
 
 ## Archive
 
+- [ ] `architecture-cli-list-and-metrics`: 實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。 @2026-07-08_12:21:52 @Archived @Architecture
+    - 來源：[plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
+    - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
+    - 做法：新增 `cmd/list.go` 表格渲染、將 RPC 連線邏輯收攏至 `cmd/client.go` 的 `CLIClient`，並將 `tui/metrics.go` 解耦為具備多平台實現的 `HostMetricsCollector`。
+- [ ] `architecture-dynamic-path-wrapper`: 讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。 @2026-07-08_12:21:47 @Archived @Architecture
+    - 來源：[plans/architecture-dynamic-path-wrapper.md](./plans/architecture-dynamic-path-wrapper.md)
+    - 目標：讓 launchd daemon 啟動時動態取得 macOS 最新 `PATH`，取代 `.plist` 硬編碼 `EnvironmentVariables`。
+    - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
 - [x] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 規格 [docs/specs/tui-decoupling.md](./docs/specs/tui-decoupling.md) @2026-07-06_22:21:06 @Completed @Daemon
     - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
     - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
