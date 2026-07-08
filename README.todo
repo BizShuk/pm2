@@ -4,11 +4,6 @@
 
 ## Architecture
 
-- [x] [P1] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
-    - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
-    - 目標：將進程管理的核心協調與控制邏輯（包含進程註冊表、生命週期管理、排程器管理與存檔機制）從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
-    - 做法：新增 `daemon/process_manager.go` 檔案，宣告 `ProcessManager` 結構體並實現 `network.Manager` 介面，`Server` 簡化為僅持有 `ProcessManager` 與負責 Socket 的生命週期管理與定時協程的啟動。
-    - 結果（2026-07-08）：新增 `daemon/process_manager.go`（~430 行），定義 `ProcessManager` 結構體（持有 `*ProcessRegistry`、`*executor.Executor`、`*cron.Scheduler`）並完整實現 `network.Manager` 介面（`StartApp`、`StopByName`、`RestartByName`、`PauseByName`、`ResumeByName`、`DeleteByName`、`ListAll`、`Save`、`Resurrect`、`KillAll`、`Ping`、`Status`）。`ManagedProcess` 一併移至 `process_manager.go`。`Server` 簡化為 85 行（嵌入 `*ProcessManager`），僅保留 `NewServer`、`Listen`、`startAutoResurrect`、`startAutoSave`。刪除 `daemon/manager.go` 與 `daemon/persistence.go`（方法已全部移至 `ProcessManager`）。`server_test.go` 全面改用 `NewProcessManager` 直接測試。`go test -race ./...` 全綠。
 
 
 
@@ -25,6 +20,11 @@
 
 ## Archive
 
+- [x] [P1] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。 @2026-07-08_23:39:42 @Completed @Architecture
+    - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
+    - 目標：將進程管理的核心協調與控制邏輯（包含進程註冊表、生命週期管理、排程器管理與存檔機制）從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。
+    - 做法：新增 `daemon/process_manager.go` 檔案，宣告 `ProcessManager` 結構體並實現 `network.Manager` 介面，`Server` 簡化為僅持有 `ProcessManager` 與負責 Socket 的生命週期管理與定時協程的啟動。
+    - 結果（2026-07-08）：新增 `daemon/process_manager.go`（~430 行），定義 `ProcessManager` 結構體（持有 `*ProcessRegistry`、`*executor.Executor`、`*cron.Scheduler`）並完整實現 `network.Manager` 介面（`StartApp`、`StopByName`、`RestartByName`、`PauseByName`、`ResumeByName`、`DeleteByName`、`ListAll`、`Save`、`Resurrect`、`KillAll`、`Ping`、`Status`）。`ManagedProcess` 一併移至 `process_manager.go`。`Server` 簡化為 85 行（嵌入 `*ProcessManager`），僅保留 `NewServer`、`Listen`、`startAutoResurrect`、`startAutoSave`。刪除 `daemon/manager.go` 與 `daemon/persistence.go`（方法已全部移至 `ProcessManager`）。`server_test.go` 全面改用 `NewProcessManager` 直接測試。`go test -race ./...` 全綠。
 - [ ] `architecture-cli-list-and-metrics`: 實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。 @2026-07-08_12:21:52 @Archived @Architecture
     - 來源：[plans/architecture-cli-list-and-metrics.md](./plans/architecture-cli-list-and-metrics.md)
     - 目標：實作 `pm2 list` 非互動式列表指令，抽離 CLI 中重複的遠端程序呼叫與自動啟動邏輯，並使 TUI 主機指標收集器支持跨平台 (macOS 與 Linux)。
