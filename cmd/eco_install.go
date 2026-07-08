@@ -148,7 +148,7 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 // so the agent can read the current workspace without a prompt.
 func isPlannerAgent(script string) bool {
 	switch filepath.Base(script) {
-	case "agy", "claude":
+	case "agy", "claude", "claudem", "claudew":
 		return true
 	}
 	return false

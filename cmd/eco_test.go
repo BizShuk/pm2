@@ -90,6 +90,28 @@ func TestBuildInstallAppEmptyCwdBasename(t *testing.T) {
 	}
 }
 
+func TestIsPlannerAgent(t *testing.T) {
+	tests := []struct {
+		script string
+		want   bool
+	}{
+		{"agy", true},
+		{"claude", true},
+		{"claudem", true},
+		{"claudew", true},
+		{"/usr/local/bin/claudem", true},
+		{"/usr/local/bin/claudew", true},
+		{"node", false},
+		{"python", false},
+	}
+	for _, tc := range tests {
+		if got := isPlannerAgent(tc.script); got != tc.want {
+			t.Errorf("isPlannerAgent(%q) = %t, want %t", tc.script, got, tc.want)
+		}
+	}
+}
+
+
 // runWizard invokes the wizard cobra command with the given args, piping
 // stdin for the interactive prompts. Returns the resulting output file
 // contents (or "" if not written) and the run error.
