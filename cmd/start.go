@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/bizshuk/pm2/config"
 	"github.com/bizshuk/pm2/model"
@@ -13,13 +14,26 @@ import (
 
 func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "start [ecosystem.config.js|ecosystem.config.json]",
-		Short: "Start processes from an ecosystem file",
+		Use:   "start [ecosystem.config.js|ecosystem.config.json|owner/repo|https://github.com/...]",
+		Short: "Start processes from an ecosystem file or a remote GitHub repo",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "ecosystem.config.js"
 			if len(args) > 0 {
 				target = args[0]
+			}
+
+			// If target looks like a remote GitHub reference,
+			// clone/pull into ~/.pm2/repos/ and resolve to the
+			// ecosystem config inside.
+			if config.IsRemoteRef(target) {
+				cacheDir := filepath.Join(pm2Home, "repos")
+				resolved, err := config.ResolveRemote(target, cacheDir)
+				if err != nil {
+					return fmt.Errorf("resolve remote %q: %w", target, err)
+				}
+				fmt.Fprintf(os.Stderr, "pm2: resolved remote %q -> %s\n", target, resolved)
+				target = resolved
 			}
 
 			cfg, err := config.Load(target)
