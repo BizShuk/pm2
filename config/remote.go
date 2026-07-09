@@ -1,6 +1,13 @@
+// Package config handles ecosystem config loading and remote resolution.
+//
+// Remote resolution uses codeload.github.com tarballs (same mechanism as
+// bizshuk/skills svc/plugin/fetch.go), which requires no authentication and
+// has no rate-limiting issues unlike raw.githubusercontent.com.
 package config
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,19 +16,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // githubRepoRE matches GitHub owner/repo shorthand.
-// Owner: alphanumeric, may contain single hyphens/underscores/dots between alphanumeric segments.
-// Repo:  same rules as owner.
 var githubRepoRE = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?/[a-zA-Z0-9._-]+$`)
 
-// defaultBranches is the ordered list of branch names to probe
-// when fetching a remote ecosystem config.
-var defaultBranches = []string{"main", "master"}
-
-// configFileNames is the ordered list of ecosystem config filenames to probe.
-var configFileNames = []string{"ecosystem.config.js", "ecosystem.config.json"}
+// configFileName is the ecosystem config filename to look for at the repo root.
+const configFileName = "ecosystem.config.js"
 
 // IsRemoteRef returns true if path looks like a remote reference
 // (GitHub owner/repo shorthand or HTTPS URL) rather than a local file.
@@ -36,9 +38,9 @@ func IsRemoteRef(path string) bool {
 	return githubRepoRE.MatchString(path)
 }
 
-// ResolveRemote fetches the ecosystem config from a GitHub repo via
-// the raw.githubusercontent.com blob endpoint and writes it to
-// cacheDir. Returns the local path to the downloaded config file.
+// ResolveRemote resolves a remote GitHub reference to a local ecosystem
+// config file path. It first checks the cache directory; a cached file is
+// reused as-is. Otherwise it downloads the repo tarball from codeload.
 //
 // remoteRef is either:
 //   - owner/repo  (e.g. "bizshuk/pm2")
@@ -50,69 +52,119 @@ func ResolveRemote(remoteRef, cacheDir string) (string, error) {
 	}
 
 	repoCacheDir := filepath.Join(cacheDir, owner, repo)
+
+	// If a cached config already exists, use it.
+	cached := filepath.Join(repoCacheDir, configFileName)
+	if st, err := os.Stat(cached); err == nil && st.Size() > 0 {
+		return cached, nil
+	}
+
 	if err := os.MkdirAll(repoCacheDir, 0o755); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
 	}
 
-	// Probe (branch, filename) combos in order.
-	for _, branch := range defaultBranches {
-		for _, fn := range configFileNames {
-			rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, branch, fn)
-			body, status, err := fetchRaw(rawURL)
+	archiveURL := fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/HEAD", owner, repo)
 
-			if status == http.StatusNotFound {
-				continue
-			}
-			if err != nil {
-				return "", fmt.Errorf("fetch %s: %w", rawURL, err)
-			}
-
-			// Success — write to cache.
-			localPath := filepath.Join(repoCacheDir, fn)
-			if err := os.WriteFile(localPath, body, 0o644); err != nil {
-				return "", fmt.Errorf("write config: %w", err)
-			}
-			return localPath, nil
+	for attempt := 1; attempt <= 5; attempt++ {
+		found, err := downloadAndExtractConfig(archiveURL, repoCacheDir)
+		if err == nil {
+			return found, nil
 		}
+		if !isRetryable(err) || attempt == 5 {
+			return "", err
+		}
+		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
 	}
 
-	return "", fmt.Errorf(
-		"no ecosystem.config.js or ecosystem.config.json found in %s/%s (tried branches: %s)",
-		owner, repo, strings.Join(defaultBranches, ", "),
-	)
+	return "", fmt.Errorf("no %s found in %s/%s", configFileName, owner, repo)
 }
 
-// fetchRaw GETs a URL and returns the body bytes, HTTP status, and any error.
-// On 404 the caller retries the next candidate.
-// On any other non-2xx status (e.g. 429 rate-limit, 403 forbidden, 5xx) an
-// error is returned so the caller does not write a garbage response to cache.
-func fetchRaw(rawURL string) ([]byte, int, error) {
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+// downloadAndExtractConfig fetches a tarball from codeload and extracts
+// ecosystem.config.js into dest. Returns the path to the config file.
+func downloadAndExtractConfig(archiveURL, dest string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, archiveURL, nil)
 	if err != nil {
-		return nil, 0, err
+		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("User-Agent", "pm2/1.0.0")
-	req.Header.Set("Accept", "text/plain, application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return "", retryable(fmt.Errorf("download: %w", err))
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 500 {
+		return "", retryable(fmt.Errorf("HTTP %d from %s", resp.StatusCode, archiveURL))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, archiveURL)
+	}
+
+	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return "", retryable(fmt.Errorf("gzip: %w", err))
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+
+	// The archive has a top-level "<repo>-<branch>/" prefix. We learn it
+	// from the first entry's path and strip it from all subsequent paths.
+	var topPrefix string
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", retryable(fmt.Errorf("tar: %w", err))
+		}
+
+		name := strings.TrimPrefix(hdr.Name, "./")
+
+		if topPrefix == "" {
+			if i := strings.Index(name, "/"); i >= 0 {
+				topPrefix = name[:i+1]
+			}
+		}
+
+		rel := strings.TrimPrefix(name, topPrefix)
+
+		// Only care about ecosystem.config.js at the repo root.
+		if rel != configFileName || hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		target := filepath.Join(dest, rel)
+		f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return "", fmt.Errorf("write %s: %w", rel, err)
+		}
+		if _, err := io.Copy(f, tr); err != nil {
+			f.Close()
+			return "", fmt.Errorf("copy %s: %w", rel, err)
+		}
+		f.Close()
+
+		return target, nil
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, resp.StatusCode, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
+	return "", fmt.Errorf("no %s found in tarball", configFileName)
+}
 
-	return body, resp.StatusCode, nil
+// retryable wraps an error that may succeed on retry (network blip, 5xx).
+type retryableError struct{ err error }
+
+func (e *retryableError) Error() string { return e.err.Error() }
+func (e *retryableError) Unwrap() error { return e.err }
+
+func retryable(err error) error { return &retryableError{err: err} }
+
+func isRetryable(err error) bool {
+	_, ok := err.(*retryableError)
+	return ok
 }
 
 // parseGitHubRef extracts (owner, repo) from a remote reference.
