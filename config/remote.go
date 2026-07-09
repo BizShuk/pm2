@@ -57,15 +57,13 @@ func ResolveRemote(remoteRef, cacheDir string) (string, error) {
 	// Probe (branch, filename) combos in order.
 	for _, branch := range defaultBranches {
 		for _, fn := range configFileNames {
-			rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/refs/heads/%s/%s", owner, repo, branch, fn)
+			rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, branch, fn)
 			body, status, err := fetchRaw(rawURL)
 
 			if status == http.StatusNotFound {
-				// Try next combo.
 				continue
 			}
 			if err != nil {
-				// Non-404 error: network problem, etc.
 				return "", fmt.Errorf("fetch %s: %w", rawURL, err)
 			}
 
@@ -85,9 +83,18 @@ func ResolveRemote(remoteRef, cacheDir string) (string, error) {
 }
 
 // fetchRaw GETs a URL and returns the body bytes, HTTP status, and any error.
-// Non-2xx status is NOT treated as error — the caller decides how to handle it.
+// On 404 the caller retries the next candidate.
+// On any other non-2xx status (e.g. 429 rate-limit, 403 forbidden, 5xx) an
+// error is returned so the caller does not write a garbage response to cache.
 func fetchRaw(rawURL string) ([]byte, int, error) {
-	resp, err := http.Get(rawURL)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("User-Agent", "pm2/1.0.0")
+	req.Header.Set("Accept", "text/plain, application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -97,9 +104,14 @@ func fetchRaw(rawURL string) ([]byte, int, error) {
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+
+	if resp.StatusCode == http.StatusNotFound {
 		return nil, resp.StatusCode, nil
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
 	return body, resp.StatusCode, nil
 }
 
