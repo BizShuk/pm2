@@ -149,34 +149,6 @@ type DaemonInfo struct {
 	ProcessCount int       `json:"process_count"`
 }
 
-// DumpEntry is what gets persisted to dump.json for resurrect
-//
-// Deprecated: as of the unified-config refactor (see
-// plans/architecture-unified-config.md and plans/gentle-finding-gizmo.md),
-// dump.json is now serialized directly as []AppConfig. DumpEntry is
-// retained briefly for any out-of-tree readers but the daemon no
-// longer writes it.
-type DumpEntry struct {
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	Script      string            `json:"script"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	CronRestart string            `json:"cron_restart"`
-	Cron        string            `json:"cron"`
-	Instances   int               `json:"instances"`
-	MaxRestarts int               `json:"max_restarts"`
-	LogFile     string            `json:"log_file"`
-	OutFile     string            `json:"out_file"`
-	ErrorFile   string            `json:"error_file"`
-	ConfigDir   string            `json:"config_dir"`
-	Watch       bool              `json:"watch"`
-	Version     string            `json:"version"`
-	ConfigFile  string            `json:"config_file"`
-	CWD         string            `json:"cwd"`
-	BaseEnv     []string          `json:"base_env,omitempty"`
-}
-
 // NormalizeName returns a filesystem-safe form of a process name for
 // use as a path component: lowercased with spaces rewritten to hyphens.
 // Used as the default ConfigDir segment when the user does not supply

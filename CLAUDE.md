@@ -56,18 +56,24 @@ pm2/
 │   ├── monitor.go            pm2 monit (live process dashboard) / save / resurrect
 │   ├── logs.go               pm2 logs  — reads log files directly
 │   ├── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
-│   ├── eco.go                pm2 wizard (Cobra command setup)
-│   ├── eco_wizard.go         interactive wizard logic to build ecosystem file
-│   ├── eco_renderer.go       CLI ecosystem file output renderer
-│   ├── eco_install.go        pm2 wizard install <script>
+│   ├── eco.go                pm2 wizard — thin Cobra wrapper, delegates to config/wizard
+│   ├── eco_install.go        pm2 wizard install — thin Cobra wrapper, delegates to config/wizard
 │   ├── eco_install_system.go helper to install system-planner profile
 │   ├── eco_install_business.go helper to install business-planner profile
-│   └── eco_test.go           wizard and install command tests
+│   └── eco_test.go           CLI-level integration tests for wizard and install commands
 ├── config/
 │   ├── ecosystem.go          Load() — parses .json and .js (goja) ecosystem files
 │   │                         Normalize() fills defaults; resolves relative script paths
 │   │                         relative to config file dir (not CWD)
-│   └── ecosystem_test.go     Unit tests for script path resolution and configuration loading
+│   ├── ecosystem_test.go     Unit tests for script path resolution and configuration loading
+│   └── wizard/               config/wizard sub-package — interactive wizard core
+│       ├── context.go        WizardContext struct (I/O streams + YesAll)
+│       ├── prompt.go         promptLine / promptYesNo / promptInstances / promptEnvVars
+│       ├── wizard.go         RunInteractive / RunInstall entry points +
+│       │                     collectAnswers / askOneApp / DeriveName
+│       ├── renderer.go       WriteEcosystemFile / renderEcosystemJS / renderEcosystemJSON +
+│       │                     mergeAppsByName / loadExistingApps / detectFormatFromExt
+│       └── wizard_test.go    Unit tests for prompts, rendering, merge, and public API
 ├── daemon/
 │   ├── server.go             Server — thin daemon wrapper: owns Unix socket
 │   │                         lifecycle + auto-save/auto-resurrect goroutines.
@@ -263,7 +269,7 @@ caller always picks an explicit verb.
 ```tree
 ~/.pm2/
 ├── pm2.sock        Unix socket
-├── dump.json       serialised []process.DumpEntry (pm2 save / resurrect)
+├── dump.json       serialised []process.AppConfig (pm2 save / resurrect)
 └── logs/
     ├── <name>-out.log
     └── <name>-err.log
@@ -278,8 +284,8 @@ caller always picks an explicit verb.
   method calls.
 - Always prefer the high-level `ProcessRegistry` methods (`Get`/`Add`/
   `Remove`/`UpdateInfo`/`UpdateMetrics`/`UpdateCronStatus`/`Snapshot`/
-  `SnapshotForMetrics`/`SnapshotMap`/`SnapshotAppConfigs`/`FindByTarget`/
-  `Len`) over the lock escape hatches. The escape hatches are reserved
+  `SnapshotOne`/`SnapshotForMetrics`/`SnapshotMap`/`SnapshotAppConfigs`/
+  `FindByTarget`/`Len`) over the lock escape hatches. The escape hatches are reserved
   for code that genuinely needs cross-method atomicity (e.g. `launchProcess`
   doing lookup + ID increment + map write as one critical section).
 - For atomic field mutations on a single `*ManagedProcess`, use
@@ -288,6 +294,16 @@ caller always picks an explicit verb.
   races with `onProcessExit`'s own `UpdateInfo` calls and trips the race
   detector (this is what `TestSaveConcurrentWithMapMutation` was originally
   designed to catch).
+- Reads follow the same rule as writes: never read `mp.Info.X` directly
+  from outside the registry — a naked read races with `onProcessExit`'s
+  `UpdateInfo` writes just as a naked write does (the race that
+  `TestPauseResumeRunningProcess` exposed). Prefer
+  `pm.reg.SnapshotOne(key)` to obtain a `process.ProcessInfo` value copy
+  taken under the read lock, and read fields off the copy. Only the hot
+  path that needs to *trigger* stop / restart / `UpdateInfo` (and the rare
+  case that needs the private `paused` flag alongside `Status`) uses
+  `pm.reg.Get(key)` for a live `*ManagedProcess` or `UpdateInfo` to read
+  atomically under the write lock.
 - `onProcessExit` (the `executor.Watch` callback) is the only place that
   transitions a process from `online` → `errored` or `stopped` *for processes
   that exit on their own*. Deliberate stops update status from inside

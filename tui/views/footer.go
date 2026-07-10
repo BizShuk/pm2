@@ -36,6 +36,11 @@ func RenderFooter(w int, sortBy string) string {
 // at the bottom of the wide-table view. Net/disk numbers are
 // intentionally randomised for cosmetic variety; CPU/Mem come from
 // the latest ViewContext sample.
+//
+// TODO(cli-list-and-metrics follow-up): replace the net/disk random
+// placeholders below with real collectors in tui/hostmetrics/net.go
+// and tui/hostmetrics/disk.go. The CPU/Mem path is already split out
+// into tui/hostmetrics; net/disk are the last un-modelled pair.
 func RenderHostMetricsLines(ctx ViewContext) (string, string) {
 	w := ctx.Width
 	lblSt := lipgloss.NewStyle().Bold(true).Foreground(theme.Text)

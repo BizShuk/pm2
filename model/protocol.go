@@ -30,7 +30,6 @@ const (
 	CmdResume   CommandType = "resume"
 	CmdDelete   CommandType = "delete"
 	CmdList     CommandType = "list"
-	CmdLogs     CommandType = "logs"
 	CmdSave     CommandType = "save"
 	CmdResurrect CommandType = "resurrect"
 	CmdKill     CommandType = "kill"
@@ -38,13 +37,17 @@ const (
 	CmdStatus   CommandType = "status"
 )
 
+// PM2Version is the version string both the CLI (`pm2 --version`)
+// and the daemon (CmdStatus payload) report. Kept in the model
+// package so there is one source of truth shared across processes.
+const PM2Version = "1.0.0"
+
 // Request is a CLI → daemon message
 type Request struct {
 	Command CommandType `json:"command"`
 	Name    string      `json:"name,omitempty"` // process name or "all"
 	ID      int         `json:"id,omitempty"`
 	App     *AppStartReq `json:"app,omitempty"`
-	Follow  bool        `json:"follow,omitempty"`
 }
 
 // AppStartReq carries the config for a new process. The static

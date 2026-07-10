@@ -64,6 +64,31 @@ func (r *ProcessRegistry) Get(key string) (*ManagedProcess, bool) {
 	return mp, ok
 }
 
+// SnapshotOne returns a value-copy of the ProcessInfo stored under key.
+// The copy is taken under the read lock so the snapshot is atomic with
+// respect to any UpdateInfo / UpdateMetrics / UpdateCronStatus write;
+// callers may freely read fields from the returned value without holding
+// any registry lock.
+//
+// Returns (zero, false) if the key is absent.
+//
+// This is the read-side counterpart to the CLAUDE.md §Conventions rule
+// that field mutations on a single *ManagedProcess must go through
+// UpdateInfo. Just as a naked `mp.Info.X = ...` races with onProcessExit,
+// so does a naked `mp.Info.X` read — direct field reads from outside the
+// registry are forbidden regardless of direction. SnapshotOne is the
+// sanctioned read path for test code and the rare read-only consumer
+// that needs a single ProcessInfo without Snapshot()'s full map copy.
+func (r *ProcessRegistry) SnapshotOne(key string) (process.ProcessInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	mp, ok := r.processes[key]
+	if !ok {
+		return process.ProcessInfo{}, false
+	}
+	return mp.Info, true
+}
+
 // Remove deletes the entry under key. It returns the removed mp and true
 // if a removal happened, or (nil, false) if the key was absent.
 //
@@ -296,8 +321,9 @@ func (r *ProcessRegistry) LookupExistingForLaunch(ns, name, configFile string) (
 // Used by launchProcess in a multi-step "compute id + write mp" section
 // that needs exclusive access across the whole sequence.
 func (r *ProcessRegistry) findExistingForLaunchUnderLock(ns, name, configFile string) (mp *ManagedProcess, oldKey string, found bool) {
-	if m, ok := r.processes[ns+":"+name]; ok {
-		return m, ns + ":" + name, true
+	k := cronKey(ns, name)
+	if m, ok := r.processes[k]; ok {
+		return m, k, true
 	}
 	if configFile != "" {
 		for k, m := range r.processes {

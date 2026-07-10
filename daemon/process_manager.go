@@ -3,11 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"time"
 
@@ -17,6 +17,17 @@ import (
 	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
 )
+
+// errProcessNotFound is returned by RPC handlers when the target
+// resolves to zero managed processes (wrong name, unknown
+// namespace, unknown ID, or "all" with an empty registry). Wrapped
+// with the target name by processNotFoundError so the user sees
+// what they typed.
+var errProcessNotFound = errors.New("process or namespace not found")
+
+func processNotFoundError(name string) error {
+	return fmt.Errorf("%w: %s", errProcessNotFound, name)
+}
 
 // ManagedProcess pairs runtime state with the OS process handle.
 type ManagedProcess struct {
@@ -126,7 +137,7 @@ func (pm *ProcessManager) StartApp(req *model.AppStartReq) ([]process.ProcessInf
 func (pm *ProcessManager) StopByName(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
-		return fmt.Errorf("process or namespace not found: %s", name)
+		return processNotFoundError(name)
 	}
 	for _, mp := range targets {
 		_ = pm.stopProcess(mp)
@@ -140,10 +151,10 @@ func (pm *ProcessManager) StopByName(name string) error {
 func (pm *ProcessManager) RestartByName(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
-		return fmt.Errorf("process or namespace not found: %s", name)
+		return processNotFoundError(name)
 	}
 	for _, mp := range targets {
-		key := mp.Info.Namespace + ":" + mp.Info.Name
+		key := cronKey(mp.Info.Namespace, mp.Info.Name)
 		var (
 			appCfg process.AppConfig
 			pname  string
@@ -173,11 +184,11 @@ func (pm *ProcessManager) RestartByName(name string) error {
 func (pm *ProcessManager) PauseByName(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
-		return fmt.Errorf("process or namespace not found: %s", name)
+		return processNotFoundError(name)
 	}
 	for _, mp := range targets {
 		_ = pm.stopProcess(mp)
-		key := mp.Info.Namespace + ":" + mp.Info.Name
+		key := cronKey(mp.Info.Namespace, mp.Info.Name)
 		pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 			mp.paused = true
 			mp.Info.Status = process.StatusPaused
@@ -196,10 +207,10 @@ func (pm *ProcessManager) PauseByName(name string) error {
 func (pm *ProcessManager) ResumeByName(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
-		return fmt.Errorf("process or namespace not found: %s", name)
+		return processNotFoundError(name)
 	}
 	for _, mp := range targets {
-		key := mp.Info.Namespace + ":" + mp.Info.Name
+		key := cronKey(mp.Info.Namespace, mp.Info.Name)
 		var (
 			paused bool
 			appCfg process.AppConfig
@@ -226,11 +237,11 @@ func (pm *ProcessManager) ResumeByName(name string) error {
 func (pm *ProcessManager) DeleteByName(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
-		return fmt.Errorf("process or namespace not found: %s", name)
+		return processNotFoundError(name)
 	}
 	for _, mp := range targets {
 		_ = pm.stopProcess(mp)
-		pm.reg.Remove(mp.Info.Namespace + ":" + mp.Info.Name)
+		pm.reg.Remove(cronKey(mp.Info.Namespace, mp.Info.Name))
 	}
 	return nil
 }
@@ -307,7 +318,7 @@ func (pm *ProcessManager) Status() process.DaemonInfo {
 	return process.DaemonInfo{
 		PID:          os.Getpid(),
 		StartedAt:    pm.startedAt,
-		Version:      PM2Version,
+		Version:      model.PM2Version,
 		HomeDir:      pm.homeDir,
 		ProcessCount: pm.reg.Len(),
 	}
@@ -322,248 +333,6 @@ func (pm *ProcessManager) findProcesses(target string) []*ManagedProcess {
 	return pm.reg.FindByTarget(target)
 }
 
-// launchProcess is the ProcessManager-side wrapper around executor.Start. It
-// owns the registry-state side of a launch (id assignment, mp
-// construction, registry write, cron registration) and delegates all
-// OS operations to the Executor.
-func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (process.ProcessInfo, error) {
-	onFileChanged := func() {
-		_ = pm.RestartByName(name)
-	}
-
-	result, err := pm.executor.Start(req, name, onFileChanged)
-	if err != nil {
-		return process.ProcessInfo{}, fmt.Errorf("executor start: %w", err)
-	}
-
-	version := req.Version
-	if version == "" {
-		version = getAppVersion(req.Script)
-	}
-
-	pm.Lock()
-	defer pm.Unlock()
-
-	var id int
-	var lastCronAt time.Time
-	var lastCronStatus string
-	var startedAt time.Time
-	var pid int
-	status := process.StatusOnline
-
-	isCronTask := req.Cron != "" && !req.CronTriggered
-	isPaused := req.Paused
-	if isPaused {
-		status = process.StatusPaused
-	} else if isCronTask {
-		status = process.StatusStopped
-	} else {
-		startedAt = time.Now()
-		pid = result.Cmd.Process.Pid
-	}
-
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
-	}
-
-	existing, oldKey, ok := pm.reg.findExistingForLaunchUnderLock(ns, name, req.ConfigFile)
-
-	if ok && existing.paused && req.CronTriggered {
-		info := existing.Info
-		go pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, nil, nil)
-		return info, nil
-	}
-
-	var restarts int
-	if ok {
-		id = existing.Info.ID
-		lastCronAt = existing.Info.LastCronAt
-		lastCronStatus = existing.Info.LastCronStatus
-		restarts = existing.Info.Restarts
-	} else {
-		id = pm.nextID
-		pm.nextID++
-	}
-
-	currentUser := "unknown"
-	if u, err := user.Current(); err == nil {
-		currentUser = u.Username
-	}
-
-	mp := &ManagedProcess{
-		Info: process.ProcessInfo{
-			AppConfig: process.AppConfig{
-				Namespace:   ns,
-				Name:        name,
-				Script:      req.Script,
-				Args:        req.Args,
-				Env:         req.Env,
-				CronRestart: req.CronRestart,
-				Cron:        req.Cron,
-				MaxRestarts: req.MaxRestarts,
-				ConfigDir:   req.ConfigDir,
-				Version:     version,
-				Watch:       req.Watch,
-				ConfigFile:  req.ConfigFile,
-				CWD:         req.CWD,
-				BaseEnv:     req.BaseEnv,
-				LogFile:     result.LogFile,
-				ErrorFile:   result.ErrFile,
-			},
-			ID:             id,
-			PID:            pid,
-			Status:         status,
-			StartedAt:      startedAt,
-			Restarts:       restarts,
-			User:           currentUser,
-			LastCronAt:     lastCronAt,
-			LastCronStatus: lastCronStatus,
-		},
-		Cmd:     result.Cmd,
-		done:    make(chan struct{}),
-		Watcher: result.Watcher,
-	}
-	pm.reg.processes[ns+":"+name] = mp
-	if oldKey != "" && oldKey != ns+":"+name {
-		delete(pm.reg.processes, oldKey)
-	}
-
-	if !isCronTask && !isPaused {
-		go pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(waitErr error) {
-			pm.onProcessExit(mp, waitErr)
-		})
-	}
-
-	mp.paused = isPaused
-
-	cronKey := ns + ":" + name
-	if req.CronRestart != "" && !isPaused {
-		if err := pm.scheduler.Register(cronKey, req.CronRestart, func() {
-			firedAt := time.Now()
-			restartErr := pm.RestartByName(cronKey)
-			cronStatus := "ok"
-			if restartErr != nil {
-				cronStatus = "failed"
-			}
-			pm.reg.UpdateCronStatus(cronKey, firedAt, cronStatus)
-		}); err != nil {
-			slog.Info("cron_restart parse error", "name", cronKey, "err", err)
-		}
-	}
-
-	if req.Cron != "" && !isPaused {
-		if err := pm.scheduler.Register(cronKey, req.Cron, func() {
-			pm.triggerCron(ns, name, req)
-		}); err != nil {
-			slog.Info("cron parse error", "name", cronKey, "err", err)
-		}
-	}
-
-	info := mp.Info
-	return info, nil
-}
-
-// onProcessExit is the callback that runs after executor.Watch observes
-// cmd.Wait returning.
-func (pm *ProcessManager) onProcessExit(mp *ManagedProcess, waitErr error) {
-	key := mp.Info.Namespace + ":" + mp.Info.Name
-	shouldRestart := false
-	pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-		mp.Info.PID = 0
-		if !mp.stopping {
-			if waitErr != nil {
-				mp.Info.Status = process.StatusErrored
-			} else {
-				mp.Info.Status = process.StatusStopped
-			}
-		}
-
-		if !mp.stopping && mp.Info.Status == process.StatusErrored && mp.Info.Restarts < mp.Info.MaxRestarts {
-			mp.Info.Restarts++
-			mp.Info.Status = process.StatusLaunching
-			shouldRestart = true
-		}
-	})
-
-	if shouldRestart {
-		go func() {
-			time.Sleep(pm.RestartDelay)
-
-			var (
-				appCfg process.AppConfig
-				procNS string
-				procNm string
-			)
-			ok := pm.reg.UpdateInfo(key, func(current *ManagedProcess) {
-				if current != mp || current.stopping {
-					shouldRestart = false
-					return
-				}
-				appCfg = current.Info.AppConfig
-				procNS = current.Info.Namespace
-				procNm = current.Info.Name
-			})
-			if !ok || !shouldRestart {
-				return
-			}
-			_ = procNS
-			req := &model.AppStartReq{AppConfig: appCfg}
-			_, _ = pm.launchProcess(procNm, req)
-		}()
-	}
-}
-
-// stopProcess is the ProcessManager-side wrapper around executor.Stop.
-func (pm *ProcessManager) stopProcess(mp *ManagedProcess) error {
-	key := mp.Info.Namespace + ":" + mp.Info.Name
-
-	pm.scheduler.Remove(key)
-
-	if mp.Watcher != nil {
-		_ = mp.Watcher.Close()
-		mp.Watcher = nil
-	}
-
-	return pm.executor.Stop(
-		mp.Cmd,
-		mp.done,
-		func() {
-			pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-				mp.stopping = true
-				mp.Info.Status = process.StatusStopping
-			})
-		},
-		func() {
-			pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-				mp.Info.Status = process.StatusStopped
-				mp.Info.PID = 0
-			})
-		},
-	)
-}
-
-func (pm *ProcessManager) triggerCron(ns, name string, originalReq *model.AppStartReq) {
-	key := ns + ":" + name
-	mp, ok := pm.reg.Get(key)
-	if !ok {
-		return
-	}
-
-	triggerReq := *originalReq
-	triggerReq.CronTriggered = true
-
-	firedAt := time.Now()
-
-	_ = pm.stopProcess(mp)
-	_, err := pm.launchProcess(name, &triggerReq)
-
-	cronStatus := "ok"
-	if err != nil {
-		cronStatus = "failed"
-	}
-	pm.reg.UpdateCronStatus(key, firedAt, cronStatus)
-}
 
 // ---------------------------------------------------------------------------
 // Metrics

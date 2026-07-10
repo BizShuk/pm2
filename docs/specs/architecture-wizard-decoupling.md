@@ -1,5 +1,10 @@
 # 架構演進與優化計畫 — wizard-decoupling (Architecture Evolution & Optimization Plan)
 
+> **狀態:已完成 (Completed)**
+> 三階段絞殺榕重構於 2026-07-08 完成。`cmd/eco_wizard.go` 與 `cmd/eco_renderer.go` 已刪除，核心邏輯遷移至 `config/wizard/`。
+> `cmd/eco.go` 與 `cmd/eco_install.go` 為 thin Cobra wrapper，僅做 flag 解析與 I/O 注入。
+> 本檔保留作為設計參考與遷移映射記錄。
+
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 我們對現有 `pm2` 專案中有關生態配置精靈 (Ecosystem Wizard) 的程式碼進行了審查，發現了以下關鍵的結構耦合與技術債問題：

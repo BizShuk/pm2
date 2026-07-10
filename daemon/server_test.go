@@ -104,10 +104,8 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	}
 
 	// 1. Stored on the running process.
-	pm.RLock()
-	mp, _ := pm.reg.Get("default:persistcheck")
-	pm.RUnlock()
-	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
+	info, ok := pm.reg.SnapshotOne("default:persistcheck")
+	if !ok || !envHas(info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv not stored on ProcessInfo")
 	}
 
@@ -115,10 +113,8 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	if err := pm.RestartByName("persistcheck"); err != nil {
 		t.Fatalf("restart failed: %v", err)
 	}
-	pm.RLock()
-	mp, _ = pm.reg.Get("default:persistcheck")
-	pm.RUnlock()
-	if mp == nil || !envHas(mp.Info.BaseEnv, marker, want) {
+	info, ok = pm.reg.SnapshotOne("default:persistcheck")
+	if !ok || !envHas(info.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv lost after restart")
 	}
 
@@ -132,10 +128,8 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	if err := pm2.Resurrect(); err != nil {
 		t.Fatalf("resurrect failed: %v", err)
 	}
-	pm2.RLock()
-	mp2, _ := pm2.reg.Get("default:persistcheck")
-	pm2.RUnlock()
-	if mp2 == nil || !envHas(mp2.Info.BaseEnv, marker, want) {
+	info2, ok2 := pm2.reg.SnapshotOne("default:persistcheck")
+	if !ok2 || !envHas(info2.BaseEnv, marker, want) {
 		t.Fatalf("BaseEnv lost across save/resurrect")
 	}
 	_ = pm2.StopByName("persistcheck")
@@ -143,6 +137,21 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 
 func envHas(env []string, key, val string) bool {
 	return slices.Contains(env, key+"="+val)
+}
+
+// pauseState atomically reads the (Status, paused) pair for a process
+// under the registry write lock via UpdateInfo. This is the sanctioned
+// read path when a test needs the private `paused` flag alongside
+// ProcessInfo.Status — SnapshotOne only returns the value-copy Info and
+// cannot see `paused`. Used by the pause/resume tests, which must
+// synchronise against onProcessExit / stopProcess background writes.
+func pauseState(pm *ProcessManager, key string) (status process.Status, paused, ok bool) {
+	pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
+		status = mp.Info.Status
+		paused = mp.paused
+		ok = true
+	})
+	return status, paused, ok
 }
 
 func TestFindProcesses(t *testing.T) {
@@ -174,8 +183,14 @@ func TestFindProcesses(t *testing.T) {
 
 	// 1. 測試 ID 匹配
 	res := pm.findProcesses("1")
-	if len(res) != 1 || res[0].Info.Name != "appB" || res[0].Info.Namespace != "Infra" {
-		t.Errorf("ID matching failed")
+	if len(res) != 1 {
+		t.Fatalf("ID matching failed, got %d results", len(res))
+	}
+	// Read identity fields through a value-copy snapshot rather than the
+	// live pointer returned by findProcesses.
+	info, ok := pm.reg.SnapshotOne("Infra:appB")
+	if !ok || info.Name != "appB" || info.Namespace != "Infra" {
+		t.Errorf("ID matching failed: name=%q ns=%q", info.Name, info.Namespace)
 	}
 
 	// 2. 測試 Name 匹配
@@ -333,14 +348,15 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 
 	pm.KillAll()
 
-	pm.RLock()
-	defer pm.RUnlock()
-	for key, mp := range pm.reg.SnapshotMap() {
-		if mp.Info.Status != process.StatusStopped {
-			t.Errorf("%s: status=%s, want stopped", key, mp.Info.Status)
+	// Snapshot() returns value copies taken under the read lock, so the
+	// status/PID reads below are atomic with respect to any writer and
+	// need no external locking.
+	for _, info := range pm.reg.Snapshot() {
+		if info.Status != process.StatusStopped {
+			t.Errorf("%s: status=%s, want stopped", info.Name, info.Status)
 		}
-		if mp.Info.PID != 0 {
-			t.Errorf("%s: PID=%d, want 0", key, mp.Info.PID)
+		if info.PID != 0 {
+			t.Errorf("%s: PID=%d, want 0", info.Name, info.PID)
 		}
 	}
 }
@@ -400,17 +416,16 @@ func TestConfigFileReplacement(t *testing.T) {
 		t.Errorf("Old process 'default:agentmemory' should have been deleted")
 	}
 
-	mp, ok := pm.reg.Get("Agent:agentmemory")
+	info, ok := pm.reg.SnapshotOne("Agent:agentmemory")
 	if !ok {
 		t.Fatalf("New process 'Agent:agentmemory' was not found")
 	}
-
-	if mp.Info.ID != 42 {
-		t.Errorf("Expected ID 42 to be inherited, got %d", mp.Info.ID)
+	if info.ID != 42 {
+		t.Errorf("Expected ID 42 to be inherited, got %d", info.ID)
 	}
 
-	if mp.Info.ConfigFile != "/path/to/ecosystem.config.js" {
-		t.Errorf("Expected ConfigFile to be propagated, got %s", mp.Info.ConfigFile)
+	if info.ConfigFile != "/path/to/ecosystem.config.js" {
+		t.Errorf("Expected ConfigFile to be propagated, got %s", info.ConfigFile)
 	}
 }
 
@@ -437,18 +452,14 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	// Wait a bit for the process to exit and enter the restart sleep
 	time.Sleep(200 * time.Millisecond)
 
-	pm.RLock()
-	mp, exists := pm.reg.Get("default:fail-app")
-	pm.RUnlock()
+	// Existence check + status read via a single snapshot value copy.
+	info, exists := pm.reg.SnapshotOne("default:fail-app")
 	if !exists {
 		t.Fatalf("Process fail-app was not registered")
 	}
 
 	// Verify it's in StatusLaunching or StatusErrored
-	pm.RLock()
-	status := mp.Info.Status
-	pm.RUnlock()
-	if status != process.StatusLaunching && status != process.StatusErrored {
+	if status := info.Status; status != process.StatusLaunching && status != process.StatusErrored {
 		t.Logf("Process status: %s", status)
 	}
 
@@ -462,10 +473,7 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 
 	// Check if it got back
-	pm.RLock()
-	_, exists = pm.reg.Get("default:fail-app")
-	pm.RUnlock()
-	if exists {
+	if _, exists := pm.reg.Get("default:fail-app"); exists {
 		t.Errorf("Deleted process got back after restart sleep!")
 	}
 }
@@ -500,15 +508,13 @@ func TestRestartsInheritance(t *testing.T) {
 		t.Fatalf("Failed to start app: %v", err)
 	}
 
-	pm.RLock()
-	mp, exists := pm.reg.Get("default:appA")
-	pm.RUnlock()
+	info, exists := pm.reg.SnapshotOne("default:appA")
 	if !exists {
 		t.Fatalf("Process appA was not registered")
 	}
 
-	if mp.Info.Restarts != 5 {
-		t.Errorf("Expected restarts counter to be inherited as 5, got %d", mp.Info.Restarts)
+	if info.Restarts != 5 {
+		t.Errorf("Expected restarts counter to be inherited as 5, got %d", info.Restarts)
 	}
 }
 
@@ -770,17 +776,15 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 	// process whose PID still matches the snapshot.
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:metric-%d", i)
-		pm.RLock()
-		mp, _ := pm.reg.Get(key)
-		pm.RUnlock()
-		if mp == nil {
+		info, ok := pm.reg.SnapshotOne(key)
+		if !ok {
 			t.Fatalf("%s missing from processes map", key)
 		}
-		if mp.Info.CPU != 42.0 {
-			t.Errorf("%s CPU=%v, want 42.0", key, mp.Info.CPU)
+		if info.CPU != 42.0 {
+			t.Errorf("%s CPU=%v, want 42.0", key, info.CPU)
 		}
-		if mp.Info.Memory != 4096 {
-			t.Errorf("%s Memory=%d, want 4096", key, mp.Info.Memory)
+		if info.Memory != 4096 {
+			t.Errorf("%s Memory=%d, want 4096", key, info.Memory)
 		}
 	}
 }
@@ -799,16 +803,16 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 
 	// The stub captures the PID it was called with (i.e. the snapshot
 	// value from phase 1) and then mutates the underlying ProcessInfo
-	// to simulate a restart that happens DURING phase 2.
+	// to simulate a restart that happens DURING phase 2. The mutation
+	// goes through UpdateInfo — the same path a real restart takes —
+	// so it acquires the write lock and is race-clean under -race.
 	var capturedPID int
 	executor.GetProcessMetrics = func(pid int) (float64, uint64) {
 		capturedPID = pid
 		const key = "default:lonely"
-		pm.RLock()
-		if mp, ok := pm.reg.Get(key); ok {
+		pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 			mp.Info.PID = 5678 // simulate restart while ps is in flight
-		}
-		pm.RUnlock()
+		})
 		return 99.0, 9999
 	}
 
@@ -836,15 +840,16 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	// Phase 3 saw the PID had changed to 5678 and skipped the write —
 	// the stale (99, 9999) sample must NOT have leaked onto the new
 	// instance's ProcessInfo.
-	pm.RLock()
-	mp, _ := pm.reg.Get(key)
-	pm.RUnlock()
-	if mp.Info.CPU != 0 || mp.Info.Memory != 0 {
-		t.Errorf("restarted process inherited stale metrics: CPU=%v Memory=%d (want 0/0)",
-			mp.Info.CPU, mp.Info.Memory)
+	info, ok := pm.reg.SnapshotOne(key)
+	if !ok {
+		t.Fatalf("%s missing from processes map", key)
 	}
-	if mp.Info.PID != 5678 {
-		t.Errorf("PID post-refresh=%d, want 5678", mp.Info.PID)
+	if info.CPU != 0 || info.Memory != 0 {
+		t.Errorf("restarted process inherited stale metrics: CPU=%v Memory=%d (want 0/0)",
+			info.CPU, info.Memory)
+	}
+	if info.PID != 5678 {
+		t.Errorf("PID post-refresh=%d, want 5678", info.PID)
 	}
 }
 
@@ -909,14 +914,15 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 	// sample lost, no cross-contamination between goroutines.
 	for i := 0; i < N; i++ {
 		key := fmt.Sprintf("default:speed-%d", i)
-		pm.RLock()
-		mp, _ := pm.reg.Get(key)
-		pm.RUnlock()
+		info, ok := pm.reg.SnapshotOne(key)
+		if !ok {
+			t.Fatalf("%s missing from processes map", key)
+		}
 		wantCPU := float64(1000 + i)
 		wantMem := uint64(1000+i) * 1024
-		if mp.Info.CPU != wantCPU || mp.Info.Memory != wantMem {
+		if info.CPU != wantCPU || info.Memory != wantMem {
 			t.Errorf("%s: CPU=%v Memory=%d, want CPU=%v Memory=%d",
-				key, mp.Info.CPU, mp.Info.Memory, wantCPU, wantMem)
+				key, info.CPU, info.Memory, wantCPU, wantMem)
 		}
 	}
 }
@@ -983,29 +989,30 @@ func TestHighConcurrencyStartup(t *testing.T) {
 	}()
 
 	// All N must be registered. PIDs unique, IDs unique, all online.
-	pm.RLock()
-	defer pm.RUnlock()
+	// Snapshot() returns value copies under the read lock, so the
+	// PID/ID/Status reads below are race-clean with no external lock.
 	if got := pm.reg.Len(); got != N {
 		t.Errorf("registered %d processes, want %d", got, N)
 	}
 
 	seenPID := make(map[int]bool, N)
 	seenID := make(map[int]bool, N)
-	for key, mp := range pm.reg.SnapshotMap() {
-		if mp.Info.PID == 0 {
+	for _, info := range pm.reg.Snapshot() {
+		key := info.Namespace + ":" + info.Name
+		if info.PID == 0 {
 			t.Errorf("%s: PID=0 after start", key)
 			continue
 		}
-		if seenPID[mp.Info.PID] {
-			t.Errorf("%s: duplicate PID %d", key, mp.Info.PID)
+		if seenPID[info.PID] {
+			t.Errorf("%s: duplicate PID %d", key, info.PID)
 		}
-		seenPID[mp.Info.PID] = true
-		if seenID[mp.Info.ID] {
-			t.Errorf("%s: duplicate ID %d", key, mp.Info.ID)
+		seenPID[info.PID] = true
+		if seenID[info.ID] {
+			t.Errorf("%s: duplicate ID %d", key, info.ID)
 		}
-		seenID[mp.Info.ID] = true
-		if mp.Info.Status != process.StatusOnline {
-			t.Errorf("%s: status=%s, want online", key, mp.Info.Status)
+		seenID[info.ID] = true
+		if info.Status != process.StatusOnline {
+			t.Errorf("%s: status=%s, want online", key, info.Status)
 		}
 	}
 }
@@ -1038,40 +1045,32 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 	defer pm.StopByName("errored-norestart")
 
 	// Wait for the process to die and watchProcess to update state.
-	// All field reads happen under RLock so the race detector sees a
-	// clean happens-before with watchProcess's Lock-guarded writes.
+	// Each field read goes through SnapshotOne so it is a value copy
+	// taken under the read lock — a clean happens-before with
+	// onProcessExit's UpdateInfo-guarded writes.
 	var (
-		mp     *ManagedProcess
-		status process.Status
-		pid    int
-		rest   int
+		info   process.ProcessInfo
+		exists bool
 	)
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		pm.RLock()
-		mp, _ = pm.reg.Get("default:errored-norestart")
-		if mp != nil {
-			status = mp.Info.Status
-			pid = mp.Info.PID
-			rest = mp.Info.Restarts
-		}
-		pm.RUnlock()
-		if mp != nil && status == process.StatusErrored {
+		info, exists = pm.reg.SnapshotOne("default:errored-norestart")
+		if exists && info.Status == process.StatusErrored {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if mp == nil {
+	if !exists {
 		t.Fatalf("process not registered")
 	}
-	if status != process.StatusErrored {
-		t.Errorf("status=%s, want %s", status, process.StatusErrored)
+	if info.Status != process.StatusErrored {
+		t.Errorf("status=%s, want %s", info.Status, process.StatusErrored)
 	}
-	if pid != 0 {
-		t.Errorf("PID=%d after exit, want 0", pid)
+	if info.PID != 0 {
+		t.Errorf("PID=%d after exit, want 0", info.PID)
 	}
-	if rest != 0 {
-		t.Errorf("Restarts=%d, want 0 (MaxRestarts=0)", rest)
+	if info.Restarts != 0 {
+		t.Errorf("Restarts=%d, want 0 (MaxRestarts=0)", info.Restarts)
 	}
 }
 
@@ -1109,12 +1108,13 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 	}
 	defer pm.StopByName("errored-autorestart")
 
-	// Capture initial PID + ID under RLock.
-	pm.RLock()
-	mp0, _ := pm.reg.Get("default:errored-autorestart")
-	initialPID := mp0.Info.PID
-	initialID := mp0.Info.ID
-	pm.RUnlock()
+	// Capture initial PID + ID via a value-copy snapshot.
+	info0, ok := pm.reg.SnapshotOne("default:errored-autorestart")
+	if !ok {
+		t.Fatalf("process not registered after start")
+	}
+	initialPID := info0.PID
+	initialID := info0.ID
 	if initialPID == 0 {
 		t.Fatalf("initial PID is 0")
 	}
@@ -1126,28 +1126,27 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 	// the test could land in a "process just exited, new one not
 	// yet spawned" gap.
 	var (
-		mp2      *ManagedProcess
+		info2    process.ProcessInfo
+		exists2  bool
 		newPID   int
 		restarts int
 		newID    int
 	)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		pm.RLock()
-		mp2, _ = pm.reg.Get("default:errored-autorestart")
-		if mp2 != nil {
-			newPID = mp2.Info.PID
-			restarts = mp2.Info.Restarts
-			newID = mp2.Info.ID
+		info2, exists2 = pm.reg.SnapshotOne("default:errored-autorestart")
+		if exists2 {
+			newPID = info2.PID
+			restarts = info2.Restarts
+			newID = info2.ID
 		}
-		pm.RUnlock()
-		if mp2 != nil && restarts >= 1 {
+		if exists2 && restarts >= 1 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if mp2 == nil {
+	if !exists2 {
 		t.Fatalf("process removed from map — auto-restart did not fire")
 	}
 	if restarts < 1 {
@@ -1194,47 +1193,33 @@ func TestProcessCleanExit(t *testing.T) {
 
 	// Wait for the process to die and watchProcess to update state.
 	var (
-		mp     *ManagedProcess
-		status process.Status
-		pid    int
-		rest   int
+		info   process.ProcessInfo
+		exists bool
 	)
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		pm.RLock()
-		mp, _ = pm.reg.Get("default:clean-exit")
-		if mp != nil {
-			status = mp.Info.Status
-			pid = mp.Info.PID
-			rest = mp.Info.Restarts
-		}
-		pm.RUnlock()
-		if mp != nil && pid == 0 {
+		info, exists = pm.reg.SnapshotOne("default:clean-exit")
+		if exists && info.PID == 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if mp == nil {
+	if !exists {
 		t.Fatalf("process not registered")
 	}
-	if status != process.StatusStopped {
+	if info.Status != process.StatusStopped {
 		t.Errorf("status=%s, want %s (clean exit should be stopped, not errored)",
-			status, process.StatusStopped)
+			info.Status, process.StatusStopped)
 	}
-	if pid != 0 {
-		t.Errorf("PID=%d after exit, want 0", pid)
+	if info.PID != 0 {
+		t.Errorf("PID=%d after exit, want 0", info.PID)
 	}
 	// Wait a bit longer to confirm no auto-restart fires.
 	time.Sleep(500 * time.Millisecond)
-	pm.RLock()
-	mp, _ = pm.reg.Get("default:clean-exit")
-	if mp != nil {
-		rest = mp.Info.Restarts
-	}
-	pm.RUnlock()
-	if rest != 0 {
+	info, exists = pm.reg.SnapshotOne("default:clean-exit")
+	if exists && info.Restarts != 0 {
 		t.Errorf("Restarts=%d, want 0 (clean exit must not trigger auto-restart)",
-			rest)
+			info.Restarts)
 	}
 }
 
@@ -1276,11 +1261,12 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	}
 	defer pm.StopByName("cron-restart-app")
 
-	// Capture initial PID under RLock.
-	pm.RLock()
-	mp0, _ := pm.reg.Get("default:cron-restart-app")
-	initialPID := mp0.Info.PID
-	pm.RUnlock()
+	// Capture initial PID via a value-copy snapshot.
+	info0, ok := pm.reg.SnapshotOne("default:cron-restart-app")
+	if !ok {
+		t.Fatalf("process not registered after start")
+	}
+	initialPID := info0.PID
 	if initialPID == 0 {
 		t.Fatalf("initial PID is 0")
 	}
@@ -1290,23 +1276,22 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	// (new instance running) or a Restarts/ID-change signal. Allow up
 	// to 2.5s so the test is stable under CI jitter.
 	var (
-		mp1       *ManagedProcess
 		pidAfter1 int
+		seen1     bool
 	)
 	deadline := time.Now().Add(2500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		pm.RLock()
-		mp1, _ = pm.reg.Get("default:cron-restart-app")
-		if mp1 != nil {
-			pidAfter1 = mp1.Info.PID
+		info1, exists := pm.reg.SnapshotOne("default:cron-restart-app")
+		if exists {
+			pidAfter1 = info1.PID
+			seen1 = true
 		}
-		pm.RUnlock()
-		if mp1 != nil && pidAfter1 != 0 && pidAfter1 != initialPID {
+		if exists && pidAfter1 != 0 && pidAfter1 != initialPID {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if mp1 == nil {
+	if !seen1 {
 		t.Fatalf("process removed from map after first cron tick")
 	}
 	if pidAfter1 == initialPID {
@@ -1319,23 +1304,22 @@ func TestCronRestartFiresReboot(t *testing.T) {
 	// second tick will never fire and the PID will stay put.
 	secondInitialPID := pidAfter1
 	var (
-		mp2       *ManagedProcess
 		pidAfter2 int
+		seen2     bool
 	)
 	deadline = time.Now().Add(2500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		pm.RLock()
-		mp2, _ = pm.reg.Get("default:cron-restart-app")
-		if mp2 != nil {
-			pidAfter2 = mp2.Info.PID
+		info2, exists := pm.reg.SnapshotOne("default:cron-restart-app")
+		if exists {
+			pidAfter2 = info2.PID
+			seen2 = true
 		}
-		pm.RUnlock()
-		if mp2 != nil && pidAfter2 != 0 && pidAfter2 != secondInitialPID {
+		if exists && pidAfter2 != 0 && pidAfter2 != secondInitialPID {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if mp2 == nil {
+	if !seen2 {
 		t.Fatalf("process removed after second cron tick — cron not re-registered")
 	}
 	if pidAfter2 == secondInitialPID {
@@ -1510,9 +1494,12 @@ func TestPauseResumeCronTask(t *testing.T) {
 	}
 
 	// A cron task boots idle (StatusStopped) with its schedule registered.
-	mp, _ := pm.reg.Get("default:nightly")
-	if mp.Info.Status != process.StatusStopped {
-		t.Fatalf("after start: status=%s, want stopped", mp.Info.Status)
+	status, _, ok := pauseState(pm, "default:nightly")
+	if !ok {
+		t.Fatalf("nightly not registered after start")
+	}
+	if status != process.StatusStopped {
+		t.Fatalf("after start: status=%s, want stopped", status)
 	}
 	if got := pm.scheduler.EntryCount(); got != 1 {
 		t.Fatalf("after start: scheduler has %d entries, want 1", got)
@@ -1522,11 +1509,14 @@ func TestPauseResumeCronTask(t *testing.T) {
 	if err := pm.PauseByName("default:nightly"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
-	mp, _ = pm.reg.Get("default:nightly")
-	if mp.Info.Status != process.StatusPaused {
-		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
+	status, paused, ok := pauseState(pm, "default:nightly")
+	if !ok {
+		t.Fatalf("nightly vanished after pause")
 	}
-	if !mp.paused {
+	if status != process.StatusPaused {
+		t.Errorf("after pause: status=%s, want paused", status)
+	}
+	if !paused {
 		t.Errorf("after pause: paused flag not set")
 	}
 	if got := pm.scheduler.EntryCount(); got != 0 {
@@ -1537,11 +1527,14 @@ func TestPauseResumeCronTask(t *testing.T) {
 	if err := pm.ResumeByName("default:nightly"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
-	mp, _ = pm.reg.Get("default:nightly")
-	if mp.Info.Status != process.StatusStopped {
-		t.Errorf("after resume: status=%s, want stopped (idle)", mp.Info.Status)
+	status, paused, ok = pauseState(pm, "default:nightly")
+	if !ok {
+		t.Fatalf("nightly vanished after resume")
 	}
-	if mp.paused {
+	if status != process.StatusStopped {
+		t.Errorf("after resume: status=%s, want stopped (idle)", status)
+	}
+	if paused {
 		t.Errorf("after resume: paused flag still set")
 	}
 	if got := pm.scheduler.EntryCount(); got != 1 {
@@ -1598,17 +1591,19 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 		t.Fatalf("resurrect: %v", err)
 	}
 
-	mp, ok := pm2.reg.Get("default:nightly-paused")
+	// Critical assertions — all three must hold after the fix. The
+	// (Status, paused) pair is read atomically under the registry write
+	// lock via pauseState; there is no background goroutine writing the
+	// resurrected entry, but we keep the sanctioned read path.
+	status, paused, ok := pauseState(pm2, "default:nightly-paused")
 	if !ok {
 		t.Fatalf("resurrect: process missing from registry")
 	}
-
-	// Critical assertions — all three must hold after the fix.
-	if mp.Info.Status != process.StatusPaused {
+	if status != process.StatusPaused {
 		t.Errorf("after resurrect: status=%s, want %s (paused state must survive)",
-			mp.Info.Status, process.StatusPaused)
+			status, process.StatusPaused)
 	}
-	if !mp.paused {
+	if !paused {
 		t.Errorf("after resurrect: paused flag is false, want true")
 	}
 	if got := pm2.scheduler.EntryCount(); got != 0 {
@@ -1641,22 +1636,42 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 	if err := pm.PauseByName("default:worker"); err != nil {
 		t.Fatalf("pauseByName: %v", err)
 	}
-	mp, _ := pm.reg.Get("default:worker")
-	if mp.Info.Status != process.StatusPaused {
-		t.Errorf("after pause: status=%s, want paused", mp.Info.Status)
+	// Category B read: a live worker's onProcessExit goroutine runs in
+	// the background and writes mp.Info.PID=0 via UpdateInfo, so the
+	// (Status, PID) pair must be read under the registry write lock too.
+	// SnapshotOne would race with that write; UpdateInfo serialises it.
+	var (
+		pausedStatus process.Status
+		pausedPID    int
+	)
+	pm.reg.UpdateInfo("default:worker", func(mp *ManagedProcess) {
+		pausedStatus = mp.Info.Status
+		pausedPID = mp.Info.PID
+	})
+	if pausedStatus != process.StatusPaused {
+		t.Errorf("after pause: status=%s, want paused", pausedStatus)
 	}
-	if mp.Info.PID != 0 {
-		t.Errorf("after pause: PID=%d, want 0", mp.Info.PID)
+	if pausedPID != 0 {
+		t.Errorf("after pause: PID=%d, want 0", pausedPID)
 	}
 
 	if err := pm.ResumeByName("default:worker"); err != nil {
 		t.Fatalf("resumeByName: %v", err)
 	}
-	mp, _ = pm.reg.Get("default:worker")
-	if mp.Info.Status != process.StatusOnline {
-		t.Errorf("after resume: status=%s, want online", mp.Info.Status)
+	// Same Category B race window after resume: the freshly-launched
+	// worker has a live onProcessExit goroutine once again.
+	var (
+		resumedStatus process.Status
+		resumedPID    int
+	)
+	pm.reg.UpdateInfo("default:worker", func(mp *ManagedProcess) {
+		resumedStatus = mp.Info.Status
+		resumedPID = mp.Info.PID
+	})
+	if resumedStatus != process.StatusOnline {
+		t.Errorf("after resume: status=%s, want online", resumedStatus)
 	}
-	if mp.Info.PID == 0 {
+	if resumedPID == 0 {
 		t.Errorf("after resume: PID=0, want a live pid")
 	}
 }
@@ -1718,36 +1733,36 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 		}
 	}()
 
-	// Goroutine B: snapshot all fields the auto-restart path used
-	// to read raw, touching them under RLock and the registry
-	// UpdateInfo path. Mirrors what was naked before the fix.
+	// Goroutine B: read every field the auto-restart path used to read
+	// raw, via SnapshotOne's value copy (taken under the registry read
+	// lock). Mirrors what was naked before the fix — every field is
+	// touched while a concurrent writer (RestartByName / auto-restart)
+	// mutates the live entry, and the race detector must stay silent.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			pm.RLock()
-			mp, ok := pm.reg.Get("default:race-restart")
+			info, ok := pm.reg.SnapshotOne("default:race-restart")
 			if ok {
-				_ = mp.Info.Namespace
-				_ = mp.Info.Name
-				_ = mp.Info.Script
-				_ = mp.Info.Args
-				_ = mp.Info.Env
-				_ = mp.Info.Cron
-				_ = mp.Info.CronRestart
-				_ = mp.Info.Watch
-				_ = mp.Info.MaxRestarts
-				_ = mp.Info.Version
-				_ = mp.Info.LogFile
-				_ = mp.Info.ErrorFile
-				_ = mp.Info.ConfigFile
-				_ = mp.Info.CWD
-				_ = mp.Info.BaseEnv
-				_ = mp.Info.Status
-				_ = mp.Info.PID
-				_ = mp.Info.Restarts
+				_ = info.Namespace
+				_ = info.Name
+				_ = info.Script
+				_ = info.Args
+				_ = info.Env
+				_ = info.Cron
+				_ = info.CronRestart
+				_ = info.Watch
+				_ = info.MaxRestarts
+				_ = info.Version
+				_ = info.LogFile
+				_ = info.ErrorFile
+				_ = info.ConfigFile
+				_ = info.CWD
+				_ = info.BaseEnv
+				_ = info.Status
+				_ = info.PID
+				_ = info.Restarts
 			}
-			pm.RUnlock()
 			time.Sleep(40 * time.Millisecond)
 		}
 	}()

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/bizshuk/gosdk/metric"
+	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +21,7 @@ func Execute() {
 	if len(os.Args) > 1 {
 		arg := os.Args[1]
 		if arg == "version" || arg == "-v" || arg == "--v" || arg == "--version" || arg == "-version" {
-			fmt.Println("1.0.0")
+			fmt.Println(model.PM2Version)
 			os.Exit(0)
 		}
 	}
@@ -45,6 +46,7 @@ func init() {
 		newPauseCmd(),
 		newResumeCmd(),
 		newDeleteCmd(),
+		newListCmd(),
 		newLogsCmd(),
 		newSaveCmd(),
 		newResurrectCmd(),

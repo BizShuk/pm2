@@ -36,11 +36,6 @@ func TestRequestRoundTrip(t *testing.T) {
 			req:  Request{Command: CmdRestart, ID: 7},
 			want: `{"command":"restart","id":7}`,
 		},
-		{
-			name: "with follow",
-			req:  Request{Command: CmdLogs, Follow: true},
-			want: `{"command":"logs","follow":true}`,
-		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -56,7 +51,7 @@ func TestRequestRoundTrip(t *testing.T) {
 				t.Fatalf("unmarshal: %v", err)
 			}
 			if back.Command != c.req.Command || back.Name != c.req.Name ||
-				back.ID != c.req.ID || back.Follow != c.req.Follow {
+				back.ID != c.req.ID {
 				t.Errorf("round-trip lost fields: got %+v want %+v", back, c.req)
 			}
 		})

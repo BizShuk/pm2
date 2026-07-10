@@ -4,13 +4,13 @@
 
 ## Architecture
 
-
-
-
-- [ ] `architecture-extensibility-interfaces`: 為 `pm2` 核心模組定義標準的擴充介面，隔離外部與底層依賴。
-    - 來源：[plans/architecture-extensibility-interfaces.md](./plans/architecture-extensibility-interfaces.md)
-    - 目標：為 `pm2` 核心模組定義標準的擴充介面（狀態儲存、排程管理、指標收集與系統日誌），隔離外部與底層依賴，提升可測試性。
-    - 做法：定義 `StateStore`、`Scheduler`、`MetricsProvider` 與 `DaemonLogger` 介面，並將具體實作以依賴注入方式傳入 `Server` 與 `Executor`。
+- [x] `test-direct-info-read-fix`: 修正 `daemon/server_test.go` 79 處直接 `mp.Info.*` 讀取違反 CLAUDE.md §Conventions 問題，並新增 `ProcessRegistry.SnapshotOne` API 提供安全的值副本讀取。 @2026-07-10 @Completed @Architecture
+    - 來源：[docs/specs/2026-07-10-test-direct-info-read-fix.md](./docs/specs/2026-07-10-test-direct-info-read-fix.md)
+    - 目標：消除 `go test -race -count=3 ./...` 中必觸發的 race warning（`TestPauseResumeRunningProcess` 在 `daemon/server_test.go:1648` 直接讀 `mp.Info.PID` 與 `onProcessExit` 寫 `PID=0` 競爭）。
+    - 做法：在 `daemon/process_registry.go` 新增 `SnapshotOne(key) (process.ProcessInfo, bool)`（RLock 下拷貝值副本），逐個替換 79 處違規；對必須與 background goroutine 同步讀取的場景（如 pause/resume）改用 `pm.reg.UpdateInfo(key, fn)`。
+    - 結果（2026-07-10）：`daemon/process_registry.go` 新增 `SnapshotOne` 方法（`Get` 之後，RLock 下回傳 `mp.Info` 值副本，缺席回 `(zero, false)`），doc comment 點明其為 `UpdateInfo` 的讀側對應、CLAUDE.md §Conventions 認可的讀取路徑。`daemon/process_registry_test.go` 新增 `TestRegistrySnapshotOne`：涵蓋缺席 key、值副本隔離 live mutation、`BaseEnv` slice / `Env` map 深拷貝、並發讀寫 1000×1000 `-race` 通過。`daemon/server_test.go` 79 處 `mp.Info.*` 直接讀取全數替換：Category A（單純讀快照）改 `pm.reg.SnapshotOne(key)`，Category B（pause/resume 需與 `onProcessExit` 背景 goroutine 同步）改 `pm.reg.UpdateInfo(key, fn)` 閉包讀取；`TestFindProcesses` / `TestKillAllStopsEveryProcess` / `TestHighConcurrencyStartup` 改走 `Snapshot()` 值副本迭代。新增測試 helper `pauseState(pm, key)` 原子讀 `(Status, paused)` 供 pause/resume 測試使用。`TestRefreshMetricsSkipsRestartedProcess` 的 stub 由 `pm.RLock()` 下裸寫 `mp.Info.PID` 改為 `UpdateInfo`（寫側亦合規）。CLAUDE.md §Conventions 加註「讀取亦同」段落並把 `SnapshotOne` 列入高階方法清單。`go test -race -count=3 ./...`（cmd/config/daemon/tui/model 全部）全綠，無任何 race warning；`go list -deps ./daemon` 無新增 import cycle。
+    - 工時：0.5 天。
+    - 觸發時機：CI 引入 `go test -race -count=3 ./...` 之前。
 
 ## Bug
 
@@ -67,10 +67,10 @@
         - 驗證：`go list -deps ./tui/... | grep -c pm2/daemon` = 0（TUI 已完全不再依賴 daemon 套件）；`go test -race ./...` 全綠；`go test -count=1 -race ./model/... ./cmd/... ./tui/... ./daemon/...` 全部 PASS
 - [x] `統一進程配置定義 (Unified Process Configuration)` — 來源 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) @2026-07-06_22:20:58 @Completed @Daemon
       目標：於 `process/types.go` 建立統一的 `AppConfig` 結構，重構 `config.AppConfig` 與 `daemon.AppStartReq`，使其複用 `process.AppConfig`，消除重複定義。
-      做法：依照 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq`、`DumpEntry` 與 `ProcessInfo` 的定義與映射程式碼。
+      做法：依照 [plans/architecture-unified-config.md](./plans/architecture-unified-config.md) 中的 4 階段進行重構，利用 anonymous embedding 簡化 `AppStartReq` 與 `ProcessInfo` 的定義與映射程式碼。
       驗證：`go test -race -v ./...`。
       規格：[docs/specs/unified-config-refactor.md](./docs/specs/unified-config-refactor.md)
-      結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`process.DumpEntry` 標記 Deprecated，`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
+      結果（2026-07-01）：4 階段全綠。`process.AppConfig` 為唯一真相來源，內含 `BaseEnv`；`model.AppStartReq` 改為 anonymous embed `AppConfig` + `CronTriggered`；`process.ProcessInfo` 改為 embed `AppConfig` + 9 個 runtime 欄位（刪除 `LogFile`/`ErrorFile` 雙重定義）；`daemon/persistence.go::save()` 直接序列化 `[]AppConfig`、`resurrect()` 反序列化後呼叫 `Normalize("")`。5 個 cmd 檔案、4 個測試檔案（`config/ecosystem_test.go`、`cmd/eco_test.go`、`daemon/server_test.go`、`tui/model_test.go`）與 `daemon/server.go` 全面更新。**自然修復** `daemon/persistence.go:37` 的 `OutFile: mp.Info.LogFile` bug。dump.json 格式變更，舊版 dump 需手動 `pm2 delete all` 重建（已於錯誤訊息說明）。`go test -race -count=2 ./...` 全部通過。
 - [x] `第一階段：補強特徵測試 (Characterization tests)` @2026-07-06_22:20:57 @Completed @Daemon
     - 於 `daemon/server_test.go` 增加高並行啟動、進程異常終止、環境變數繼承、`cron` 重啟的測試案例，建立重構安全網。
     - 驗證：`go test -v ./...` 與 `go test -race ./...` 綠燈。
@@ -110,7 +110,7 @@
     - 結果（2026-07-01）：`daemon/server.go::stopProcess` 改用 `syscall.Kill(-pid, syscall.SIGTERM)` 對整個 process group 發信號（kill(2) 的負 pid 即 pgrp），5s 超時後同樣用 `Kill(-pid, syscall.SIGKILL)` 升級。新增 `TestStopProcessKillsChildren`：寫一個 `spawn_child.sh` 至 t.TempDir()，裡面跑 `sleep 60 & echo $! > child.pid; wait`，啟動後用 `syscall.Kill(childPID, 0)` 驗證 child 還活著；stopByName 後再次驗證 child PID 收到 ESRCH（已死）。已用「暫時 revert fix → 測試 fail → 恢復 fix → 測試 pass」驗證測試有效捕捉 bug。
 - [x] `修復 concurrent map 競態 (Fix concurrent map iteration/write)` — 診斷 1.1 @2026-07-06\*20:06:41 @Completed @Bug
       現況：`daemon/persistence.go:16` 的 `save()` 遍歷 `s.processes` 全程無鎖；由 `daemon/server.go:82`（`startAutoSave` 背景協程）與 `daemon/server.go:168`（RPC `CmdSave`）並發呼叫。
-      做法：在 `save()` 開頭先持 `s.mu.RLock()` 取得進程列表 `快照 (snapshot)`，於鎖外組裝 `DumpEntry` 與寫檔，避免 `fatal error: concurrent map iteration and map write`。
+      做法：在 `save()` 開頭先持 `s.mu.RLock()` 取得進程列表 `快照 (snapshot)`，於鎖外組裝 AppConfig 快照並寫檔，避免 `fatal error: concurrent map iteration and map write`。
       驗證：`go test -race ./daemon/...` 搭配並發啟動 + 連續存檔壓測。
       結果（2026-06-30）：`save()` 改為內部持 `s.mu.RLock`，對應 `listAll`/`findProcesses` 既有的「內部持鎖」慣例。新增 `daemon/server_test.go::TestSaveConcurrentWithMapMutation`（4 saver + 1 writer × 80ms 壓測），`go test -race ./daemon/...` 下穩定通過 3/3 次。其餘 `TestBaseEnvSurvivesRestartAndResurrect`、`TestWatchStateInheritance`、`TestVersionStateInheritance` 等既有測試在 `-race` 下亦全綠。
 - [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。 @2026-07-06_20:06:36 @Completed

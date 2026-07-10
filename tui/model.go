@@ -1,17 +1,13 @@
 package tui
 
 import (
-	"bufio"
-	"encoding/json"
-	"fmt"
-	"os"
 	"sort"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/tui/hostmetrics"
 	"github.com/bizshuk/pm2/tui/views"
 )
 
@@ -72,19 +68,23 @@ type Model struct {
 	logFocus  bool
 	hostCPU   float64
 	hostMem   float64
+	// hostMetrics samples CPU/Mem via the platform-appropriate
+	// collector. Held as an interface so tests can inject a stub.
+	hostMetrics hostmetrics.HostMetricsCollector
 	SortBy    SortField
 	notice    string // transient message from the last action (e.g. a failure)
 }
 
 func New(socket string, detail bool) Model {
 	return Model{
-		socket:  socket,
-		width:   120,
-		height:  30,
-		Detail:  detail,
-		hostCPU: 5.2,
-		hostMem: 64.1,
-		SortBy:  SortByName,
+		socket:      socket,
+		width:       120,
+		height:      30,
+		Detail:      detail,
+		hostCPU:     hostMetricsFallbackCPU,
+		hostMem:     hostMetricsFallbackMem,
+		hostMetrics: hostmetrics.NewCollector(),
+		SortBy:      SortByName,
 	}
 }
 
@@ -135,7 +135,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case triggerHostMetricsMsg:
 		return m, func() tea.Msg {
-			cpu, mem := collectHostMetrics()
+			cpu, mem, err := m.hostMetrics.Collect()
+			if err != nil {
+				// Collector failed (sandboxed /proc, missing macOS
+				// top, etc) — fall back to a stable cosmetic value
+				// so the TUI never blanks out. The fallback constants
+				// are defined in metrics.go next to the message types.
+				cpu, mem = hostMetricsFallbackCPU, hostMetricsFallbackMem
+			}
 			return hostMetricsMsg{cpu: cpu, mem: mem}
 		}
 
@@ -264,92 +271,7 @@ func (m *Model) cycleNamespace(delta int) {
 	m.selected = max(0, min(m.selected, len(m.procs)-1))
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	}
-	if msg.String() == "s" {
-		m.cycleSort()
-		m.sortProcs()
-		return m, nil
-	}
-	// Namespace switching is intentionally available even when the
-	// current filter has zero rows — otherwise a user could get stuck
-	// on an empty namespace with no way back.
-	switch msg.String() {
-	case "left":
-		m.cycleNamespace(-1)
-		return m, nil
-	case "right":
-		m.cycleNamespace(+1)
-		return m, nil
-	}
-	if len(m.procs) == 0 {
-		return m, nil
-	}
-	targetID := fmt.Sprintf("%d", m.procs[m.selected].ID)
-	switch msg.String() {
-	case "up", "k":
-		if m.selected > 0 {
-			m.selected--
-			if m.Detail {
-				m.logs = nil
-				return m, readLogs(m.procs[m.selected].LogFile)
-			}
-			return m, nil
-		}
-	case "down", "j":
-		if m.selected < len(m.procs)-1 {
-			m.selected++
-			if m.Detail {
-				m.logs = nil
-				return m, readLogs(m.procs[m.selected].LogFile)
-			}
-			return m, nil
-		}
-	case "r":
-		return m, doAction(m.socket, model.Request{Command: model.CmdRestart, Name: targetID})
-	case "p":
-		// Toggle pause/resume on the selected process. Pausing a cron
-		// task suspends its schedule (status → paused) and stops any
-		// running instance; pressing again resumes it (a cron task
-		// returns to idle, a regular process comes back online). The
-		// selected status was set by the last refresh, and doAction
-		// refreshes immediately, so successive presses flip cleanly.
-		cmd := pauseOrResume(m.procs[m.selected].Status)
-		return m, doAction(m.socket, model.Request{Command: cmd, Name: targetID})
-	case "d":
-		return m, doAction(m.socket, model.Request{Command: model.CmdDelete, Name: targetID})
-	case "enter":
-		// Toggle log-focus: in two-pane mode, hide the detail block and
-		// show the log tail filling the full right pane. Pressing Enter
-		// again restores the detail+logs view. No-op in wide-table mode
-		// (where there's no detail block to hide) and on an empty list.
-		if m.Detail {
-			m.logFocus = !m.logFocus
-		}
-		return m, nil
-	case "esc":
-		// Convenience exit from log-focus. No-op in wide-table mode and
-		// when log-focus is already off, so it never steals Esc from
-		// any other future binding.
-		if m.Detail {
-			m.logFocus = false
-		}
-		return m, nil
-	}
-	return m, nil
-}
 
-// pauseOrResume picks the RPC command for the `p` key toggle: a paused
-// process resumes, anything else pauses.
-func pauseOrResume(s process.Status) model.CommandType {
-	if s == process.StatusPaused {
-		return model.CmdResume
-	}
-	return model.CmdPause
-}
 
 func (m *Model) sortProcs(prevSelectedID ...int) {
 	if len(m.procs) == 0 {
@@ -429,68 +351,6 @@ func (m *Model) cycleSort() {
 	}
 }
 
-// ─── commands ────────────────────────────────────────────────────────────────
-
-func doRefresh(socket string) tea.Cmd {
-	return func() tea.Msg {
-		resp, err := model.SendRequest(socket, model.Request{Command: model.CmdList})
-		if err != nil {
-			return refreshMsg{err: err}
-		}
-		var procs []process.ProcessInfo
-		if err := json.Unmarshal(resp.Payload, &procs); err != nil {
-			return refreshMsg{err: err}
-		}
-		sort.Slice(procs, func(i, j int) bool { return procs[i].ID < procs[j].ID })
-		return refreshMsg{procs: procs}
-	}
-}
-
-func readLogs(path string) tea.Cmd {
-	return func() tea.Msg {
-		f, err := os.Open(path)
-		if err != nil {
-			return logsMsg{path: path}
-		}
-		defer f.Close()
-		var lines []string
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			lines = append(lines, sc.Text())
-		}
-		if err := sc.Err(); err != nil {
-			// Ignore or log error
-		}
-		if len(lines) > maxLogTail {
-			lines = lines[len(lines)-maxLogTail:]
-		}
-		return logsMsg{path: path, lines: lines}
-	}
-}
-
-// doAction sends an RPC then immediately re-fetches the process list.
-// The action's outcome is threaded back so the UI can report a failure
-// instead of silently swallowing it — e.g. a stale daemon that does not
-// recognise `pause`/`resume` replies "unknown command", which would
-// otherwise leave the status looking unchanged with no explanation.
-func doAction(socket string, req model.Request) tea.Cmd {
-	return func() tea.Msg {
-		var notice string
-		resp, err := model.SendRequest(socket, req)
-		switch {
-		case err != nil:
-			notice = fmt.Sprintf("%s failed: %v", req.Command, err)
-		case resp != nil && !resp.OK:
-			notice = fmt.Sprintf("%s failed: %s", req.Command, resp.Error)
-		}
-		refresh := doRefresh(socket)().(refreshMsg)
-		return actionMsg{refreshMsg: refresh, notice: notice}
-	}
-}
-
-// ─── view ────────────────────────────────────────────────────────────────────
-
-// View builds a ViewContext from the controller state and delegates
 // the actual rendering to the tui/views package. No presentation
 // logic lives here any more.
 func (m Model) View() string {

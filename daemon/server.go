@@ -12,12 +12,6 @@ import (
 	"github.com/bizshuk/pm2/daemon/network"
 )
 
-// PM2Version is the version string the running daemon reports via
-// CmdStatus. Kept as a package-level const so Status() doesn't need
-// to read a magic value from anywhere; release tooling can grep for
-// this symbol to bump the version.
-const PM2Version = "1.0.0"
-
 // Server is the PM2 daemon — a thin wrapper around ProcessManager that
 // owns the Unix socket lifecycle and background goroutines (auto-save,
 // auto-resurrect). All process management logic lives in ProcessManager;

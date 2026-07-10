@@ -107,6 +107,86 @@ func TestRegistrySnapshotIsIndependent(t *testing.T) {
 	}
 }
 
+// TestRegistrySnapshotOne covers the read-side counterpart to UpdateInfo:
+// a value copy taken under the read lock. The copy must be independent of
+// later live mutations (the whole point of routing naked reads through it
+// rather than touching mp.Info.* directly), must report absence honestly,
+// and must deep-copy the slice/map-backed AppConfig fields so a caller
+// appending to the returned BaseEnv cannot corrupt the live entry.
+func TestRegistrySnapshotOne(t *testing.T) {
+	r := NewProcessRegistry()
+
+	// Absent key → (zero, false).
+	if info, ok := r.SnapshotOne("default:nope"); ok || info.PID != 0 {
+		t.Fatalf("SnapshotOne on absent key returned (%+v, %v); want (zero, false)", info, ok)
+	}
+
+	mp := stub("deep")
+	mp.Info.ID = 7
+	mp.Info.PID = 1234
+	mp.Info.Status = process.StatusOnline
+	mp.Info.Restarts = 3
+	mp.Info.Version = "1.2.3"
+	mp.Info.BaseEnv = []string{"A=1", "B=2"}
+	mp.Info.Env = map[string]string{"K": "V"}
+	r.Add("default:deep", mp)
+
+	info, ok := r.SnapshotOne("default:deep")
+	if !ok {
+		t.Fatal("SnapshotOne on existing key returned ok=false")
+	}
+	if info.ID != 7 || info.PID != 1234 || info.Status != process.StatusOnline ||
+		info.Restarts != 3 || info.Version != "1.2.3" {
+		t.Fatalf("SnapshotOne returned wrong values: %+v", info)
+	}
+	if len(info.BaseEnv) != 2 || info.BaseEnv[0] != "A=1" {
+		t.Fatalf("BaseEnv not copied correctly: %+v", info.BaseEnv)
+	}
+	if info.Env["K"] != "V" {
+		t.Fatalf("Env map not copied correctly: %+v", info.Env)
+	}
+
+	// 1. Snapshot is frozen against later live mutations: mutating the
+	//    entry after the snapshot must NOT change the value we got back.
+	r.UpdateInfo("default:deep", func(mp *ManagedProcess) {
+		mp.Info.PID = 9999
+		mp.Info.Status = process.StatusStopped
+		mp.Info.Restarts = 42
+	})
+	if info.PID != 1234 || info.Status != process.StatusOnline || info.Restarts != 3 {
+		t.Fatalf("SnapshotOne value leaked live mutation: PID=%d Status=%s Restarts=%d",
+			info.PID, info.Status, info.Restarts)
+	}
+
+	// 2. Slice fields are deep-copied: appending to the returned BaseEnv
+	//    must NOT mutate the live entry's BaseEnv.
+	info.BaseEnv = append(info.BaseEnv, "C=3")
+	live, _ := r.SnapshotOne("default:deep")
+	if len(live.BaseEnv) != 2 {
+		t.Fatalf("caller append to returned BaseEnv corrupted live entry: %+v", live.BaseEnv)
+	}
+
+	// 3. Concurrent reads (SnapshotOne) vs writes (UpdateInfo) stay
+	//    race-clean — run under `go test -race` to verify.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_, _ = r.SnapshotOne("default:deep")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			r.UpdateInfo("default:deep", func(mp *ManagedProcess) {
+				mp.Info.Restarts++
+			})
+		}
+	}()
+	wg.Wait()
+}
+
 func TestRegistryFindByTarget(t *testing.T) {
 	r := NewProcessRegistry()
 

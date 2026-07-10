@@ -51,24 +51,27 @@ func newStartCmd() *cobra.Command {
 				// CLI environment snapshot travels in the embedded AppConfig.
 				req.App.AppConfig.BaseEnv = os.Environ()
 
-				resp, err := model.SendRequest(socketPath(), req)
-				if err != nil {
-					// Try to auto-start the daemon
-					fmt.Fprintln(os.Stderr, "daemon not running, starting it...")
-					if startErr := autoStartDaemon(); startErr != nil {
-						return fmt.Errorf("cannot start daemon: %w", startErr)
-					}
-					resp, err = model.SendRequest(socketPath(), req)
-					if err != nil {
-						return err
-					}
-				}
-				if !resp.OK {
-					return fmt.Errorf("daemon error: %s", resp.Error)
-				}
+			client := NewCLIClient(socketPath())
+			if err := client.SendOK(req); err != nil {
+				return err
+			}
+			// Re-fetch the post-start response so we can render the
+			// status block — the resp captured inside SendOK was
+			// discarded by the !OK fold. We re-issue the same StartApp
+			// request: the daemon is idempotent on same-name+same-script
+			// (stop-and-replace), and the request embeds the original
+			// AppConfig so a fresh send yields a fresh ProcessInfo
+			// snapshot in the response payload.
+			resp, err := client.Send(req)
+			if err != nil {
+				return err
+			}
+			if !resp.OK {
+				return fmt.Errorf("daemon error: %s", resp.Error)
+			}
 
-				var infos []process.ProcessInfo
-				if err := json.Unmarshal(resp.Payload, &infos); err == nil {
+			var infos []process.ProcessInfo
+			if err := json.Unmarshal(resp.Payload, &infos); err == nil {
 					for _, info := range infos {
 						if info.PID <= 0 {
 							fmt.Printf("[%d] %s scheduled\n", info.ID, info.Name)
