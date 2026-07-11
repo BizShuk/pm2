@@ -1,0 +1,23 @@
+{
+  "name": "pm2",
+  "version": "1.0.0",
+  "description": "PM2 process manager plugin containing skills to run, stop, restart, pause, save, restore, and monitor background processes and cron schedules.",
+  "author": {
+    "name": "Shuk Liu",
+    "email": "shuk.liu@gmail.com",
+    "url": "https://github.com/bizshuk"
+  },
+  "homepage": "https://github.com/bizshuk/pm2",
+  "repository": "https://github.com/bizshuk/pm2",
+  "license": "MIT",
+  "keywords": [
+    "pm2",
+    "process-manager",
+    "daemon",
+    "cron",
+    "tui",
+    "process-lifecycle"
+  ],
+  "agents": [],
+  "skills": []
+}

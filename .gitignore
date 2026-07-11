@@ -1,4 +1,5 @@
 pm2
+!/skills/pm2
 /pm2-bin
 *.test
 /tmp/
