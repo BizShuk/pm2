@@ -10,6 +10,7 @@ import (
 
 	"github.com/bizshuk/pm2/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // This file holds CLI-level integration tests only. Unit tests for
@@ -111,7 +112,6 @@ func TestIsPlannerAgent(t *testing.T) {
 	}
 }
 
-
 // runWizard invokes the wizard cobra command with the given args, piping
 // stdin for the interactive prompts. Returns the resulting output file
 // contents (or "" if not written) and the run error.
@@ -127,7 +127,7 @@ func runWizard(t *testing.T, dir, stdin, args string) (string, error) {
 
 	// Build a fresh root command each call to avoid state pollution
 	// from cobra's flag-default caching and the global metric hook.
-	root := newRootForTest()
+	root := newRootForTest(t)
 	root.SetArgs(append([]string{"wizard"}, strings.Fields(args)...))
 	root.SetIn(strings.NewReader(stdin))
 	var out, errOut bytes.Buffer
@@ -148,10 +148,24 @@ func runWizard(t *testing.T, dir, stdin, args string) (string, error) {
 // newRootForTest returns a bare cobra root containing only the wizard
 // command. Kept here (not in root.go) so production init() side effects
 // (e.g. metric hook, default pm2Home) don't leak into tests.
-func newRootForTest() *cobra.Command {
+func newRootForTest(t *testing.T) *cobra.Command {
+	t.Helper()
+	resetCommandForTest(t, WizardCmd)
+	resetCommandForTest(t, WizardInstallCmd)
+
 	root := &cobra.Command{Use: "pm2"}
-	root.AddCommand(newEcoCmd())
+	root.AddCommand(WizardCmd)
 	return root
+}
+
+func resetCommandForTest(t *testing.T, command *cobra.Command) {
+	t.Helper()
+	command.Flags().VisitAll(func(flag *pflag.Flag) {
+		if err := flag.Value.Set(flag.DefValue); err != nil {
+			t.Fatalf("reset flag %s: %v", flag.Name, err)
+		}
+		flag.Changed = false
+	})
 }
 
 func TestWizardEndToEndMerge(t *testing.T) {
@@ -288,7 +302,7 @@ func runInstall(t *testing.T, dir string, args []string) (string, string, error)
 
 	realDir, _ := os.Getwd()
 
-	root := newRootForTest()
+	root := newRootForTest(t)
 	root.SetArgs(append([]string{"wizard", "install"}, args...))
 	root.SetIn(strings.NewReader(""))
 	var out, errOut bytes.Buffer

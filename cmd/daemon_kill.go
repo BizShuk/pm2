@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newDaemonKillCmd returns `pm2 daemon kill`.
+// DaemonKillCmd is `pm2 daemon kill`.
 //
 // Semantics: send `model.CmdKill` to the running daemon. The daemon
 // invokes `KillAll()` (graceful stop of every managed process via
@@ -18,20 +18,18 @@ import (
 // This verb operates on the DAEMON, not on a managed process.
 // For stopping an individual process while the daemon keeps running,
 // use `pm2 stop <name|id|all>`.
-func newDaemonKillCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "kill",
-		Short: "Stop all processes and shut down the PM2 daemon",
-		Long: "Sends CmdKill to the running daemon, which gracefully stops every " +
-			"managed process and then exits itself. Behaviour:\n" +
-			"  - Daemon reachable → graceful stop of every process, then daemon exits.\n" +
-			"  - Daemon unreachable (socket gone) → treated as a no-op.\n\n" +
-			"This is the daemon-lifecycle verb; for stopping a single managed " +
-			"process while the daemon keeps running, use `pm2 stop <name|id|all>` " +
-			"instead.",
-		Args: cobra.NoArgs,
-		RunE: runDaemonKill,
-	}
+var DaemonKillCmd = &cobra.Command{
+	Use:   "kill",
+	Short: "Stop all processes and shut down the PM2 daemon",
+	Long: "Sends CmdKill to the running daemon, which gracefully stops every " +
+		"managed process and then exits itself. Behaviour:\n" +
+		"  - Daemon reachable → graceful stop of every process, then daemon exits.\n" +
+		"  - Daemon unreachable (socket gone) → treated as a no-op.\n\n" +
+		"This is the daemon-lifecycle verb; for stopping a single managed " +
+		"process while the daemon keeps running, use `pm2 stop <name|id|all>` " +
+		"instead.",
+	Args: cobra.NoArgs,
+	RunE: runDaemonKill,
 }
 
 // runDaemonKill is the RunE body for `pm2 daemon kill`. Behaviour:

@@ -31,11 +31,11 @@ When NOT to use:
 | `pm2 pause <name\|id\|all>`   | Suspend a process and its cron schedule      | Removes scheduler entries; status becomes `paused`                                       |
 | `pm2 resume <name\|id\|all>`  | Resume a paused process                      | Re-registers cron and launches the process                                               |
 | `pm2 delete <name\|id\|all>`  | Remove a process from the registry           | Removes configuration and stops process                                                  |
-| `pm2 list`                    | Print non-interactive process table          | Displays IDs, statuses, CPU, memory, cron, etc.                                          |
+| `pm2 list`                    | Print styled non-interactive process table   | Bordered snapshot; `--no-color` for plain output                                         |
 | `pm2 logs [name\|id]`         | Tail log files directly                      | `--lines N` to specify trailing lines                                                    |
 | `pm2 save`                    | Persist current app configs                  | Saves to `~/.pm2/dump.json`                                                              |
 | `pm2 resurrect`               | Restore saved app configs                    | Loads from `~/.pm2/dump.json`                                                            |
-| `pm2 monit`                   | Launch Bubbletea terminal dashboard          | Full screen interactive process list/metrics/logs                                        |
+| `pm2 monit` / `pm2 m`         | Launch Bubbletea terminal dashboard          | Opens the two-pane process detail/log view directly; no `-d` flag                        |
 | `pm2 startup`                 | Generate OS boot startup scripts             | Creates `plist` on macOS, systemd unit on Linux                                          |
 | `pm2 daemon start`            | Spawn the daemon process                     | `--foreground` to run blocking in foreground                                             |
 | `pm2 daemon kill`             | Gracefully exit all apps and daemon          | CLI commands can still auto-start the daemon                                             |

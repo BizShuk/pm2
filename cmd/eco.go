@@ -25,25 +25,26 @@ type interactiveFlags struct {
 	noMerge bool
 }
 
-// newEcoCmd returns the `pm2 wizard` command. It only wires Cobra
+var wizardFlags = defaultInteractiveFlags()
+
+// WizardCmd is the `pm2 wizard` command. It only wires Cobra
 // flags + I/O streams and delegates every behavioural step to
 // config/wizard (see plans/architecture-wizard-decoupling.md).
-func newEcoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "wizard",
-		Aliases: []string{"w"},
-		Short:   "Interactively build an ecosystem.config.js (or .json)",
-		Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
-			"in the current directory that `pm2 start` can load directly. " +
-			"If the output file already exists, wizard merges the new apps into it " +
-			"by default; pass --force to replace, or --no-merge to abort.",
-		Args: cobra.NoArgs,
-		RunE: runEcoInteractive,
-	}
-	flags := defaultInteractiveFlags()
-	bindInteractiveFlags(cmd, &flags)
-	cmd.AddCommand(newEcoInstallCmd())
-	return cmd
+var WizardCmd = &cobra.Command{
+	Use:     "wizard",
+	Aliases: []string{"w"},
+	Short:   "Interactively build an ecosystem.config.js (or .json)",
+	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
+		"in the current directory that `pm2 start` can load directly. " +
+		"If the output file already exists, wizard merges the new apps into it " +
+		"by default; pass --force to replace, or --no-merge to abort.",
+	Args: cobra.NoArgs,
+	RunE: runEcoInteractive,
+}
+
+func init() {
+	bindInteractiveFlags(WizardCmd, &wizardFlags)
+	WizardCmd.AddCommand(WizardInstallCmd)
 }
 
 func defaultInteractiveFlags() interactiveFlags {

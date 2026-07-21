@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newDaemonStatusCmd returns `pm2 daemon status`.
+// DaemonStatusCmd is `pm2 daemon status`.
 //
 // Semantics: send `model.CmdStatus` to the running daemon; on success
 // the daemon replies with a `process.DaemonInfo` payload (PID, started
@@ -21,19 +21,17 @@ import (
 //
 // This verb is read-only. It operates on the DAEMON's own metadata,
 // not on any managed process.
-func newDaemonStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show the running PM2 daemon's identity and counters",
-		Long: "Sends CmdStatus to the running daemon and renders its reply " +
-			"as a multi-line summary: status, pid, started_at, uptime, version, " +
-			"home_dir, socket_path, and managed-process count.\n\n" +
-			"If the daemon is unreachable (no socket at the expected path), " +
-			"the command prints a 'not running' notice with the socket path " +
-			"and a hint to start it. This verb never mutates state.",
-		Args: cobra.NoArgs,
-		RunE: runDaemonStatus,
-	}
+var DaemonStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show the running PM2 daemon's identity and counters",
+	Long: "Sends CmdStatus to the running daemon and renders its reply " +
+		"as a multi-line summary: status, pid, started_at, uptime, version, " +
+		"home_dir, socket_path, and managed-process count.\n\n" +
+		"If the daemon is unreachable (no socket at the expected path), " +
+		"the command prints a 'not running' notice with the socket path " +
+		"and a hint to start it. This verb never mutates state.",
+	Args: cobra.NoArgs,
+	RunE: runDaemonStatus,
 }
 
 // runDaemonStatus is the RunE body for `pm2 daemon status`. Behaviour:

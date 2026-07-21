@@ -7,14 +7,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// StopCmd stops a managed process without stopping the daemon.
-var StopCmd = &cobra.Command{
-	Use:   "stop <name|id|all>",
-	Short: "Stop a process",
+// RestartCmd restarts a managed process while preserving its configuration.
+var RestartCmd = &cobra.Command{
+	Use:   "restart <name|id|all>",
+	Short: "Restart a process",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := model.SendRequest(socketPath(), model.Request{
-			Command: model.CmdStop,
+			Command: model.CmdRestart,
 			Name:    args[0],
 		})
 		if err != nil {
@@ -23,7 +23,7 @@ var StopCmd = &cobra.Command{
 		if !resp.OK {
 			return fmt.Errorf("%s", resp.Error)
 		}
-		fmt.Printf("stopped: %s\n", args[0])
+		fmt.Printf("restarted: %s\n", args[0])
 		return nil
 	},
 }

@@ -16,6 +16,22 @@ State directory: `~/.pm2/` (created automatically on first run)
 
 ## Commands
 
+### `pm2 config`
+
+Inspect the merged application configuration or update one of the configuration files managed by `gosdk/cmd`.
+
+```bash
+pm2 config
+pm2 config --source
+pm2 config --update server.host=0.0.0.0
+pm2 config --delete server.host
+pm2 config --file config.yaml --update server.port=8080
+```
+
+Writes target `~/.config/pm2/` by default; use `--local` to target the current working directory. The default mutation file is `settings.local.json`. This command manages application-level SDK configuration, while process definitions remain in `ecosystem.config.js` or `ecosystem.config.json`.
+
+---
+
 ### `pm2 start`
 
 Start a process from a script path or an ecosystem config file.
@@ -124,6 +140,22 @@ Does not affect `~/.pm2/dump.json`.
 
 ---
 
+### `pm2 list` / `pm2 ls` / `pm2 status`
+
+Print one non-interactive process snapshot using the bordered, status-coloured
+table formerly shown by the wide `pm2 m` view.
+
+```bash
+pm2 list
+pm2 list --no-color   # plain output for logs and pipelines
+```
+
+The table keeps runtime columns such as ID, namespace, PID, uptime, restart
+count, status, CPU, and memory. Optional metadata columns are removed on narrow
+terminals.
+
+---
+
 ### `pm2 logs`
 
 Tail stdout and stderr log files for a process.
@@ -145,12 +177,14 @@ Log files are stored in `~/.pm2/logs/<name>-out.log` and `~/.pm2/logs/<name>-err
 
 ---
 
-### `pm2 monit` / `pm2 monitor` / `pm2 dashboard`
+### `pm2 monit` / `pm2 m` / `pm2 monitor` / `pm2 dashboard`
 
-Open the interactive live TUI dashboard. Refreshes every 2 seconds.
+Open the interactive two-pane process detail and log dashboard. Refreshes every
+2 seconds. `pm2 m` opens this view directly; there is no `-d` / `--detail`
+flag.
 
 ```bash
-pm2 monit
+pm2 m
 ```
 
 ```text

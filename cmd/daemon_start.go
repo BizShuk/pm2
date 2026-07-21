@@ -13,7 +13,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newDaemonStartCmd returns `pm2 daemon start [--foreground]`.
+var daemonStartForeground bool
+
+// DaemonStartCmd is `pm2 daemon start [--foreground]`.
 //
 // In background mode (default) the CLI spawns itself with the
 // `daemon start --foreground` argv so the foreground path is the
@@ -24,22 +26,21 @@ import (
 // In `--foreground` mode we call `daemon.NewServer(...).Listen(...)`
 // directly so Ctrl+C / SIGTERM cleanly tears the daemon down. This
 // is also the path the launchd / systemd units use.
-func newDaemonStartCmd() *cobra.Command {
-	var foreground bool
-	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Start the PM2 daemon (background by default)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if foreground {
-				srv := daemon.NewServer(pm2Home)
-				return srv.Listen(socketPath())
-			}
-			return startDaemonAsBackground()
-		},
-	}
-	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "Run the daemon in the foreground (blocking)")
-	return cmd
+var DaemonStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the PM2 daemon (background by default)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if daemonStartForeground {
+			srv := daemon.NewServer(pm2Home)
+			return srv.Listen(socketPath())
+		}
+		return startDaemonAsBackground()
+	},
+}
+
+func init() {
+	DaemonStartCmd.Flags().BoolVarP(&daemonStartForeground, "foreground", "f", false, "Run the daemon in the foreground (blocking)")
 }
 
 // startDaemonAsBackground re-execs the current binary with

@@ -2,10 +2,12 @@ package views
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/tui/theme"
@@ -77,7 +79,7 @@ type colDef struct {
 	align lipgloss.Position
 }
 
-// listColumns is the ordered set of columns rendered by RenderWideTable.
+// listColumns is the ordered set of columns rendered by the process table.
 // The "name" column (index 2) is dynamically resized based on terminal width.
 var listColumns = []colDef{
 	{"id", 3, lipgloss.Right},
@@ -95,6 +97,19 @@ var listColumns = []colDef{
 	{"last exec", 19, lipgloss.Left},
 }
 
+const (
+	listWideWidth   = 100
+	listNarrowWidth = 80
+)
+
+// ProcessTableOptions controls the non-interactive process table renderer.
+// Width follows the current terminal width; NoColor guarantees plain output
+// for logs and pipelines even when the surrounding process forces ANSI color.
+type ProcessTableOptions struct {
+	Width   int
+	NoColor bool
+}
+
 // drawBorder renders a top/middle/bottom border line for the given column layout.
 func drawBorder(cols []colDef, left, mid, right, fill string) string {
 	var parts []string
@@ -105,8 +120,8 @@ func drawBorder(cols []colDef, left, mid, right, fill string) string {
 }
 
 // sepLine colours a border line with the muted-border palette.
-func sepLine(s string) string {
-	return lipgloss.NewStyle().Foreground(theme.Border).Render(s)
+func sepLine(renderer *lipgloss.Renderer, s string) string {
+	return renderer.NewStyle().Foreground(theme.Border).Render(s)
 }
 
 // getColVal returns the rendered cell text for a given column on a process row.
@@ -115,56 +130,200 @@ func getColVal(p process.ProcessInfo, colName string) string {
 	case "id":
 		return fmt.Sprintf("%d", p.ID)
 	case "namespace":
-		return p.Namespace
+		return process.NamespaceOrDefault(p.Namespace)
 	case "name":
 		return p.Name
 	case "version":
-		if p.Version == "" {
-			return "-"
-		}
-		return p.Version
+		return process.VersionOrDash(p.Version)
 	case "pid":
-		if p.PID <= 0 {
-			return "-"
-		}
-		return fmt.Sprintf("%d", p.PID)
+		return process.PIDOrDash(p.PID)
 	case "uptime":
-		return shortUptime(p)
+		return process.ShortUptime(p)
 	case "↺":
 		return fmt.Sprintf("%d", p.Restarts)
 	case "status":
 		return string(p.Status)
 	case "cpu":
-		if p.Status != process.StatusOnline {
-			return "0.0%"
-		}
-		return fmt.Sprintf("%.1f%%", p.CPU)
+		return process.CPUPercent(p)
 	case "mem":
-		if p.Status != process.StatusOnline {
-			return "0b"
-		}
-		return formatBytes(p.Memory)
+		return process.MemCell(p)
 	case "user":
-		if p.User == "" {
-			return "-"
-		}
-		return p.User
+		return process.UserOrDash(p.User)
 	case "cron":
-		if p.Cron == "" {
-			return "-"
-		}
-		return p.Cron
+		return process.CronOrDash(p.Cron)
 	case "last exec":
-		if p.LastCronAt.IsZero() {
-			return "-"
-		}
-		res := p.LastCronAt.Format("2006-01-02 15:04:05")
-		if p.LastCronStatus != "" {
-			res += fmt.Sprintf(" (%s)", p.LastCronStatus)
-		}
-		return res
+		return process.LastExec(p)
 	default:
 		return ""
+	}
+}
+
+// RenderProcessTable renders a one-shot process snapshot using the bordered,
+// status-coloured style formerly shown by the wide `pm2 m` view. It excludes
+// interactive dashboard chrome so callers can safely print it to stdout.
+func RenderProcessTable(procs []process.ProcessInfo, opts ProcessTableOptions) string {
+	renderer := lipgloss.DefaultRenderer()
+	if opts.NoColor {
+		renderer = lipgloss.NewRenderer(io.Discard, termenv.WithProfile(termenv.Ascii))
+	}
+	return renderProcessTable(renderer, procs, opts.Width, -1)
+}
+
+// processTableColumns returns a copy of the table columns appropriate for the
+// terminal width. Tail metadata disappears first; version follows on narrow
+// terminals while the core runtime columns remain visible.
+func processTableColumns(width int) []colDef {
+	cols := append([]colDef(nil), listColumns...)
+	if width > 0 && width < listWideWidth {
+		cols = withoutColumns(cols, "user", "cron", "last exec")
+	}
+	if width > 0 && width < listNarrowWidth {
+		cols = withoutColumns(cols, "version")
+	}
+	return cols
+}
+
+func withoutColumns(cols []colDef, names ...string) []colDef {
+	drop := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		drop[name] = struct{}{}
+	}
+
+	filtered := make([]colDef, 0, len(cols)-len(drop))
+	for _, col := range cols {
+		if _, ok := drop[col.name]; !ok {
+			filtered = append(filtered, col)
+		}
+	}
+	return filtered
+}
+
+func renderProcessTable(renderer *lipgloss.Renderer, procs []process.ProcessInfo, width, selected int) string {
+	cols := processTableColumns(width)
+
+	nameIndex := -1
+	fixedWidth := 3*len(cols) + 1 // cell padding + borders, excluding the name value
+	for i, col := range cols {
+		if col.name == "name" {
+			nameIndex = i
+			continue
+		}
+		fixedWidth += col.width
+	}
+	if nameIndex >= 0 {
+		nameWidth := width - fixedWidth
+		if nameWidth < 18 {
+			nameWidth = 18
+		}
+		cols[nameIndex].width = nameWidth
+	}
+
+	top := drawBorder(cols, "┌", "┬", "┐", "─")
+	headerStyle := renderer.NewStyle().Background(theme.HdrBg).Foreground(theme.Text).Bold(true)
+	headerParts := make([]string, 0, len(cols))
+	for _, col := range cols {
+		label := col.name
+		if runewidth.StringWidth(label) > col.width {
+			label = CropRight(label, col.width)
+		}
+		style := headerStyle.Width(col.width)
+		if col.align == lipgloss.Right {
+			style = style.Align(lipgloss.Right)
+		} else {
+			style = style.Align(lipgloss.Left)
+		}
+		headerParts = append(headerParts, " "+style.Render(label)+" ")
+	}
+	headerRow := "│" + strings.Join(headerParts, "│") + "│"
+	separator := drawBorder(cols, "├", "┼", "┤", "─")
+
+	lines := []string{
+		sepLine(renderer, top),
+		sepLine(renderer, headerRow),
+		sepLine(renderer, separator),
+	}
+
+	rowStyle := renderer.NewStyle()
+	borderStyle := renderer.NewStyle().Foreground(theme.Border)
+	for i, p := range procs {
+		isSelected := selected >= 0 && i == selected
+		rowParts := make([]string, 0, len(cols))
+		for _, col := range cols {
+			value := getColVal(p, col.name)
+			if runewidth.StringWidth(value) > col.width {
+				value = CropRight(value, col.width)
+			}
+
+			style := rowStyle.Width(col.width)
+			if col.align == lipgloss.Right {
+				style = style.Align(lipgloss.Right)
+			} else {
+				style = style.Align(lipgloss.Left)
+			}
+			if isSelected {
+				style = style.Background(theme.SelBg)
+			}
+
+			renderedValue := renderProcessCell(style, p, col.name, value, isSelected)
+			if isSelected {
+				cellStyle := renderer.NewStyle().Background(theme.SelBg)
+				rowParts = append(rowParts, cellStyle.Render(" ")+renderedValue+cellStyle.Render(" "))
+			} else {
+				rowParts = append(rowParts, " "+renderedValue+" ")
+			}
+		}
+
+		line := borderStyle.Render("│") + strings.Join(rowParts, borderStyle.Render("│")) + borderStyle.Render("│")
+		lines = append(lines, line)
+	}
+
+	bottom := drawBorder(cols, "└", "┴", "┘", "─")
+	lines = append(lines, sepLine(renderer, bottom))
+	return strings.Join(lines, "\n")
+}
+
+func renderProcessCell(style lipgloss.Style, p process.ProcessInfo, column, value string, selected bool) string {
+	if selected {
+		switch column {
+		case "name":
+			return style.Bold(true).Foreground(theme.SelName).Render(value)
+		case "id", "status":
+			return style.Bold(true).Foreground(getStatusColor(p.Status)).Render(value)
+		case "cpu":
+			cellStyle := style.Bold(true).Foreground(theme.SelText)
+			if p.Status == process.StatusOnline {
+				cellStyle = cellStyle.Foreground(theme.Online)
+			}
+			return cellStyle.Render(value)
+		default:
+			return style.Bold(true).Foreground(theme.SelText).Render(value)
+		}
+	}
+
+	switch column {
+	case "id":
+		return style.Bold(true).Foreground(getStatusColor(p.Status)).Render(value)
+	case "status":
+		return style.Foreground(getStatusColor(p.Status)).Render(value)
+	case "cpu":
+		cellStyle := style.Foreground(theme.Stopped)
+		if p.Status == process.StatusOnline {
+			cellStyle = cellStyle.Foreground(theme.Online)
+		}
+		return cellStyle.Render(value)
+	case "mem":
+		cellStyle := style.Foreground(theme.Stopped)
+		if p.Status == process.StatusOnline {
+			cellStyle = cellStyle.Foreground(theme.Text)
+		}
+		return cellStyle.Render(value)
+	default:
+		if p.Status != process.StatusOnline && column != "name" && column != "version" && column != "namespace" {
+			style = style.Foreground(theme.Stopped)
+		} else {
+			style = style.Foreground(theme.Text)
+		}
+		return style.Render(value)
 	}
 }
 
@@ -183,145 +342,10 @@ func RenderWideTable(ctx ViewContext) string {
 			RenderFooter(ctx.Width, ctx.SortBy))
 	}
 
-	width := ctx.Width
-	fixedW := 0
-	for i, col := range listColumns {
-		if i != 2 { // name is index 2
-			fixedW += col.width + 3 // width + 2 spaces + 1 separator
-		}
-	}
-	fixedW += 2 // outer borders
-
-	nameW := width - fixedW - 3
-	if nameW < 18 {
-		nameW = 18
-	}
-
-	cols := make([]colDef, len(listColumns))
-	copy(cols, listColumns)
-	cols[2].width = nameW
-
-	top := drawBorder(cols, "┌", "┬", "┐", "─")
-
-	var hdrParts []string
-	hdrStyle := lipgloss.NewStyle().Background(theme.HdrBg).Foreground(theme.Text).Bold(true)
-	for _, col := range cols {
-		text := col.name
-		if len(text) > col.width {
-			text = text[:col.width]
-		}
-		style := hdrStyle.Width(col.width)
-		if col.align == lipgloss.Right {
-			style = style.Align(lipgloss.Right)
-		} else {
-			style = style.Align(lipgloss.Left)
-		}
-		hdrParts = append(hdrParts, " "+style.Render(text)+" ")
-	}
-	hdrRow := "│" + strings.Join(hdrParts, "│") + "│"
-	sep := drawBorder(cols, "├", "┼", "┤", "─")
-
-	var lines []string
-	lines = append(lines, sepLine(top))
-	lines = append(lines, sepLine(hdrRow))
-	lines = append(lines, sepLine(sep))
-
-	rowStyle := lipgloss.NewStyle()
-	borderStyle := lipgloss.NewStyle().Foreground(theme.Border)
-	for i, p := range ctx.Procs {
-		var rowParts []string
-		for _, col := range cols {
-			val := getColVal(p, col.name)
-			if runewidth.StringWidth(val) > col.width {
-				val = CropRight(val, col.width)
-			}
-
-			style := rowStyle.Width(col.width)
-			if col.align == lipgloss.Right {
-				style = style.Align(lipgloss.Right)
-			} else {
-				style = style.Align(lipgloss.Left)
-			}
-
-			if i == ctx.Selected {
-				style = style.Background(theme.SelBg)
-			}
-
-			var renderedVal string
-			if i == ctx.Selected {
-				switch col.name {
-				case "name":
-					renderedVal = style.Bold(true).Foreground(theme.SelName).Render(val)
-				case "id", "status":
-					renderedVal = style.Bold(true).Foreground(getStatusColor(p.Status)).Render(val)
-				case "cpu":
-					cpuSt := style.Bold(true)
-					if p.Status == process.StatusOnline {
-						cpuSt = cpuSt.Foreground(theme.Online)
-					} else {
-						cpuSt = cpuSt.Foreground(theme.SelText)
-					}
-					renderedVal = cpuSt.Render(val)
-				case "mem":
-					memSt := style.Bold(true)
-					if p.Status == process.StatusOnline {
-						memSt = memSt.Foreground(theme.SelText)
-					} else {
-						memSt = memSt.Foreground(theme.SelText)
-					}
-					renderedVal = memSt.Render(val)
-				default:
-					renderedVal = style.Bold(true).Foreground(theme.SelText).Render(val)
-				}
-			} else {
-				switch col.name {
-				case "id":
-					renderedVal = style.Bold(true).Foreground(getStatusColor(p.Status)).Render(val)
-				case "status":
-					renderedVal = style.Foreground(getStatusColor(p.Status)).Render(val)
-				case "cpu":
-					cpuSt := style
-					if p.Status == process.StatusOnline {
-						cpuSt = cpuSt.Foreground(theme.Online)
-					} else {
-						cpuSt = cpuSt.Foreground(theme.Stopped)
-					}
-					renderedVal = cpuSt.Render(val)
-				case "mem":
-					memSt := style
-					if p.Status == process.StatusOnline {
-						memSt = memSt.Foreground(theme.Text)
-					} else {
-						memSt = memSt.Foreground(theme.Stopped)
-					}
-					renderedVal = memSt.Render(val)
-				default:
-					defaultSt := style
-					if p.Status != process.StatusOnline && col.name != "name" && col.name != "version" && col.name != "namespace" {
-						defaultSt = defaultSt.Foreground(theme.Stopped)
-					} else {
-						defaultSt = defaultSt.Foreground(theme.Text)
-					}
-					renderedVal = defaultSt.Render(val)
-				}
-			}
-
-			var cell string
-			if i == ctx.Selected {
-				cellSt := lipgloss.NewStyle().Background(theme.SelBg)
-				cell = cellSt.Render(" ") + renderedVal + cellSt.Render(" ")
-			} else {
-				cell = " " + renderedVal + " "
-			}
-			rowParts = append(rowParts, cell)
-		}
-
-		line := borderStyle.Render("│") + strings.Join(rowParts, borderStyle.Render("│")) + borderStyle.Render("│")
-		lines = append(lines, line)
-	}
-
-	bottom := drawBorder(cols, "└", "┴", "┘", "─")
-	lines = append(lines, sepLine(bottom))
+	lines := strings.Split(
+		renderProcessTable(lipgloss.DefaultRenderer(), ctx.Procs, ctx.Width, ctx.Selected),
+		"\n",
+	)
 
 	cpuMemLine, diskNetLine := RenderHostMetricsLines(ctx)
 	lines = append(lines, cpuMemLine, diskNetLine)

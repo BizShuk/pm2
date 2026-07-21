@@ -7,14 +7,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// StopCmd stops a managed process without stopping the daemon.
-var StopCmd = &cobra.Command{
-	Use:   "stop <name|id|all>",
-	Short: "Stop a process",
-	Args:  cobra.ExactArgs(1),
+// ResumeCmd resumes a paused process and restores its cron schedule.
+var ResumeCmd = &cobra.Command{
+	Use:     "resume <name|id|all>",
+	Aliases: []string{"unpause"},
+	Short:   "Resume a paused process (re-registers its cron schedule)",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := model.SendRequest(socketPath(), model.Request{
-			Command: model.CmdStop,
+			Command: model.CmdResume,
 			Name:    args[0],
 		})
 		if err != nil {
@@ -23,7 +24,7 @@ var StopCmd = &cobra.Command{
 		if !resp.OK {
 			return fmt.Errorf("%s", resp.Error)
 		}
-		fmt.Printf("stopped: %s\n", args[0])
+		fmt.Printf("resumed: %s\n", args[0])
 		return nil
 	},
 }

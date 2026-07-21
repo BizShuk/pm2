@@ -2,7 +2,7 @@
 
 ## Module
 
-`github.com/bizshuk/pm2` Go 1.24+
+`github.com/bizshuk/pm2` Go 1.26.3
 
 ## Architecture
 
@@ -48,16 +48,27 @@ The lock and import invariants are spelled out in the Conventions section below.
 
 ```tree
 pm2/
-├── main.go                   entry point — calls cmd.Execute()
+├── main.go                   CLI composition root — RootCmd, config.Default(WithAppName("pm2")),
+│                             gosdk/cmd.ConfigCmd registration, metric hook, Execute
 ├── cmd/                      cobra commands (CLI layer)
-│   ├── root.go               pm2Home, socketPath(), Execute()
-│   ├── start.go              pm2 start  — builds AppStartReq, sends to daemon
-│   ├── stop.go               pm2 stop / restart / pause / resume / delete
-│   ├── monitor.go            pm2 monit (live process dashboard) / save / resurrect
+│   ├── root.go               pm2Home initialization + socketPath()
+│   ├── start.go              StartCmd — builds AppStartReq, sends to daemon
+│   ├── stop.go               StopCmd
+│   ├── restart.go            RestartCmd
+│   ├── pause.go              PauseCmd
+│   ├── resume.go             ResumeCmd
+│   ├── delete.go             DeleteCmd
+│   ├── list.go               ListCmd — styled non-interactive process table;
+│   │                         shares tui/views process-table renderer
 │   ├── logs.go               pm2 logs  — reads log files directly
-│   ├── daemon.go             pm2 daemon (hidden) / startup / autoStartDaemon()
-│   ├── eco.go                pm2 wizard — thin Cobra wrapper, delegates to config/wizard
-│   ├── eco_install.go        pm2 wizard install — thin Cobra wrapper, delegates to config/wizard
+│   ├── monit.go              MonitCmd — two-pane detail/log dashboard; no -d flag
+│   ├── save.go               SaveCmd
+│   ├── resurrect.go          ResurrectCmd
+│   ├── daemon.go             DaemonCmd parent; attaches daemon subcommands in init()
+│   ├── daemon_*.go           DaemonStart/Kill/Stop/StatusCmd + daemon lifecycle helpers
+│   ├── startup.go            StartupCmd — launchd/systemd service generation
+│   ├── eco.go                WizardCmd — thin Cobra wrapper, delegates to config/wizard
+│   ├── eco_install.go        WizardInstallCmd — delegates to config/wizard
 │   ├── eco_install_system.go helper to install system-planner profile
 │   ├── eco_install_business.go helper to install business-planner profile
 │   └── eco_test.go           CLI-level integration tests for wizard and install commands
@@ -128,7 +139,7 @@ pm2/
     │   ├── footer.go         RenderFooter (key hints) + RenderHostMetricsLines
     │   ├── detail.go         RenderDetail — right-panel param table
     │   ├── logs.go           RenderLogs — right-panel log tail
-    │   ├── list.go           RenderWideTable + RenderLeftPane (two-pane list)
+    │   ├── list.go           RenderProcessTable + RenderWideTable + RenderLeftPane
     │   ├── layout.go         RenderLayout — single entry point; orchestrates
     │   │                     header + body + footer, decides single vs two-pane
     │   └── format.go         Pure formatters: shortUptime, fullUptime, fmtTime,
@@ -210,6 +221,9 @@ No persistent connection — each CLI invocation is a fresh dial.
 
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
+`pm2 monit` (including alias `pm2 m`) always starts in the two-pane detail/log
+layout. The former wide-table presentation is exposed as the one-shot
+`pm2 list` output through `views.RenderProcessTable`; `monit` has no `-d` flag.
 `doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
 list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
@@ -257,12 +271,12 @@ caller always picks an explicit verb.
 
 | Package                              | Purpose                               |
 | ------------------------------------ | ------------------------------------- |
+| `github.com/bizshuk/gosdk`           | App config, built-in config command, metrics hook |
 | `github.com/spf13/cobra`             | CLI commands                          |
 | `github.com/robfig/cron/v3`          | Cron scheduler in daemon              |
 | `github.com/dop251/goja`             | JS runtime for `.js` ecosystem config |
 | `github.com/charmbracelet/bubbletea` | TUI event loop                        |
-| `github.com/charmbracelet/lipgloss`  | TUI styling                           |
-| `github.com/olekukonko/tablewriter`  | `pm2 list` table output               |
+| `github.com/charmbracelet/lipgloss`  | TUI and `pm2 list` table styling      |
 
 ## State directory (`~/.pm2/`)
 
@@ -277,6 +291,9 @@ caller always picks an explicit verb.
 
 ## Conventions
 
+- `main.go` is the only Cobra composition root. Commands under `cmd/` are
+  package-level exported `*cobra.Command` vars; flags and child commands bind in
+  `init()`. Do not reintroduce `NewXxxCmd()` / `newXxxCmd()` constructors.
 - All process state is owned by `daemon.ProcessRegistry` (defined in
   `daemon/process_registry.go`). `daemon.ProcessManager` holds a `*ProcessRegistry` and delegates
   lock primitives via `pm.Lock()`/`pm.Unlock()`/`pm.RLock()`/`pm.RUnlock()` for

@@ -7,14 +7,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// StopCmd stops a managed process without stopping the daemon.
-var StopCmd = &cobra.Command{
-	Use:   "stop <name|id|all>",
-	Short: "Stop a process",
-	Args:  cobra.ExactArgs(1),
+// DeleteCmd stops and removes a managed process from the daemon registry.
+var DeleteCmd = &cobra.Command{
+	Use:     "delete <name|id|all>",
+	Aliases: []string{"del"},
+	Short:   "Remove a process from the list",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := model.SendRequest(socketPath(), model.Request{
-			Command: model.CmdStop,
+			Command: model.CmdDelete,
 			Name:    args[0],
 		})
 		if err != nil {
@@ -23,7 +24,7 @@ var StopCmd = &cobra.Command{
 		if !resp.OK {
 			return fmt.Errorf("%s", resp.Error)
 		}
-		fmt.Printf("stopped: %s\n", args[0])
+		fmt.Printf("deleted: %s\n", args[0])
 		return nil
 	},
 }

@@ -31,7 +31,7 @@ func writeStopMarker() error {
 	return os.WriteFile(path, []byte{}, 0o644)
 }
 
-// newDaemonStopCmd returns `pm2 daemon stop`.
+// DaemonStopCmd is `pm2 daemon stop`.
 //
 // Semantics: write the "user stopped" marker, then send `CmdKill` to
 // the running daemon (graceful stop of every managed process + the
@@ -48,35 +48,33 @@ func writeStopMarker() error {
 // This verb is idempotent: if the daemon is already gone, the marker
 // is still written (so the auto-spawn suppression remains consistent)
 // and the command reports success without an error.
-func newDaemonStopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "stop",
-		Short: "Stop the PM2 daemon and prevent auto-respawn",
-		Long: "Stops the running daemon (graceful stop of every managed process " +
-			"plus the daemon's own exit, same as `pm2 daemon kill`) AND records " +
-			"an on-disk marker that suppresses the silent auto-respawn path used " +
-			"by other CLI commands. Behaviour:\n" +
-			"  - Daemon reachable → graceful stop of every process, daemon exits, " +
-			"marker is written.\n" +
-			"  - Daemon unreachable (socket gone) → marker is still written, the " +
-			"command reports success (idempotent).\n\n" +
-			"To re-enable the daemon and clear the auto-respawn suppression, run " +
-			"`pm2 daemon start`.\n\n" +
-			"This is the daemon-lifecycle verb; for stopping a single managed " +
-			"process while the daemon keeps running, use `pm2 stop <name|id|all>`.",
-		Args: cobra.NoArgs,
-		RunE: runDaemonStop,
-	}
+var DaemonStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the PM2 daemon and prevent auto-respawn",
+	Long: "Stops the running daemon (graceful stop of every managed process " +
+		"plus the daemon's own exit, same as `pm2 daemon kill`) AND records " +
+		"an on-disk marker that suppresses the silent auto-respawn path used " +
+		"by other CLI commands. Behaviour:\n" +
+		"  - Daemon reachable → graceful stop of every process, daemon exits, " +
+		"marker is written.\n" +
+		"  - Daemon unreachable (socket gone) → marker is still written, the " +
+		"command reports success (idempotent).\n\n" +
+		"To re-enable the daemon and clear the auto-respawn suppression, run " +
+		"`pm2 daemon start`.\n\n" +
+		"This is the daemon-lifecycle verb; for stopping a single managed " +
+		"process while the daemon keeps running, use `pm2 stop <name|id|all>`.",
+	Args: cobra.NoArgs,
+	RunE: runDaemonStop,
 }
 
 // runDaemonStop is the RunE body for `pm2 daemon stop`. Behaviour:
 //
-//   1. Write the stop-marker FIRST so a concurrent CLI invocation
-//      cannot auto-spawn a new daemon between our marker write and
-//      our kill request reaching the daemon.
-//   2. Send `CmdKill`. If the daemon is unreachable (already stopped),
-//      treat as no-op — the marker is still the source of truth.
-//   3. Report outcome.
+//  1. Write the stop-marker FIRST so a concurrent CLI invocation
+//     cannot auto-spawn a new daemon between our marker write and
+//     our kill request reaching the daemon.
+//  2. Send `CmdKill`. If the daemon is unreachable (already stopped),
+//     treat as no-op — the marker is still the source of truth.
+//  3. Report outcome.
 //
 // Why write the marker before the RPC: the marker is the only durable
 // signal that survives the daemon's exit. If we wrote it AFTER, a
