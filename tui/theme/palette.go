@@ -1,4 +1,4 @@
-// Package theme is the single source of truth for the pm2 monit
+// Package theme is the single source of truth for the pm2 monitor
 // colour palette. Every view in tui/views and every controller helper
 // in tui reads its AdaptiveColor values from here.
 //

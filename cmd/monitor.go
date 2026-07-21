@@ -9,22 +9,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var monitSortBy string
+var monitorSortBy string
 
-// MonitCmd opens the live process dashboard.
-var MonitCmd = &cobra.Command{
-	Use:     "monit",
-	Aliases: []string{"m", "monitor", "dashboard"},
+// MonitorCmd opens the live process dashboard.
+var MonitorCmd = &cobra.Command{
+	Use:     "monitor",
+	Aliases: []string{"m", "dashboard"},
 	Short:   "Live process detail and log dashboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := tui.SortField(strings.ToLower(monitSortBy))
+		s := tui.SortField(strings.ToLower(monitorSortBy))
 		switch s {
 		case tui.SortByName, tui.SortByNamespace, tui.SortByCPU, tui.SortByMem, tui.SortByStatus:
 			// valid
 		default:
 			s = tui.SortByName
 		}
-		m := newMonitModel(socketPath())
+		m := newMonitorModel(socketPath())
 		m.SortBy = s
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		finalModel, err := p.Run()
@@ -38,9 +38,9 @@ var MonitCmd = &cobra.Command{
 }
 
 func init() {
-	MonitCmd.Flags().StringVar(&monitSortBy, "sort", "name", "sort processes by: name, namespace, cpu, memory, status")
+	MonitorCmd.Flags().StringVar(&monitorSortBy, "sort", "name", "sort processes by: name, namespace, cpu, memory, status")
 }
 
-func newMonitModel(socket string) tui.Model {
+func newMonitorModel(socket string) tui.Model {
 	return tui.New(socket, true)
 }

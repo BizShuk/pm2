@@ -34,7 +34,7 @@ func init() {
 		appcmd.ResurrectCmd,
 		appcmd.StartupCmd,
 		appcmd.DaemonCmd,
-		appcmd.MonitCmd,
+		appcmd.MonitorCmd,
 		appcmd.WizardCmd,
 		sdkcmd.ConfigCmd,
 	)

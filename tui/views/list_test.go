@@ -19,7 +19,7 @@ func TestRenderProcessTableIsStaticAndNoColorSafe(t *testing.T) {
 			t.Errorf("process table missing %q: %q", want, out)
 		}
 	}
-	for _, interactiveChrome := range []string{"pm2 monit", "navigate", "cpu: ", "net: "} {
+	for _, interactiveChrome := range []string{"pm2 monitor", "navigate", "cpu: ", "net: "} {
 		if strings.Contains(out, interactiveChrome) {
 			t.Errorf("static process table contains interactive chrome %q: %q", interactiveChrome, out)
 		}

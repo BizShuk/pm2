@@ -61,7 +61,7 @@ pm2/
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
 │   ├── logs.go               pm2 logs  — reads log files directly
-│   ├── monit.go              MonitCmd — two-pane detail/log dashboard; no -d flag
+│   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
 │   ├── daemon.go             DaemonCmd parent; attaches daemon subcommands in init()
@@ -221,9 +221,9 @@ No persistent connection — each CLI invocation is a fresh dial.
 
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
-`pm2 monit` (including alias `pm2 m`) always starts in the two-pane detail/log
+`pm2 monitor` (including alias `pm2 m`) always starts in the two-pane detail/log
 layout. The former wide-table presentation is exposed as the one-shot
-`pm2 list` output through `views.RenderProcessTable`; `monit` has no `-d` flag.
+`pm2 list` output through `views.RenderProcessTable`; `monitor` has no `-d` flag.
 `doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
 list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,

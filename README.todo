@@ -35,7 +35,7 @@
     - 做法：新增 `launch_wrapper.sh`，內部以 `/usr/libexec/path_helper` + Homebrew 路徑偵測組裝 `PATH`，再 `exec` 主程式；`.plist` 的 `ProgramArguments` 改指向此腳本。
 - [x] `第六階段：解耦 TUI 視圖與狀態 (Decouple TUI views)` — 規格 [docs/specs/tui-decoupling.md](./docs/specs/tui-decoupling.md) @2026-07-06_22:21:06 @Completed @Daemon
     - 建立 `tui/views/`，將 `view_list.go`（列表渲染）與 `view_detail.go`（詳細與日誌渲染）從 `model.go` 拆出，降低狀態流轉與渲染的耦合。
-    - 驗證：啟動 `pm2 monit`，對照渲染結果與重構前一致。
+    - 驗證：啟動 `pm2 monitor`，對照渲染結果與重構前一致。
     - 結果（2026-07-03）：提交 `4ed9e89 refactor(tui): split renderer into stateless views under tui/views/`，新建 `tui/views/{context.go, header.go, footer.go, detail.go, logs.go, list.go, layout.go, format.go}` 八個檔案。`context.go` 定義 `ViewContext` 結構（`Width`/`Height`/`Procs`/`Logs`/`MetricsLines`/`Cursor`/`Watching`/`Time`/`Notice` 等）；`layout.go` 提供 `RenderLayout` 單一入口，依終端寬度決定 single-pane 或 two-pane 編排。各 View 函式僅接受 `ViewContext` 或所需 primitive、回傳 `string`，**無狀態、無 callback、無 `tui.Model` 引用** — 純函式，便於測試。色彩 token 改由 `tui/theme/palette.go` 統一輸出，`tui/theme.go` 之 `clXxx` re-export 僅作向後相容，新程式碼直接 import `tui/theme`。`tui.Model::View()` 簡化為委派 `views.RenderLayout(ctx)`，`Update()` 仍負責事件分支與 `doRefresh()` 派發。`go test -race ./tui/...` 全綠；`go list -deps ./tui/views/... | grep 'pm2/daemon$'` 為空，TUI views 完全不依賴 daemon 套件。
 - [x] `第五階段：抽離網路傳輸層 (Extract network layer)` — 規格 [docs/specs/extract-network-layer.md](./docs/specs/extract-network-layer.md) @2026-07-06_22:21:05 @Completed @Daemon
     - 將 `Listen`/`handleConn` 遷至 `daemon/network/listener.go` 與 `handler.go`，僅依賴 `Manager` 的主動介面路由，網路與業務完全隔離。

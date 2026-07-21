@@ -1,5 +1,5 @@
 // Package views contains the stateless renderers that turn a ViewContext
-// into the strings displayed by `pm2 monit`.
+// into the strings displayed by `pm2 monitor`.
 //
 // Views in this package are pure functions: they consume a ViewContext
 // and return a string. They never mutate state and never reach into the

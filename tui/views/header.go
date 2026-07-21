@@ -11,7 +11,7 @@ import (
 // RenderHeader renders the top title bar with process count / error
 // indicator / transient action notice. Pure function — see ViewContext.
 func RenderHeader(ctx ViewContext) string {
-	name := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render("pm2 monit")
+	name := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render("pm2 monitor")
 	var info string
 	switch {
 	case ctx.Notice != "":

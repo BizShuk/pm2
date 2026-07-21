@@ -177,7 +177,7 @@ Log files are stored in `~/.pm2/logs/<name>-out.log` and `~/.pm2/logs/<name>-err
 
 ---
 
-### `pm2 monit` / `pm2 m` / `pm2 monitor` / `pm2 dashboard`
+### `pm2 monitor` / `pm2 m` / `pm2 dashboard`
 
 Open the interactive two-pane process detail and log dashboard. Refreshes every
 2 seconds. `pm2 m` opens this view directly; there is no `-d` / `--detail`
@@ -188,7 +188,7 @@ pm2 m
 ```
 
 ```text
-pm2 monit  4 processes · 10:24:51
+pm2 monitor  4 processes · 10:24:51
 ──────────────────────┬────────────────────────────────────────
  PROCESSES            │ DETAIL — api
                       │
@@ -364,7 +364,7 @@ EOF
 pm2 start ecosystem.config.json
 
 # 3. Monitor
-pm2 monit
+pm2 monitor
 
 # 4. Deploy new build
 pm2 restart api

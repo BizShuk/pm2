@@ -1,6 +1,6 @@
 // Package process contains the data types shared between the CLI,
 // the daemon, and the TUI. The format helpers in this file are the
-// single source of truth for column rendering: both `pm2 monit`
+// single source of truth for column rendering: both `pm2 monitor`
 // (via tui/views/format.go wrappers) and `pm2 list` (via cmd/list.go)
 // pull from the same primitives so the two views can never drift
 // in how a process is presented.
@@ -85,7 +85,7 @@ func CPUPercent(p ProcessInfo) string {
 	return fmt.Sprintf("%.1f%%", p.CPU)
 }
 
-// MemCell pairs FormatBytes with the not-online dash. Monit uses
+// MemCell pairs FormatBytes with the not-online dash. Monitor uses
 // the same rule.
 func MemCell(p ProcessInfo) string {
 	if p.Status != StatusOnline {

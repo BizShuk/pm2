@@ -35,7 +35,7 @@ When NOT to use:
 | `pm2 logs [name\|id]`         | Tail log files directly                      | `--lines N` to specify trailing lines                                                    |
 | `pm2 save`                    | Persist current app configs                  | Saves to `~/.pm2/dump.json`                                                              |
 | `pm2 resurrect`               | Restore saved app configs                    | Loads from `~/.pm2/dump.json`                                                            |
-| `pm2 monit` / `pm2 m`         | Launch Bubbletea terminal dashboard          | Opens the two-pane process detail/log view directly; no `-d` flag                        |
+| `pm2 monitor` / `pm2 m`       | Launch Bubbletea terminal dashboard          | Opens the two-pane process detail/log view directly; no `-d` flag                        |
 | `pm2 startup`                 | Generate OS boot startup scripts             | Creates `plist` on macOS, systemd unit on Linux                                          |
 | `pm2 daemon start`            | Spawn the daemon process                     | `--foreground` to run blocking in foreground                                             |
 | `pm2 daemon kill`             | Gracefully exit all apps and daemon          | CLI commands can still auto-start the daemon                                             |
@@ -86,17 +86,6 @@ module.exports = {
 
 ## Common Mistakes
 
-orker.js",
-cron_restart: "0 \* \* \* \*"
-}
-]
-};
-
-```
-
-## Common Mistakes
-
 - Confusing `pm2 stop` with `pm2 daemon kill` or `pm2 daemon stop`. Always double check if you want to stop a single process or the entire daemon.
 - Expecting a cron task to stop firing with `pm2 stop`. Use `pm2 pause` to suspend cron schedules.
 - Starting a script with a duplicate name but different code. Use `pm2 delete` first to remove the old entry.
-```
