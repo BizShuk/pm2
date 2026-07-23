@@ -139,6 +139,11 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 		Namespace: namespace,
 		Version:   wizard.DefaultVersion,
 		CWD:       cwd,
+		// A planner agent is a per-machine choice, not something every
+		// consumer of this ecosystem file should be handed. Publishing it
+		// as opt-in means `pm2 start owner/repo` skips it and prints the
+		// `--with <name>` command instead.
+		Optional: true,
 	}
 	a.Normalize("")
 	return a

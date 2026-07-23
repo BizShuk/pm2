@@ -12,6 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	startAll  bool
+	startWith []string
+)
+
+func init() {
+	StartCmd.Flags().BoolVar(&startAll, "all", false, "Also start apps marked optional in the ecosystem file")
+	StartCmd.Flags().StringSliceVar(&startWith, "with", nil, "Start these optional apps by name (repeatable or comma-separated)")
+}
+
 // StartCmd starts processes from a local ecosystem file or remote repository.
 var StartCmd = &cobra.Command{
 	Use:   "start [ecosystem.config.js|ecosystem.config.json|owner/repo|https://github.com/...]",
@@ -22,6 +32,9 @@ var StartCmd = &cobra.Command{
 		if len(args) > 0 {
 			target = args[0]
 		}
+		// Remote resolution rewrites target to a cache path; keep the
+		// user-facing spelling for the --with hint.
+		origTarget := target
 
 		// If target looks like a remote GitHub reference,
 		// clone/pull into ~/.pm2/repos/ and resolve to the
@@ -41,7 +54,16 @@ var StartCmd = &cobra.Command{
 			return fmt.Errorf("load config: %w", err)
 		}
 
-		for _, app := range cfg.Apps {
+		selected, skipped, err := selectApps(cfg.Apps, startAll, startWith)
+		if err != nil {
+			return err
+		}
+		for _, app := range skipped {
+			fmt.Fprintf(os.Stderr, "pm2: skipped optional app %q — start it with: pm2 start %s --with %s\n",
+				app.Name, origTarget, app.Name)
+		}
+
+		for _, app := range selected {
 			req := model.Request{
 				Command: model.CmdStart,
 				App: &model.AppStartReq{

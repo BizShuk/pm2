@@ -136,6 +136,10 @@ func DefaultApp() process.AppConfig {
 		Namespace: defaultNamespace,
 		Instances: 1,
 		Version:   DefaultVersion,
+		// Matches the interactive default for the Optional prompt in
+		// askOneApp — `--yes` must mean "the answers I would have got
+		// by pressing Enter through the wizard".
+		Optional: true,
 	}
 	a.Normalize("")
 	return a
@@ -153,8 +157,8 @@ func collectAnswers(in io.Reader, out io.Writer) ([]process.AppConfig, error) {
 		}
 		app.Normalize("")
 		apps = append(apps, app)
-		fmt.Fprintf(out, "  -> app #%d: name=%s script=%s instances=%d namespace=%s watch=%t cron=%q\n",
-			n, app.Name, app.Script, app.Instances, app.Namespace, app.Watch, app.Cron)
+		fmt.Fprintf(out, "  -> app #%d: name=%s script=%s instances=%d namespace=%s watch=%t cron=%q optional=%t\n",
+			n, app.Name, app.Script, app.Instances, app.Namespace, app.Watch, app.Cron, app.Optional)
 		if n == maxApps {
 			fmt.Fprintf(out, "(reached max of %d apps; stopping)\n", maxApps)
 			break
@@ -244,6 +248,16 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 			app.CronRestart = cron
 		}
 	}
+
+	// Install policy. Defaults to yes: a wizard-authored app is usually
+	// one machine's choice, so opt-in is the safer thing to publish. An
+	// app that must run everywhere is the deliberate answer here.
+	optional, err := promptYesNo(rdr, out,
+		"Optional? (skipped by `pm2 start` unless --all or --with names it)", true)
+	if err != nil {
+		return app, err
+	}
+	app.Optional = optional
 
 	app.Version = DefaultVersion
 	return app, nil

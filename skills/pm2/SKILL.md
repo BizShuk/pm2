@@ -25,7 +25,7 @@ When NOT to use:
 
 | Command                       | Purpose                                      | Usage / Key Flags                                                                        |
 | ----------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `pm2 start <target>`          | Start process from script/ecosystem config   | `-n, --name string`, `-i, --instances int`, `--cron-restart "expr"`, `-e, --env KEY=VAL` |
+| `pm2 start <target>`          | Start apps from an ecosystem file or GitHub repo | `--all` (include optional apps), `--with name1,name2` (opt into specific ones) |
 | `pm2 stop <name\|id\|all>`    | Stop a process gracefully                    | `SIGTERM` escalated to `SIGKILL` after 5 seconds                                         |
 | `pm2 restart <name\|id\|all>` | Restart a process                            | Closes, re-spawns, and re-registers scheduler                                            |
 | `pm2 pause <name\|id\|all>`   | Suspend a process and its cron schedule      | Removes scheduler entries; status becomes `paused`                                       |
@@ -297,6 +297,30 @@ pm2 logs "LLM Proxy" --lines 50 # last 50 lines
 pm2 daemon kill        # stop all + exit daemon (auto-respawn OK)
 pm2 daemon stop        # stop all + exit daemon + block auto-respawn
 ```
+
+### Optional apps
+
+An app may set `optional: true` to become opt-in. `pm2 start` skips it and
+prints the command to enable it; everything else in the file still starts.
+This is useful when a repo ships both mandatory tasks (a daily report) and
+tasks a given machine may not want (a planner agent).
+
+```javascript
+module.exports = {
+    apps: [
+        { name: "daily-report", script: "./report.sh", cron: "0 9 * * *" },
+        { name: "planner", script: "./planner.sh", optional: true }
+    ]
+};
+```
+
+- `pm2 start ./ecosystem.config.js` — starts `daily-report` only
+- `pm2 start ./ecosystem.config.js --with planner` — also starts `planner`
+- `pm2 start ./ecosystem.config.js --all` — starts every app
+
+`--with` matches `name` or `namespace:name`. A name that matches no app is an
+error, so a typo does not silently leave the app unstarted. The same rules
+apply to remote installs (`pm2 start owner/repo`).
 
 ## Common Mistakes
 

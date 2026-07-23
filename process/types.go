@@ -59,6 +59,14 @@ type AppConfig struct {
 	// suspended via `pm2 pause`. Persisted across save/resurrect so a daemon
 	// restart does not silently re-enable a cron schedule the user paused.
 	Paused bool `json:"paused,omitempty"`
+	// Optional marks an app as opt-in: `pm2 start` skips it unless the
+	// caller passes --all or names it via --with. The zero value (false)
+	// means required, so an app that says nothing is always installed.
+	//
+	// This is an *install policy* field, not a runtime one — it is read
+	// once by the CLI when selecting which apps to send to the daemon and
+	// has no effect on a process that is already registered.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // Normalize fills in defaults for an AppConfig and resolves relative

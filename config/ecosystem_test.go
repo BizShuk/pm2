@@ -65,3 +65,45 @@ func TestResolveScriptPath(t *testing.T) {
 		t.Errorf("Expected %q, got %q", nonExistentCmd, res)
 	}
 }
+
+// TestLoadOptionalField pins the `optional` install-policy flag across
+// both loader paths. The .js path crosses the goja boundary
+// (exports -> JSON -> AppConfig), so a missing json tag would silently
+// drop the field and make every optional app install by default.
+func TestLoadOptionalField(t *testing.T) {
+	dir := t.TempDir()
+
+	jsPath := filepath.Join(dir, "ecosystem.config.js")
+	js := `module.exports = { apps: [
+    { name: "daily-report", script: "/bin/echo" },
+    { name: "planner", script: "/bin/echo", optional: true }
+] };`
+	if err := os.WriteFile(jsPath, []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonPath := filepath.Join(dir, "ecosystem.config.json")
+	jsonSrc := `{"apps":[
+    {"name":"daily-report","script":"/bin/echo"},
+    {"name":"planner","script":"/bin/echo","optional":true}
+]}`
+	if err := os.WriteFile(jsonPath, []byte(jsonSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{jsPath, jsonPath} {
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", filepath.Base(path), err)
+		}
+		if len(cfg.Apps) != 2 {
+			t.Fatalf("%s: got %d apps, want 2", filepath.Base(path), len(cfg.Apps))
+		}
+		if cfg.Apps[0].Optional {
+			t.Errorf("%s: daily-report should default to required", filepath.Base(path))
+		}
+		if !cfg.Apps[1].Optional {
+			t.Errorf("%s: planner should be optional", filepath.Base(path))
+		}
+	}
+}

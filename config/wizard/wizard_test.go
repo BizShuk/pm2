@@ -233,8 +233,9 @@ func TestCollectAnswersSingle(t *testing.T) {
 	//   6. watch
 	//   7. env (blank → finish; reads 1 line)
 	//   8. cron (blank → skip restart)
+	//   9. optional (blank → default true)
 	// Then collectAnswers prompt: "Add another app?" → "n"
-	// Total: 9 lines of input.
+	// Total: 10 lines of input.
 	lines := []string{
 		"name-only-one", // script
 		"",              // name (derive)
@@ -244,6 +245,7 @@ func TestCollectAnswersSingle(t *testing.T) {
 		"",              // watch
 		"",              // env (blank → finish)
 		"",              // cron
+		"",              // optional (blank → default yes)
 		"n",             // add another? → no
 	}
 	in := strings.NewReader(strings.Join(lines, "\n") + "\n")
@@ -275,12 +277,16 @@ func TestCollectAnswersSingle(t *testing.T) {
 	if got.Cron != "" || got.CronRestart != "" {
 		t.Errorf("Expected no cron, got cron=%q restart=%q", got.Cron, got.CronRestart)
 	}
+	// The Optional prompt defaults to yes, so a blank answer must opt in.
+	if !got.Optional {
+		t.Errorf("Expected optional true on a blank answer")
+	}
 }
 
 // TestCollectAnswersMulti covers two apps in a row.
 func TestCollectAnswersMulti(t *testing.T) {
-	// Each app: 8 lines (script, name, args, namespace, instances, watch,
-	// env-blank, cron-blank). Between apps: 1 line "y" / "n".
+	// Each app: 9 lines (script, name, args, namespace, instances, watch,
+	// env-blank, cron-blank, optional). Between apps: 1 line "y" / "n".
 	input := strings.Join([]string{
 		"first.js",  // 1: script
 		"",          // 2: name
@@ -290,6 +296,7 @@ func TestCollectAnswersMulti(t *testing.T) {
 		"",          // 6: watch
 		"",          // 7: env (blank → finish)
 		"",          // 8: cron
+		"",          // 9: optional (blank → default yes)
 		"y",         // add another? → yes
 		"second.js", // 1: script
 		"second",    // 2: name
@@ -299,6 +306,7 @@ func TestCollectAnswersMulti(t *testing.T) {
 		"",          // 6: watch
 		"",          // 7: env
 		"",          // 8: cron
+		"n",         // 9: optional → explicit no
 		"n",         // add another? → no
 	}, "\n")
 	in := strings.NewReader(input + "\n")
@@ -319,6 +327,13 @@ func TestCollectAnswersMulti(t *testing.T) {
 	}
 	if apps[1].Name != "second" {
 		t.Errorf("apps[1].Name = %q, want %q", apps[1].Name, "second")
+	}
+	// Per-app answers must not leak: #1 took the default (yes), #2 said no.
+	if !apps[0].Optional {
+		t.Errorf("apps[0].Optional = false, want true (blank → default)")
+	}
+	if apps[1].Optional {
+		t.Errorf("apps[1].Optional = true, want false (explicit 'n')")
 	}
 }
 

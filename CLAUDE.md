@@ -52,7 +52,10 @@ pm2/
 │                             gosdk/cmd.ConfigCmd registration, metric hook, Execute
 ├── cmd/                      cobra commands (CLI layer)
 │   ├── root.go               pm2Home initialization + socketPath()
-│   ├── start.go              StartCmd — builds AppStartReq, sends to daemon
+│   ├── start.go              StartCmd — builds AppStartReq, sends to daemon;
+│   │                         --all / --with select optional apps
+│   ├── start_select.go       selectApps() — pure install-policy filter over
+│   │                         AppConfig.Optional (required vs opt-in)
 │   ├── stop.go               StopCmd
 │   ├── restart.go            RestartCmd
 │   ├── pause.go              PauseCmd
@@ -205,6 +208,37 @@ replacing the entry or registering any schedule, and reaps the racing child in
 the background. Because both the guard and `PauseByName`'s `paused=true` mutate
 under the same lock, the decision is atomic (regression test:
 `TestPauseDuringCronFireLeavesNoSchedule`).
+
+### Install policy: required vs optional apps
+
+`process.AppConfig.Optional` marks an app as opt-in. The zero value
+(`false`) means required, so an ecosystem file that says nothing about
+`optional` behaves exactly as before the field existed — every app starts.
+
+`pm2 start` applies the policy through `cmd.selectApps()`
+(`cmd/start_select.go`), a pure function over the loaded app list:
+
+| Input | Result |
+| ----- | ------ |
+| `optional: false` (default) | always started |
+| `optional: true`, no flag | skipped, with a `--with <name>` hint on stderr |
+| `optional: true`, `--all` | started |
+| `optional: true`, `--with <name>` | started (matches `name` or `namespace:name`) |
+| `--with` naming no app at all | error — a typo must not silently leave an app unstarted |
+
+Two boundaries worth keeping:
+
+- The filter lives entirely in the CLI. The daemon sends one
+  `AppStartReq` per app and has no concept of install policy, so the wire
+  protocol is unchanged and `Optional` is inert for a process that is
+  already registered.
+- The policy is applied uniformly to local and remote ecosystem files.
+  `optional` is a property of the app, not of how the config was fetched;
+  making it remote-only would be a surprising special case.
+
+`Optional` rides along in `dump.json` via `AppConfig`, but `resurrect`
+only restores processes that were actually started, so a skipped optional
+app never reappears on daemon restart.
 
 ### Relative path resolution
 

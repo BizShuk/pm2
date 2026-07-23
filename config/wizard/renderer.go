@@ -263,6 +263,9 @@ func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	if a.Watch {
 		b.WriteString("            watch: true,\n")
 	}
+	if a.Optional {
+		b.WriteString("            optional: true,\n")
+	}
 	if len(a.Env) > 0 {
 		b.WriteString("            env: {\n")
 		keys := make([]string, 0, len(a.Env))
