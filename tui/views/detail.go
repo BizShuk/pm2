@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -21,11 +22,15 @@ func RenderDetail(p process.ProcessInfo, w int) string {
 	if len(p.Args) > 0 {
 		scriptVal += " " + strings.Join(p.Args, " ")
 	}
+	cwdVal := p.CWD
+	if cwdVal == "" && p.ConfigFile != "" {
+		cwdVal = filepath.Dir(p.ConfigFile)
+	}
 
 	type row struct{ k, v, sty string }
 	rows := []row{
 		{"script", Crop(scriptVal, w-21), "path"},
-		{"cwd", Crop(p.CWD, w-21), "path"},
+		{"cwd", Crop(cwdVal, w-21), "path"},
 		{"namespace", CropRight(p.Namespace, w-21), ""},
 		{"user", CropRight(p.User, w-21), ""},
 		{"status", CropRight(string(p.Status), w-21), "status"},

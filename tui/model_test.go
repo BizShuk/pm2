@@ -72,6 +72,23 @@ func TestBuildDetailShowsCWD(t *testing.T) {
 	}
 }
 
+func TestBuildDetailShowsExecutionFolderForLegacyTask(t *testing.T) {
+	p := process.ProcessInfo{
+		AppConfig: process.AppConfig{
+			Name:       "legacy-app",
+			Script:     "/usr/bin/worker",
+			ConfigFile: "/srv/legacy-app/ecosystem.config.js",
+		},
+		Status: process.StatusOnline,
+	}
+
+	detail := views.RenderDetail(p, 100)
+
+	if !strings.Contains(detail, "/srv/legacy-app") {
+		t.Errorf("legacy task detail missing inferred execution folder: %q", detail)
+	}
+}
+
 func TestRenderRightPaneHidesLogsWhenDetailUsesFullHeight(t *testing.T) {
 	ctx := views.ViewContext{
 		Procs: []process.ProcessInfo{{
