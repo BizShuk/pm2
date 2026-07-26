@@ -56,15 +56,17 @@ func (e *Executor) HomeDir() string { return e.homeDir }
 //
 // Fields:
 //   - Cmd:     the started *exec.Cmd (Process.Pid populated after Start)
-//              nil if req.Cron != "" and !req.CronTriggered (cron task)
+//     nil if req.Cron != "" and !req.CronTriggered (cron task)
 //   - OutF:    opened *os.File for stdout (caller passes to Watch)
-//              nil if cron task
+//     nil if cron task
 //   - ErrF:    opened *os.File for stderr (caller passes to Watch)
-//              nil if cron task
+//     nil if cron task
 //   - Watcher: fsnotify.Watcher for the script file (caller passes to Watch)
-//              nil if req.Watch == false OR cron task
+//     nil if req.Watch == false OR cron task
 //   - LogFile: resolved absolute path (always set)
 //   - ErrFile: resolved absolute path (always set)
+//   - CWD:     effective absolute execution folder (always set when the
+//     daemon working directory can be resolved)
 type StartResult struct {
 	Cmd     *exec.Cmd
 	OutF    *os.File
@@ -72,6 +74,7 @@ type StartResult struct {
 	Watcher *fsnotify.Watcher
 	LogFile string
 	ErrFile string
+	CWD     string
 }
 
 // Start resolves log paths, opens log files, builds the *exec.Cmd via
@@ -115,6 +118,8 @@ func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func
 		return nil, err
 	}
 
+	workDir := resolveWorkDir(req)
+
 	isCronTask := req.Cron != "" && !req.CronTriggered
 	isPaused := req.Paused
 	if isCronTask || isPaused {
@@ -127,22 +132,7 @@ func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func
 		// open while idle.
 		outF.Close()
 		errF.Close()
-		return &StartResult{LogFile: logFile, ErrFile: errFile}, nil
-	}
-
-	// Resolve the working directory: req.CWD wins; otherwise fall back
-	// to the directory of the originating ecosystem.config.js.
-	workDir := req.CWD
-	if workDir == "" {
-		workDir = filepath.Dir(req.ConfigFile)
-	}
-	if workDir != "" {
-		if _, err := os.Stat(workDir); err != nil {
-			// Fall back to the daemon's own cwd so os.StartProcess
-			// doesn't fail with ENOENT (e.g. tests pass a fake
-			// /path/to/ecosystem.config.js).
-			workDir = ""
-		}
+		return &StartResult{LogFile: logFile, ErrFile: errFile, CWD: workDir}, nil
 	}
 
 	// Prefer the CLI's environment snapshot; fall back to daemon's.
@@ -180,7 +170,27 @@ func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func
 		Watcher: watcher,
 		LogFile: logFile,
 		ErrFile: errFile,
+		CWD:     workDir,
 	}, nil
+}
+
+func resolveWorkDir(req *model.AppStartReq) string {
+	workDir := req.CWD
+	if workDir == "" {
+		workDir = filepath.Dir(req.ConfigFile)
+	}
+	if _, err := os.Stat(workDir); err == nil {
+		if absDir, absErr := filepath.Abs(workDir); absErr == nil {
+			return absDir
+		}
+		return workDir
+	}
+
+	// Preserve the existing fallback when a configured directory does not
+	// exist, but make the inherited daemon cwd explicit so ProcessInfo and
+	// `pm2 m` report the folder the child actually executes in.
+	cwd, _ := os.Getwd()
+	return cwd
 }
 
 // Watch blocks on cmd.Wait(), then:

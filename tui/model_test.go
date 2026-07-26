@@ -52,6 +52,45 @@ func TestBuildDetailScriptNoArgs(t *testing.T) {
 	}
 }
 
+func TestBuildDetailShowsCWD(t *testing.T) {
+	p := process.ProcessInfo{
+		AppConfig: process.AppConfig{
+			Name:   "test-app",
+			Script: "/srv/api/bin/server",
+			CWD:    "/srv/api",
+		},
+		Status: process.StatusOnline,
+	}
+
+	detail := views.RenderDetail(p, 100)
+
+	if !strings.Contains(detail, "cwd") {
+		t.Errorf("detail missing cwd label: %q", detail)
+	}
+	if !strings.Contains(detail, "/srv/api") {
+		t.Errorf("detail missing cwd value: %q", detail)
+	}
+}
+
+func TestRenderRightPaneHidesLogsWhenDetailUsesFullHeight(t *testing.T) {
+	ctx := views.ViewContext{
+		Procs: []process.ProcessInfo{{
+			AppConfig: process.AppConfig{
+				Name:   "test-app",
+				Script: "/srv/api/bin/server",
+				CWD:    "/srv/api",
+			},
+			Status: process.StatusOnline,
+		}},
+	}
+
+	out := views.RenderRightPane(ctx, 80, 20)
+
+	if strings.Contains(out, "LOGS —") {
+		t.Errorf("20-row pane should contain detail only after adding cwd: %q", out)
+	}
+}
+
 func TestProcessSorting(t *testing.T) {
 	m := New("mock_socket", false)
 

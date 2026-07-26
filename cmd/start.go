@@ -18,8 +18,8 @@ var (
 )
 
 func init() {
-	StartCmd.Flags().BoolVar(&startAll, "all", false, "Also start apps marked optional in the ecosystem file")
-	StartCmd.Flags().StringSliceVar(&startWith, "with", nil, "Start these optional apps by name (repeatable or comma-separated)")
+	StartCmd.Flags().BoolVar(&startAll, "all", false, "Start optional apps instead of registering them paused")
+	StartCmd.Flags().StringSliceVar(&startWith, "with", nil, "Start these optional apps instead of registering them paused (repeatable or comma-separated)")
 }
 
 // StartCmd starts processes from a local ecosystem file or remote repository.
@@ -32,9 +32,6 @@ var StartCmd = &cobra.Command{
 		if len(args) > 0 {
 			target = args[0]
 		}
-		// Remote resolution rewrites target to a cache path; keep the
-		// user-facing spelling for the --with hint.
-		origTarget := target
 
 		// If target looks like a remote GitHub reference,
 		// clone/pull into ~/.pm2/repos/ and resolve to the
@@ -54,13 +51,17 @@ var StartCmd = &cobra.Command{
 			return fmt.Errorf("load config: %w", err)
 		}
 
-		selected, skipped, err := selectApps(cfg.Apps, startAll, startWith)
+		selected, paused, err := selectApps(cfg.Apps, startAll, startWith)
 		if err != nil {
 			return err
 		}
-		for _, app := range skipped {
-			fmt.Fprintf(os.Stderr, "pm2: skipped optional app %q — start it with: pm2 start %s --with %s\n",
-				app.Name, origTarget, app.Name)
+		for _, app := range paused {
+			processKey := app.Name
+			if app.Namespace != "" {
+				processKey = app.Namespace + ":" + app.Name
+			}
+			fmt.Fprintf(os.Stderr, "pm2: optional app %q will be registered paused — resume it with: pm2 resume %s\n",
+				app.Name, processKey)
 		}
 
 		for _, app := range selected {
@@ -95,7 +96,9 @@ var StartCmd = &cobra.Command{
 			var infos []process.ProcessInfo
 			if err := json.Unmarshal(resp.Payload, &infos); err == nil {
 				for _, info := range infos {
-					if info.PID <= 0 {
+					if info.Status == process.StatusPaused {
+						fmt.Printf("[%d] %s registered (paused)\n", info.ID, info.Name)
+					} else if info.PID <= 0 {
 						fmt.Printf("[%d] %s scheduled\n", info.ID, info.Name)
 					} else {
 						fmt.Printf("[%d] %s started (pid=%d)\n", info.ID, info.Name, info.PID)

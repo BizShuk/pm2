@@ -105,5 +105,11 @@ func TestLoadOptionalField(t *testing.T) {
 		if !cfg.Apps[1].Optional {
 			t.Errorf("%s: planner should be optional", filepath.Base(path))
 		}
+		for _, app := range cfg.Apps {
+			if app.CWD != dir {
+				t.Errorf("%s: %s CWD = %q, want config directory %q",
+					filepath.Base(path), app.Name, app.CWD, dir)
+			}
+		}
 	}
 }

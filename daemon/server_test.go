@@ -325,6 +325,48 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 	}
 }
 
+func TestStartAppReportsEffectiveExecutionCWD(t *testing.T) {
+	testDir := testDir(t)
+	pm := NewProcessManager(testDir)
+	actualCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get daemon cwd: %v", err)
+	}
+
+	outPath := filepath.Join(testDir, "effective-cwd.out")
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace: "default",
+			Name:      "effective-cwd",
+			Script:    "pwd",
+			Args:      []string{"> " + outPath},
+			CWD:       filepath.Join(testDir, "missing"),
+		},
+	}
+	infos, err := pm.StartApp(req)
+	if err != nil {
+		t.Fatalf("start app: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("start app returned %d infos, want 1", len(infos))
+	}
+
+	var data []byte
+	for range 50 {
+		if b, readErr := os.ReadFile(outPath); readErr == nil && len(b) > 0 {
+			data = b
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if executedAt := strings.TrimSpace(string(data)); executedAt != actualCWD {
+		t.Fatalf("task executed at %q, want %q", executedAt, actualCWD)
+	}
+	if infos[0].CWD != actualCWD {
+		t.Fatalf("ProcessInfo.CWD = %q, want actual execution folder %q", infos[0].CWD, actualCWD)
+	}
+}
+
 // TestKillAllStopsEveryProcess verifies the kill command's core: all managed
 // processes are stopped and their PIDs cleared.
 func TestKillAllStopsEveryProcess(t *testing.T) {
@@ -1613,6 +1655,41 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 	_ = pm2.StopByName("default:nightly-paused")
 }
 
+func TestStartAppRegistersOptionalRequestAsPaused(t *testing.T) {
+	pm := NewProcessManager(testDir(t))
+	req := &model.AppStartReq{
+		AppConfig: process.AppConfig{
+			Namespace: "default",
+			Name:      "optional-worker",
+			Script:    "/bin/sleep",
+			Args:      []string{"60"},
+			Optional:  true,
+			Paused:    true,
+		},
+	}
+
+	infos, err := pm.StartApp(req)
+	if err != nil {
+		t.Fatalf("start optional app: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("start optional app returned %d infos, want 1", len(infos))
+	}
+	info := infos[0]
+	if info.Status != process.StatusPaused {
+		t.Errorf("status = %s, want %s", info.Status, process.StatusPaused)
+	}
+	if info.PID != 0 {
+		t.Errorf("PID = %d, want 0 for paused registration", info.PID)
+	}
+	if !info.Optional {
+		t.Error("registered process dropped Optional metadata")
+	}
+	if got := pm.scheduler.EntryCount(); got != 0 {
+		t.Errorf("paused optional process registered %d schedules, want 0", got)
+	}
+}
+
 // TestPauseResumeRunningProcess verifies pause stops a live process (PID
 // cleared, status paused) and resume brings it back online.
 func TestPauseResumeRunningProcess(t *testing.T) {
@@ -1782,6 +1859,4 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 		t.Errorf("race-restart vanished from registry after concurrent restarts")
 	}
 }
-
-
 

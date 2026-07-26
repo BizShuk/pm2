@@ -14,7 +14,7 @@ import (
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 17 // rows in detail section (excluding header)
+	detailRows = 18 // rows in detail section (excluding header)
 )
 
 type SortField string
@@ -372,4 +372,3 @@ func (m Model) View() string {
 		LogFocus:   m.logFocus,
 	})
 }
-

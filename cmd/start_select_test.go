@@ -23,67 +23,90 @@ func names(apps []process.AppConfig) []string {
 	return out
 }
 
-func TestSelectAppsDefaultsToRequiredOnly(t *testing.T) {
-	selected, skipped, err := selectApps(fixtureApps(), false, nil)
+func TestSelectAppsDefaultsToRegisterOptionalAsPaused(t *testing.T) {
+	selected, paused, err := selectApps(fixtureApps(), false, nil)
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if got := strings.Join(names(selected), ","); got != "daily-report" {
-		t.Errorf("selected = %q, want %q", got, "daily-report")
+	if len(selected) != 3 {
+		t.Fatalf("selected = %q, want all apps registered", strings.Join(names(selected), ","))
 	}
-	if got := strings.Join(names(skipped), ","); got != "planner,auditor" {
-		t.Errorf("skipped = %q, want %q", got, "planner,auditor")
+	if got := strings.Join(names(paused), ","); got != "planner,auditor" {
+		t.Errorf("paused = %q, want %q", got, "planner,auditor")
+	}
+	if selected[0].Paused {
+		t.Error("required app should start active")
+	}
+	if !selected[1].Paused || !selected[2].Paused {
+		t.Errorf("optional apps should register paused: %+v", selected)
 	}
 }
 
 func TestSelectAppsAllIncludesOptional(t *testing.T) {
-	selected, skipped, err := selectApps(fixtureApps(), true, nil)
+	selected, paused, err := selectApps(fixtureApps(), true, nil)
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
 	if len(selected) != 3 {
 		t.Errorf("selected = %v, want all 3", names(selected))
 	}
-	if len(skipped) != 0 {
-		t.Errorf("skipped = %v, want none", names(skipped))
+	if len(paused) != 0 {
+		t.Errorf("paused = %v, want none", names(paused))
+	}
+	for _, app := range selected {
+		if app.Paused {
+			t.Errorf("--all left %q paused", app.Name)
+		}
 	}
 }
 
 func TestSelectAppsWithOptsInByName(t *testing.T) {
-	selected, skipped, err := selectApps(fixtureApps(), false, []string{"planner"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"planner"})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if got := strings.Join(names(selected), ","); got != "daily-report,planner" {
-		t.Errorf("selected = %q, want %q", got, "daily-report,planner")
+	if len(selected) != 3 {
+		t.Fatalf("selected = %q, want all apps registered", strings.Join(names(selected), ","))
 	}
-	if got := strings.Join(names(skipped), ","); got != "auditor" {
-		t.Errorf("skipped = %q, want %q", got, "auditor")
+	if got := strings.Join(names(paused), ","); got != "auditor" {
+		t.Errorf("paused = %q, want %q", got, "auditor")
+	}
+	if selected[1].Paused {
+		t.Error("--with planner should start planner active")
+	}
+	if !selected[2].Paused {
+		t.Error("unnamed optional auditor should register paused")
 	}
 }
 
 func TestSelectAppsWithAcceptsNamespacedKey(t *testing.T) {
-	selected, _, err := selectApps(fixtureApps(), false, []string{"infra:auditor"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"infra:auditor"})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if got := strings.Join(names(selected), ","); got != "daily-report,auditor" {
-		t.Errorf("selected = %q, want %q", got, "daily-report,auditor")
+	if len(selected) != 3 {
+		t.Fatalf("selected = %q, want all apps registered", strings.Join(names(selected), ","))
+	}
+	if got := strings.Join(names(paused), ","); got != "planner" {
+		t.Errorf("paused = %q, want planner", got)
+	}
+	if selected[2].Paused {
+		t.Error("--with infra:auditor should start auditor active")
 	}
 }
 
 // Naming a required app is redundant but must not be an error — it is
 // already selected, so --with is simply a no-op for it.
 func TestSelectAppsWithRequiredAppIsNoOp(t *testing.T) {
-	selected, skipped, err := selectApps(fixtureApps(), false, []string{"daily-report"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"daily-report"})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if got := strings.Join(names(selected), ","); got != "daily-report" {
-		t.Errorf("selected = %q, want %q", got, "daily-report")
+	if got := strings.Join(names(selected), ","); got != "daily-report,planner,auditor" {
+		t.Errorf("selected = %q, want all apps registered", got)
 	}
-	if len(skipped) != 2 {
-		t.Errorf("skipped = %v, want 2", names(skipped))
+	if len(paused) != 2 {
+		t.Errorf("paused = %v, want 2", names(paused))
 	}
 }
 
@@ -104,11 +127,11 @@ func TestSelectAppsNoOptionalIsUnchanged(t *testing.T) {
 		{Name: "api", Script: "./api.sh"},
 		{Name: "worker", Script: "./worker.sh"},
 	}
-	selected, skipped, err := selectApps(apps, false, nil)
+	selected, paused, err := selectApps(apps, false, nil)
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if len(selected) != 2 || len(skipped) != 0 {
-		t.Errorf("selected = %v, skipped = %v", names(selected), names(skipped))
+	if len(selected) != 2 || len(paused) != 0 {
+		t.Errorf("selected = %v, paused = %v", names(selected), names(paused))
 	}
 }

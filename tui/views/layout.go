@@ -57,10 +57,10 @@ func RenderRightPane(ctx ViewContext, w, h int) string {
 		return RenderLogs(p.Name, ctx.Logs, w, h)
 	}
 	detail := RenderDetail(p, w)
-	if h < 20 {
+	if h < detailRows+3 {
 		return detail
 	}
-	logH := h - detailRows - 3 // detailRows (17) + detail header (1) + divider newline (1) + log header (1) = 20
+	logH := h - detailRows - 3 // detail rows + detail header + divider newline + log header
 	logs := RenderLogs(p.Name, ctx.Logs, w, logH)
 	return detail + "\n" + logs
 }

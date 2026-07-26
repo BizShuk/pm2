@@ -59,13 +59,14 @@ type AppConfig struct {
 	// suspended via `pm2 pause`. Persisted across save/resurrect so a daemon
 	// restart does not silently re-enable a cron schedule the user paused.
 	Paused bool `json:"paused,omitempty"`
-	// Optional marks an app as opt-in: `pm2 start` skips it unless the
-	// caller passes --all or names it via --with. The zero value (false)
-	// means required, so an app that says nothing is always installed.
+	// Optional marks an app as inactive by default: `pm2 start` registers
+	// it paused unless the caller passes --all or names it via --with. The
+	// zero value (false) means required, so an app that says nothing starts
+	// immediately.
 	//
-	// This is an *install policy* field, not a runtime one — it is read
-	// once by the CLI when selecting which apps to send to the daemon and
-	// has no effect on a process that is already registered.
+	// This is an install policy field. The CLI translates it into Paused on
+	// the start request; after registration, pause/resume controls runtime
+	// state.
 	Optional bool `json:"optional,omitempty"`
 }
 
@@ -118,6 +119,9 @@ func (a *AppConfig) Normalize(baseDir string) {
 		} else {
 			a.ConfigFile = "ecosystem.config.js"
 		}
+	}
+	if a.CWD == "" && baseDir != "" {
+		a.CWD = baseDir
 	}
 	if baseDir != "" {
 		a.Script = ResolveScriptPath(baseDir, a.Script)

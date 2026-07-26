@@ -53,9 +53,9 @@ pm2/
 ├── cmd/                      cobra commands (CLI layer)
 │   ├── root.go               pm2Home initialization + socketPath()
 │   ├── start.go              StartCmd — builds AppStartReq, sends to daemon;
-│   │                         --all / --with select optional apps
-│   ├── start_select.go       selectApps() — pure install-policy filter over
-│   │                         AppConfig.Optional (required vs opt-in)
+│   │                         optional apps register paused by default
+│   ├── start_select.go       selectApps() — maps AppConfig.Optional to Paused;
+│   │                         --all / --with opt selected apps into active start
 │   ├── stop.go               StopCmd
 │   ├── restart.go            RestartCmd
 │   ├── pause.go              PauseCmd
@@ -211,9 +211,12 @@ under the same lock, the decision is atomic (regression test:
 
 ### Install policy: required vs optional apps
 
-`process.AppConfig.Optional` marks an app as opt-in. The zero value
-(`false`) means required, so an ecosystem file that says nothing about
+`process.AppConfig.Optional` marks an app as inactive by default. The zero
+value (`false`) means required, so an ecosystem file that says nothing about
 `optional` behaves exactly as before the field existed — every app starts.
+An optional app is still registered; the CLI sets `Paused = true` on its
+`AppStartReq`, so the daemon creates the registry entry without spawning a
+child or registering a cron schedule.
 
 `pm2 start` applies the policy through `cmd.selectApps()`
 (`cmd/start_select.go`), a pure function over the loaded app list:
@@ -221,29 +224,31 @@ under the same lock, the decision is atomic (regression test:
 | Input | Result |
 | ----- | ------ |
 | `optional: false` (default) | always started |
-| `optional: true`, no flag | skipped, with a `--with <name>` hint on stderr |
-| `optional: true`, `--all` | started |
-| `optional: true`, `--with <name>` | started (matches `name` or `namespace:name`) |
-| `--with` naming no app at all | error — a typo must not silently leave an app unstarted |
+| `optional: true`, no flag | registered with `StatusPaused`, PID 0, no scheduler entry |
+| `optional: true`, `--all` | registered and started |
+| `optional: true`, `--with <name>` | named app starts; other optional apps register paused |
+| `--with` naming no app at all | error — a typo must not silently leave an app paused |
 
 Two boundaries worth keeping:
 
-- The filter lives entirely in the CLI. The daemon sends one
-  `AppStartReq` per app and has no concept of install policy, so the wire
-  protocol is unchanged and `Optional` is inert for a process that is
-  already registered.
+- Policy mapping lives in the CLI: every app produces one `AppStartReq`, and
+  unselected optional apps carry `Paused = true`. The daemon only implements
+  the existing pause lifecycle; it preserves `Optional` as metadata but does
+  not interpret it after registration.
 - The policy is applied uniformly to local and remote ecosystem files.
   `optional` is a property of the app, not of how the config was fetched;
   making it remote-only would be a surprising special case.
 
-`Optional` rides along in `dump.json` via `AppConfig`, but `resurrect`
-only restores processes that were actually started, so a skipped optional
-app never reappears on daemon restart.
+`Optional` and the derived paused state ride along in `dump.json` via
+`AppConfig`. `resurrect` restores the optional entry as paused, so a daemon
+restart cannot silently activate it.
 
 ### Relative path resolution
 
-`config.Load()` resolves relative `script` paths relative to the config file's directory
-at parse time (in the CLI process). The daemon always receives absolute paths.
+`config.Load()` resolves relative `script` paths relative to the config file's
+directory at parse time (in the CLI process). The same directory becomes the
+default `CWD`, so `ProcessInfo.CWD` is both the effective running folder and
+the value shown in `pm2 m`. The daemon always receives absolute paths.
 
 ### RPC protocol
 
@@ -256,7 +261,8 @@ No persistent connection — each CLI invocation is a fresh dial.
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
 `pm2 monitor` (including alias `pm2 m`) always starts in the two-pane detail/log
-layout. The former wide-table presentation is exposed as the one-shot
+layout. `views.RenderDetail` shows the selected task's `cwd` directly below
+its script. The former wide-table presentation is exposed as the one-shot
 `pm2 list` output through `views.RenderProcessTable`; `monitor` has no `-d` flag.
 `doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
 list updates without waiting for the next tick. The `p` key is a pause/resume

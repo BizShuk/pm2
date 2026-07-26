@@ -44,6 +44,8 @@ Flags:
   -i, --instances int         number of parallel instances
       --cron-restart string   cron schedule for automatic restart
   -e, --env stringArray       environment variable  KEY=VAL  (repeatable)
+      --all                   start optional apps instead of registering them paused
+      --with strings          start named optional apps instead of registering them paused
 ```
 
 Examples:
@@ -70,6 +72,18 @@ pm2 start ./ecosystem.config.js
 ```
 
 Process identity is `name + script path`. Re-starting with the same name and script replaces the existing process. Re-starting with the same name but a different script returns an error — use `pm2 delete` first.
+
+An ecosystem app with `optional: true` is always registered, but starts in
+`paused` state by default. It has no child process or active cron schedule until
+resumed. Use `--all` to start every optional app immediately, or `--with
+<name>` to start selected optional apps:
+
+```bash
+pm2 start ./ecosystem.config.js                # optional apps register paused
+pm2 resume default:planner                     # activate one registered app
+pm2 start ./ecosystem.config.js --with planner # start one optional app now
+pm2 start ./ecosystem.config.js --all          # start every optional app now
+```
 
 ---
 
@@ -193,9 +207,10 @@ pm2 monitor  4 processes · 10:24:51
  PROCESSES            │ DETAIL — api
                       │
  ● api         3d2h   │ script    /home/user/myapp/bin/server
- ● worker-0    1d4h   │ status    online
- ◌ worker-1    0s     │ uptime    3 days  14:22:11
- ○ nightly     —      │ started   2026-06-09  19:31:04
+ ● worker-0    1d4h   │ cwd       /home/user/myapp
+ ◌ worker-1    0s     │ status    online
+ ○ nightly     —      │ uptime    3 days  14:22:11
+                      │ started   2026-06-09  19:31:04
                       │ restarts  0 / 15 max
                       │ cron      0 3 * * *  →  next 06-13 03:00
                       │ stdout    ~/.pm2/logs/api-out.log
@@ -314,6 +329,8 @@ module.exports = {
 | `error_file`   | string   | `~/.pm2/logs/<name>-err.log`  | stderr path                                    |
 | `config_dir`   | string   | `"~/.config/<name>/"`         | Base directory for log files                   |
 | `config_file`  | string   | `"<cwd>/ecosystem.config.js"` | Path to ecosystem config file (auto-set)       |
+| `cwd`          | string   | ecosystem file directory      | Working directory used to run the process      |
+| `optional`     | bool     | `false`                       | Register paused unless selected by start flags |
 
 ---
 

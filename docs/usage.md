@@ -321,7 +321,9 @@ cd /tmp && pm2 start /home/user/myapp/ecosystem.config.json  # same result
 ```
 
 > Paths are resolved at parse time in the CLI process before being sent to
-> the daemon as absolute paths. The daemon always receives absolute paths.
+> the daemon as absolute paths. When `cwd` is omitted, the config file's
+> directory is also used as the process working directory and is shown in
+> `pm2 m`. The daemon always receives absolute paths.
 
 ---
 
