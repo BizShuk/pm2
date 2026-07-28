@@ -905,7 +905,7 @@ func TestRunInteractiveYesAllSynthesizesDefaultApp(t *testing.T) {
 		ErrOut: &bytes.Buffer{},
 		YesAll: true,
 	}
-	if err := RunInteractive(ctx, RunOptions{Output: out}); err != nil {
+	if err := RunInteractive(ctx, WriteOptions{Output: out}); err != nil {
 		t.Fatalf("RunInteractive: %v", err)
 	}
 	data, err := os.ReadFile(out)
@@ -935,7 +935,7 @@ func TestRunInteractiveYesAllSynthesizesDefaultApp(t *testing.T) {
 // before any I/O happens.
 func TestRunInteractiveRejectsBadFormat(t *testing.T) {
 	ctx := WizardContext{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
-	err := RunInteractive(ctx, RunOptions{Format: "yaml"})
+	err := RunInteractive(ctx, WriteOptions{Format: "yaml"})
 	if err == nil {
 		t.Fatal("expected error for invalid format")
 	}
@@ -957,7 +957,7 @@ func TestRunInteractiveHonorsFinalWriteAnswer(t *testing.T) {
 		ErrOut: &bytes.Buffer{},
 	}
 
-	if err := RunInteractive(ctx, RunOptions{Output: output}); err != nil {
+	if err := RunInteractive(ctx, WriteOptions{Output: output}); err != nil {
 		t.Fatalf("RunInteractive: %v", err)
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
@@ -985,7 +985,7 @@ func TestRunInstallForcesNonInteractive(t *testing.T) {
 		YesAll: false,
 	}
 	app := DefaultApp()
-	if err := RunInstall(ctx, app, InstallOptions{Output: out}); err != nil {
+	if err := RunInstall(ctx, app, WriteOptions{Output: out}); err != nil {
 		t.Fatalf("RunInstall: %v", err)
 	}
 	data, err := os.ReadFile(out)
@@ -1007,7 +1007,9 @@ func TestWriteEcosystemFilePromptsToWriteToFile(t *testing.T) {
 		ErrOut: &bytes.Buffer{},
 	}
 
-	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, output, DefaultWriteOptions()); err != nil {
+	opts := DefaultWriteOptions()
+	opts.Output = output
+	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts); err != nil {
 		t.Fatalf("WriteEcosystemFile: %v", err)
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
@@ -1033,7 +1035,9 @@ func TestWriteEcosystemFilePreviewGoesToErrOut(t *testing.T) {
 		ErrOut: &stderr,
 		YesAll: true,
 	}
-	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, out, DefaultWriteOptions()); err != nil {
+	opts := DefaultWriteOptions()
+	opts.Output = out
+	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts); err != nil {
 		t.Fatalf("WriteEcosystemFile: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "preview of") {
@@ -1056,7 +1060,10 @@ func TestWriteEcosystemFileNoMergeAborts(t *testing.T) {
 	}
 
 	ctx := WizardContext{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, YesAll: true}
-	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, out, WriteOptions{NoMerge: true})
+	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, WriteOptions{
+		Output:  out,
+		NoMerge: true,
+	})
 	if err == nil {
 		t.Fatal("expected abort with --no-merge on existing file")
 	}
@@ -1075,7 +1082,9 @@ func TestWriteEcosystemFileMalformedExistingSurfacesForceHint(t *testing.T) {
 	}
 
 	ctx := WizardContext{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, YesAll: true}
-	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, out, DefaultWriteOptions())
+	opts := DefaultWriteOptions()
+	opts.Output = out
+	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts)
 	if err == nil {
 		t.Fatal("expected abort on malformed existing file")
 	}

@@ -1,4 +1,5 @@
-package cmd
+// Package runtime owns shared CLI state and daemon RPC infrastructure.
+package runtime
 
 import (
 	"fmt"

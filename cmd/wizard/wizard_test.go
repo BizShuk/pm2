@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	plannerprompt "github.com/bizshuk/pm2/cmd/wizard/prompt"
 	"github.com/bizshuk/pm2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -17,17 +18,30 @@ import (
 // the wizard's prompt / render / merge helpers live in
 // config/wizard/wizard_test.go (see plans/architecture-wizard-decoupling.md).
 
-func TestPlannerPrefixes(t *testing.T) {
-	if ecoPlannerSystemPrefix != "run /system-planner for current workspace, and output under <workspace>/plans/" {
-		t.Errorf("ecoPlannerSystemPrefix = %q", ecoPlannerSystemPrefix)
-	}
-	if ecoPlannerBusinessPrefix != "run /business-planner for current workspace, and output under <workspace>/plans/" {
-		t.Errorf("ecoPlannerBusinessPrefix = %q", ecoPlannerBusinessPrefix)
+func TestPlannerFlagsUseTemplates(t *testing.T) {
+	for _, template := range []plannerprompt.Template{
+		plannerprompt.System(),
+		plannerprompt.Business(),
+	} {
+		flag := InstallCmd.Flags().Lookup(template.Flag)
+		if flag == nil {
+			t.Fatalf("missing --%s flag", template.Flag)
+		}
+		if flag.Usage != template.Help {
+			t.Errorf("--%s help = %q, want %q", template.Flag, flag.Usage, template.Help)
+		}
 	}
 }
 
 func TestBuildInstallApp(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "analyze repo", ecoPlannerNS, "pm2", "/home/user/pm2")
+	template := plannerprompt.System()
+	app := buildInstallApp(
+		"/abs/agy",
+		template.Render("analyze repo"),
+		ecoPlannerNS,
+		"pm2",
+		"/home/user/pm2",
+	)
 	if app.Script != "/abs/agy" {
 		t.Errorf("Script = %q, want /abs/agy", app.Script)
 	}
@@ -44,7 +58,7 @@ func TestBuildInstallApp(t *testing.T) {
 	// joined into one single-quoted -p arg.
 	wantArgs := []string{
 		"--add-dir", "/home/user/pm2",
-		"-p", "'" + ecoPlannerSystemPrefix + " analyze repo'",
+		"-p", "'" + template.Render("analyze repo") + "'",
 	}
 	if len(app.Args) != len(wantArgs) {
 		t.Fatalf("len(Args) = %d, want %d", len(app.Args), len(wantArgs))
@@ -60,11 +74,18 @@ func TestBuildInstallApp(t *testing.T) {
 }
 
 func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerBusinessPrefix, "", ecoPlannerNS, "myproj", "/home/user/proj")
+	template := plannerprompt.Business()
+	app := buildInstallApp(
+		"/abs/agy",
+		template.Render(""),
+		ecoPlannerNS,
+		"myproj",
+		"/home/user/proj",
+	)
 	// Empty user_prompt → prompt is just the prefix, still single-quoted.
 	wantArgs := []string{
 		"--add-dir", "/home/user/proj",
-		"-p", "'" + ecoPlannerBusinessPrefix + "'",
+		"-p", "'" + template.Render("") + "'",
 	}
 	if len(app.Args) != len(wantArgs) {
 		t.Fatalf("len(Args) = %d, want %d", len(app.Args), len(wantArgs))
@@ -85,7 +106,13 @@ func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
 // buildInstallApp should drop the cwd suffix entirely when cwdBasename
 // is empty (defensive guard for unusual Getwd failures).
 func TestBuildInstallAppEmptyCwdBasename(t *testing.T) {
-	app := buildInstallApp("/abs/agy", ecoPlannerSystemPrefix, "x", ecoPlannerNS, "", "/abs/cwd")
+	app := buildInstallApp(
+		"/abs/agy",
+		plannerprompt.System().Render("x"),
+		ecoPlannerNS,
+		"",
+		"/abs/cwd",
+	)
 	if app.Name != "agy" {
 		t.Errorf("Name = %q, want agy (no suffix when cwdBasename empty)", app.Name)
 	}
@@ -463,7 +490,7 @@ func TestInstallEndToEnd(t *testing.T) {
 		realDir = dir
 	}
 	wantArgsLine := `args: ["--add-dir", ` + strconvQuote(realDir) + `, "-p", ` +
-		strconvQuote("'"+ecoPlannerSystemPrefix+" analyze repo'") + `]`
+		strconvQuote("'"+plannerprompt.System().Render("analyze repo")+"'") + `]`
 	if !strings.Contains(got, wantArgsLine) {
 		t.Errorf("args line not as expected, want %s:\n%s", wantArgsLine, got)
 	}
@@ -485,7 +512,12 @@ func TestInstallEndToEnd(t *testing.T) {
 	if a.Namespace != ecoPlannerNS {
 		t.Errorf("loaded Namespace = %q, want %q", a.Namespace, ecoPlannerNS)
 	}
-	wantLoadedArgs := []string{"--add-dir", realDir, "-p", "'" + ecoPlannerSystemPrefix + " analyze repo'"}
+	wantLoadedArgs := []string{
+		"--add-dir",
+		realDir,
+		"-p",
+		"'" + plannerprompt.System().Render("analyze repo") + "'",
+	}
 	if len(a.Args) != len(wantLoadedArgs) {
 		t.Fatalf("loaded len(Args) = %d, want %d (%v)", len(a.Args), len(wantLoadedArgs), a.Args)
 	}
@@ -525,7 +557,12 @@ func TestInstallNoUserPrompt(t *testing.T) {
 		realDir = dir
 	}
 	// No user_prompt → -p value is the bare single-quoted prefix.
-	wantArgs := []string{"--add-dir", realDir, "-p", "'" + ecoPlannerSystemPrefix + "'"}
+	wantArgs := []string{
+		"--add-dir",
+		realDir,
+		"-p",
+		"'" + plannerprompt.System().Render("") + "'",
+	}
 	if len(a.Args) != len(wantArgs) {
 		t.Fatalf("expected %d args, got %d (%v)", len(wantArgs), len(a.Args), a.Args)
 	}

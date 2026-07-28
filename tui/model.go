@@ -53,26 +53,26 @@ type actionMsg struct {
 // ─── model ───────────────────────────────────────────────────────────────────
 
 type Model struct {
-	socket    string
-	procs     []process.ProcessInfo
-	allProcs  []process.ProcessInfo // unfiltered list — drives the namespace strip
-	namespaces []string            // ["All"] + unique sorted namespaces from allProcs
-	nsCursor   int                 // index into namespaces; 0 == All
-	selected  int
-	logs      []string
-	width     int
-	height    int
-	err       error
-	updated   time.Time
-	Detail    bool
-	logFocus  bool
-	hostCPU   float64
-	hostMem   float64
+	socket     string
+	procs      []process.ProcessInfo
+	allProcs   []process.ProcessInfo // unfiltered list — drives the namespace strip
+	namespaces []string              // ["All"] + unique sorted namespaces from allProcs
+	nsCursor   int                   // index into namespaces; 0 == All
+	selected   int
+	logs       []string
+	width      int
+	height     int
+	err        error
+	updated    time.Time
+	Detail     bool
+	logFocus   bool
+	hostCPU    float64
+	hostMem    float64
 	// hostMetrics samples CPU/Mem via the platform-appropriate
 	// collector. Held as an interface so tests can inject a stub.
 	hostMetrics hostmetrics.HostMetricsCollector
-	SortBy    SortField
-	notice    string // transient message from the last action (e.g. a failure)
+	SortBy      SortField
+	notice      string // transient message from the last action (e.g. a failure)
 }
 
 func New(socket string, detail bool) Model {
@@ -195,7 +195,7 @@ func (m *Model) recomputeNamespaces() {
 	for _, p := range m.allProcs {
 		ns := p.Namespace
 		if ns == "" {
-			ns = "default"
+			ns = process.DefaultNamespace
 		}
 		seen[ns] = struct{}{}
 	}
@@ -243,7 +243,7 @@ func (m *Model) applyNamespaceFilter() {
 	for _, p := range m.allProcs {
 		ns := p.Namespace
 		if ns == "" {
-			ns = "default"
+			ns = process.DefaultNamespace
 		}
 		if ns == target {
 			filtered = append(filtered, p)
@@ -270,8 +270,6 @@ func (m *Model) cycleNamespace(delta int) {
 	m.sortProcs()
 	m.selected = max(0, min(m.selected, len(m.procs)-1))
 }
-
-
 
 func (m *Model) sortProcs(prevSelectedID ...int) {
 	if len(m.procs) == 0 {

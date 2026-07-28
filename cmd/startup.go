@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -57,7 +58,7 @@ func generateLaunchd(exe string) error {
 	<key>StandardErrorPath</key><string>%s/daemon-err.log</string>
 </dict>
 </plist>
-`, label, exe, os.Getenv("PATH"), pm2Home, pm2Home)
+`, label, exe, os.Getenv("PATH"), cliruntime.PM2Home(), cliruntime.PM2Home())
 
 	_ = os.MkdirAll(filepath.Dir(plistPath), 0o755)
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {

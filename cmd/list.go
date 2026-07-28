@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/tui/views"
@@ -44,7 +45,7 @@ func init() {
 }
 
 func runList(opts *listOptions) error {
-	client := NewCLIClient(socketPath())
+	client := cliruntime.NewCLIClient(cliruntime.SocketPath())
 
 	// Send folds the dial+auto-respawn logic; we still own the
 	// resp.OK check here so the dial-failure path can be rewritten

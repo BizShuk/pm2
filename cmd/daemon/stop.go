@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"os"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +19,7 @@ import (
 // We use 0644 (not 0600) so that the file is easy to inspect and
 // delete by hand if needed — there is no sensitive data in it.
 func writeStopMarker() error {
-	return os.WriteFile(appcmd.DaemonStopMarkerPath(), []byte{}, 0o644)
+	return os.WriteFile(cliruntime.DaemonStopMarkerPath(), []byte{}, 0o644)
 }
 
 // StopCmd is `pm2 daemon stop`.
@@ -80,12 +80,12 @@ func runStop(_ *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not write stop marker: %v\n", err)
 	}
 
-	resp, err := model.SendRequest(appcmd.SocketPath(), model.Request{Command: model.CmdKill})
+	resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{Command: model.CmdKill})
 	if err != nil {
 		// No reachable daemon — marker is already in place, the
 		// auto-spawn suppression is consistent with the user's intent.
 		fmt.Println("PM2 daemon is not running. Auto-respawn suppressed.")
-		fmt.Printf("  marker:       %s\n", appcmd.DaemonStopMarkerPath())
+		fmt.Printf("  marker:       %s\n", cliruntime.DaemonStopMarkerPath())
 		fmt.Println("  Re-enable:    pm2 daemon start")
 		return nil
 	}
@@ -93,7 +93,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("%s", resp.Error)
 	}
 	fmt.Println("PM2 daemon stopped, auto-respawn suppressed.")
-	fmt.Printf("  marker:       %s\n", appcmd.DaemonStopMarkerPath())
+	fmt.Printf("  marker:       %s\n", cliruntime.DaemonStopMarkerPath())
 	fmt.Println("  Re-enable:    pm2 daemon start")
 	return nil
 }
@@ -107,7 +107,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 // surfaced so the caller can decide whether to fall back to a hard
 // failure.
 func removeStopMarker() error {
-	err := os.Remove(appcmd.DaemonStopMarkerPath())
+	err := os.Remove(cliruntime.DaemonStopMarkerPath())
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}

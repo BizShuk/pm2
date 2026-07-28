@@ -47,6 +47,7 @@ Import direction (no cycles):
 - `cmd/task` and `cmd/daemon` -> `cmd` for shared CLI runtime paths and daemon
   auto-start client; `cmd` never imports either command sub-package
 - `cmd/daemon` -> `daemon` for the foreground server runtime
+- `cmd/wizard` -> `cmd/wizard/prompt` for Cobra-free planner prompt templates
 - `cmd/wizard` -> `config/wizard` for prompt, render, merge, and install logic
 
 The lock and import invariants are spelled out in the Conventions section below.
@@ -89,8 +90,11 @@ pm2/
 │   ├── wizard/               wizard command sub-package
 │   │   ├── wizard.go         Cmd parent + interactive wizard Cobra shell
 │   │   ├── install.go        install subcommand + AppConfig assembly
-│   │   ├── install_system.go system-planner profile flag and prompt
-│   │   ├── install_business.go business-planner profile flag and prompt
+│   │   ├── install_flags.go  shared planner flag binding
+│   │   ├── prompt/           planner prompt-template domain; no Cobra dependency
+│   │   │   ├── template.go   Template model + user-prompt rendering
+│   │   │   ├── system.go     system-planner template
+│   │   │   └── business.go   business-planner template
 │   │   └── wizard_test.go    Cobra-level wizard integration tests
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
@@ -105,12 +109,23 @@ pm2/
 │   │                         relative to config file dir (not CWD)
 │   ├── ecosystem_test.go     Unit tests for script path resolution and configuration loading
 │   └── wizard/               config/wizard sub-package — interactive wizard core
+│       ├── doc.go            package boundary and ownership
 │       ├── context.go        WizardContext struct (I/O streams + YesAll)
-│       ├── prompt.go         promptLine / promptYesNo / promptInstances / promptEnvVars
-│       ├── wizard.go         RunInteractive / RunInstall entry points +
-│       │                     collectAnswers / askOneApp / DeriveName
-│       ├── renderer.go       WriteEcosystemFile / renderEcosystemJS / renderEcosystemJSON +
-│       │                     mergeAppsByName / loadExistingApps / detectFormatFromExt
+│       ├── defaults.go       wizard-only output, name, script, and count defaults
+│       ├── format.go         format validation and default output selection
+│       ├── options.go        shared output/merge options for all wizard entry points
+│       ├── prompt.go         reusable line, choice, numeric, env, and cron prompts
+│       ├── app_options.go    cron-restart, max-restart, and CWD prompt block
+│       ├── app.go            AppConfig defaults and one-app prompt sequence
+│       ├── collection.go     multi-app collection loop and summaries
+│       ├── name.go           generated wizard name derivation
+│       ├── interactive.go    RunInteractive entry point
+│       ├── install.go        RunInstall entry point
+│       ├── merge.go          existing-file loading, merge, and format detection
+│       ├── render_app.go     shared JS/JSON ecosystem projection
+│       ├── render_javascript.go  JavaScript renderer
+│       ├── render_json.go    JSON renderer
+│       ├── writer.go         preview, confirmation, and file persistence
 │       └── wizard_test.go    Unit tests for prompts, rendering, merge, and public API
 ├── daemon/
 │   ├── server.go             Server — thin daemon wrapper: owns Unix socket
@@ -151,7 +166,13 @@ pm2/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
 ├── process/
-│   └── types.go              ProcessInfo (runtime state), AppConfig (persistent)
+│   ├── app_config.go         shared static AppConfig and normalization
+│   ├── defaults.go           shared AppConfig defaults and derived log paths
+│   ├── status.go             process lifecycle states
+│   ├── process_info.go       runtime process state
+│   ├── daemon_info.go        daemon status model
+│   ├── path.go               process-name and executable-path resolution
+│   └── format.go             process display formatters
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
 └── tui/

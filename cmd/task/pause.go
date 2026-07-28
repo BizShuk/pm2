@@ -3,7 +3,7 @@ package task
 import (
 	"fmt"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ var PauseCmd = &cobra.Command{
 }
 
 func runPause(_ *cobra.Command, args []string) error {
-	resp, err := model.SendRequest(appcmd.SocketPath(), model.Request{
+	resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{
 		Command: model.CmdPause,
 		Name:    args[0],
 	})

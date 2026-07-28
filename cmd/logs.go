@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
@@ -21,7 +22,7 @@ var LogsCmd = &cobra.Command{
 	Short: "Tail process logs",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdList})
+		resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{Command: model.CmdList})
 		if err != nil {
 			return err
 		}

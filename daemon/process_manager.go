@@ -96,12 +96,12 @@ func (pm *ProcessManager) StartApp(req *model.AppStartReq) ([]process.ProcessInf
 	var infos []process.ProcessInfo
 	instances := req.Instances
 	if instances <= 0 {
-		instances = 1
+		instances = process.DefaultInstances
 	}
 
 	ns := req.Namespace
 	if ns == "" {
-		ns = "default"
+		ns = process.DefaultNamespace
 	}
 
 	for i := 0; i < instances; i++ {
@@ -332,7 +332,6 @@ func (pm *ProcessManager) Status() process.DaemonInfo {
 func (pm *ProcessManager) findProcesses(target string) []*ManagedProcess {
 	return pm.reg.FindByTarget(target)
 }
-
 
 // ---------------------------------------------------------------------------
 // Metrics

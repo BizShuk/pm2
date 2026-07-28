@@ -1,4 +1,4 @@
-package cmd
+package runtime
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 // (cheap — no I/O at construction time) and reuse for the same
 // socket path.
 //
-// CLIClient lives in `cmd` as shared CLI runtime infrastructure; the
+// CLIClient lives in `cmd/runtime` as shared CLI runtime infrastructure; the
 // `cmd/task` subpackage uses it for daemon auto-start. The TUI layer
 // continues to call `model.SendRequest` directly to avoid a
 // `tui/ -> cmd/` reverse dependency.

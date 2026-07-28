@@ -109,12 +109,37 @@ func TestWizardCommandsLiveInSubpackage(t *testing.T) {
 	for _, name := range []string{
 		"wizard.go",
 		"install.go",
-		"install_system.go",
-		"install_business.go",
+		"install_flags.go",
 		"wizard_test.go",
 	} {
 		if _, err := os.Stat(filepath.Join(wizardDir, name)); err != nil {
 			t.Errorf("wizard command package missing %s: %v", name, err)
+		}
+	}
+
+	promptDir := filepath.Join(wizardDir, "prompt")
+	promptPkg, err := build.Default.ImportDir(promptDir, build.ImportComment)
+	if err != nil {
+		t.Fatalf("load wizard prompt package: %v", err)
+	}
+	if promptPkg.Name != "prompt" {
+		t.Fatalf("wizard prompt package name = %q, want prompt", promptPkg.Name)
+	}
+	for _, name := range []string{
+		"doc.go",
+		"template.go",
+		"system.go",
+		"business.go",
+		"template_test.go",
+	} {
+		if _, err := os.Stat(filepath.Join(promptDir, name)); err != nil {
+			t.Errorf("wizard prompt package missing %s: %v", name, err)
+		}
+	}
+
+	for _, name := range []string{"install_system.go", "install_business.go"} {
+		if _, err := os.Stat(filepath.Join(wizardDir, name)); !os.IsNotExist(err) {
+			t.Errorf("legacy wizard prompt file cmd/wizard/%s still exists", name)
 		}
 	}
 
@@ -131,26 +156,37 @@ func TestWizardCommandsLiveInSubpackage(t *testing.T) {
 	}
 }
 
-func TestCustomRootCommandLivesInSubpackage(t *testing.T) {
-	rootDir := filepath.Join("cmd", "root")
-	pkg, err := build.Default.ImportDir(rootDir, build.ImportComment)
+func TestRootCommandLivesInCmdPackage(t *testing.T) {
+	cmdDir := "cmd"
+	pkg, err := build.Default.ImportDir(cmdDir, build.ImportComment)
 	if err != nil {
-		t.Fatalf("load custom root command package: %v", err)
+		t.Fatalf("load root command package: %v", err)
 	}
-	if pkg.Name != "root" {
-		t.Fatalf("custom root command package name = %q, want root", pkg.Name)
+	if pkg.Name != "cmd" {
+		t.Fatalf("root command package name = %q, want cmd", pkg.Name)
 	}
 
 	for _, name := range []string{"root.go", "execute.go", "root_test.go"} {
-		if _, err := os.Stat(filepath.Join(rootDir, name)); err != nil {
-			t.Errorf("custom root command package missing %s: %v", name, err)
+		if _, err := os.Stat(filepath.Join(cmdDir, name)); err != nil {
+			t.Errorf("root command package missing %s: %v", name, err)
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join("cmd", "state.go")); err != nil {
-		t.Errorf("shared CLI state file cmd/state.go is missing: %v", err)
+	runtimeDir := filepath.Join(cmdDir, "runtime")
+	runtimePkg, err := build.Default.ImportDir(runtimeDir, build.ImportComment)
+	if err != nil {
+		t.Fatalf("load CLI runtime package: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join("cmd", "root.go")); !os.IsNotExist(err) {
-		t.Error("legacy shared-state file cmd/root.go still exists")
+	if runtimePkg.Name != "runtime" {
+		t.Fatalf("CLI runtime package name = %q, want runtime", runtimePkg.Name)
+	}
+	for _, name := range []string{"state.go", "client.go", "client_autostart.go"} {
+		if _, err := os.Stat(filepath.Join(runtimeDir, name)); err != nil {
+			t.Errorf("CLI runtime package missing %s: %v", name, err)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(cmdDir, "root")); !os.IsNotExist(err) {
+		t.Error("legacy cmd/root package still exists")
 	}
 }

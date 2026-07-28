@@ -28,14 +28,11 @@ func promptAdditionalAppOptions(
 	}
 	app.CronRestart = resolveCronSchedule(cronRestart)
 
-	defaults := *app
-	defaults.Normalize("")
-
 	maxRestarts, err := promptPositiveInt(
 		rdr,
 		out,
 		"Max restarts",
-		defaults.MaxRestarts,
+		process.DefaultMaxRestarts,
 	)
 	if err != nil {
 		return err

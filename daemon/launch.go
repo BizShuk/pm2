@@ -52,7 +52,7 @@ func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (pr
 
 	ns := req.Namespace
 	if ns == "" {
-		ns = "default"
+		ns = process.DefaultNamespace
 	}
 
 	existing, oldKey, ok := pm.reg.findExistingForLaunchUnderLock(ns, name, req.ConfigFile)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	plannerprompt "github.com/bizshuk/pm2/cmd/wizard/prompt"
 	corewizard "github.com/bizshuk/pm2/config/wizard"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
@@ -13,8 +14,7 @@ import (
 const (
 	// ecoPlannerNS is the namespace assigned to processes installed via
 	// `wizard install --system-planner` / `--business-planner`. The
-	// prefix text itself is owned by per-planner files
-	// (install_system.go, install_business.go).
+	// prompt text is owned by cmd/wizard/prompt.
 	ecoPlannerNS = "planner"
 )
 
@@ -61,16 +61,22 @@ var InstallCmd = &cobra.Command{
 			userPrompt = args[1]
 		}
 
-		prefix := ecoPlannerSystemPrefix
+		template := plannerprompt.System()
 		if installBusinessPlanner {
-			prefix = ecoPlannerBusinessPrefix
+			template = plannerprompt.Business()
 		}
 
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("getwd: %w", err)
 		}
-		app := buildInstallApp(script, prefix, userPrompt, ecoPlannerNS, filepath.Base(cwd), cwd)
+		app := buildInstallApp(
+			script,
+			template.Render(userPrompt),
+			ecoPlannerNS,
+			filepath.Base(cwd),
+			cwd,
+		)
 
 		out := cmd.OutOrStdout()
 		errOut := cmd.ErrOrStderr()
@@ -81,7 +87,7 @@ var InstallCmd = &cobra.Command{
 				ErrOut: errOut,
 			},
 			app,
-			corewizard.InstallOptions{
+			corewizard.WriteOptions{
 				Output:  installOutput,
 				Format:  corewizard.FormatJS,
 				Force:   installForce,
@@ -97,8 +103,8 @@ var InstallCmd = &cobra.Command{
 }
 
 func init() {
-	bindSystemPlannerFlag(InstallCmd, &installSystemPlanner)
-	bindBusinessPlannerFlag(InstallCmd, &installBusinessPlanner)
+	bindPlannerFlag(InstallCmd, plannerprompt.System(), &installSystemPlanner)
+	bindPlannerFlag(InstallCmd, plannerprompt.Business(), &installBusinessPlanner)
 	InstallCmd.Flags().StringVarP(&installOutput, "output", "o", "", "output file path (default: ./ecosystem.config.js)")
 	InstallCmd.Flags().BoolVarP(&installForce, "force", "f", false,
 		"replace the entire output file instead of merging")
@@ -107,35 +113,30 @@ func init() {
 }
 
 // buildInstallApp assembles the AppConfig used by `wizard install`.
-// The pm2-defined prefix and the optional user_prompt are joined into a
-// SINGLE -p argument, wrapped in literal single quotes so the prompt
-// survives as one token: ["-p", "'<prefix> <userPrompt>'"]. When the
+// The rendered planner prompt is wrapped in literal single quotes so it
+// survives as one token: ["-p", "'<prompt>'"]. When the
 // script is a known planner agent (agy/claude), "--add-dir <cwd>" is
 // prepended so the agent has the workspace on its allow-list by default.
 // The process name is derived as `<deriveName(script)>-<cwdBasename>`
 // so multiple installs of the same script in different folders don't
 // collide.
-func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
+func buildInstallApp(script, renderedPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
 	name := corewizard.DeriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
 	}
 
-	prompt := prefix
-	if userPrompt != "" {
-		prompt = prefix + " " + userPrompt
-	}
 	var args []string
 	if isPlannerAgent(script) {
 		args = append(args, "--add-dir", cwd)
 	}
-	args = append(args, "-p", "'"+prompt+"'")
+	args = append(args, "-p", "'"+renderedPrompt+"'")
 
 	a := process.AppConfig{
 		Script:    script,
 		Name:      name,
 		Args:      args,
-		Instances: 1,
+		Instances: process.DefaultInstances,
 		Namespace: namespace,
 		Version:   corewizard.DefaultVersion,
 		CWD:       cwd,

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -13,7 +14,7 @@ var ResurrectCmd = &cobra.Command{
 	Aliases: []string{"r"},
 	Short:   "Restore previously saved process list (short alias: pm2 r)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdResurrect})
+		resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{Command: model.CmdResurrect})
 		if err != nil {
 			return err
 		}

@@ -3,7 +3,7 @@ package daemon
 import (
 	"fmt"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -44,7 +44,7 @@ var KillCmd = &cobra.Command{
 // is in the process of tearing itself down. The CLI does not need
 // to wait or reconnect.
 func runKill(_ *cobra.Command, _ []string) error {
-	resp, err := model.SendRequest(appcmd.SocketPath(), model.Request{Command: model.CmdKill})
+	resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{Command: model.CmdKill})
 	if err != nil {
 		// No reachable daemon — nothing to kill.
 		fmt.Println("PM2 daemon is not running.")

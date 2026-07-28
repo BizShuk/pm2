@@ -1,11 +1,10 @@
-// Package root composes the complete PM2 Cobra command tree.
-package root
+// Package cmd composes the complete PM2 Cobra command tree.
+package cmd
 
 import (
 	sdkcmd "github.com/bizshuk/gosdk/cmd"
 	sdkconfig "github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/gosdk/metric"
-	appcmd "github.com/bizshuk/pm2/cmd"
 	daemoncmd "github.com/bizshuk/pm2/cmd/daemon"
 	taskcmd "github.com/bizshuk/pm2/cmd/task"
 	wizardcmd "github.com/bizshuk/pm2/cmd/wizard"
@@ -24,14 +23,14 @@ func init() {
 	Cmd.AddCommand(
 		daemoncmd.RootStartCmd,
 		taskcmd.ApplyCmd,
-		appcmd.ListCmd,
-		appcmd.LogsCmd,
-		appcmd.SaveCmd,
-		appcmd.ResurrectCmd,
-		appcmd.StartupCmd,
+		ListCmd,
+		LogsCmd,
+		SaveCmd,
+		ResurrectCmd,
+		StartupCmd,
 		daemoncmd.Cmd,
 		taskcmd.Cmd,
-		appcmd.MonitorCmd,
+		MonitorCmd,
 		wizardcmd.Cmd,
 		sdkcmd.ConfigCmd,
 	)

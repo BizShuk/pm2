@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ var MonitorCmd = &cobra.Command{
 		default:
 			s = tui.SortByName
 		}
-		m := newMonitorModel(socketPath())
+		m := newMonitorModel(cliruntime.SocketPath())
 		m.SortBy = s
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		finalModel, err := p.Run()

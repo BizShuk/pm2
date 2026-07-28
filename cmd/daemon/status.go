@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
@@ -46,7 +46,7 @@ var StatusCmd = &cobra.Command{
 // matches `pm2 daemon kill`'s contract and keeps the verb safe for
 // shell scripts that probe the daemon before launching.
 func runStatus(_ *cobra.Command, _ []string) error {
-	sock := appcmd.SocketPath()
+	sock := cliruntime.SocketPath()
 
 	resp, err := model.SendRequest(sock, model.Request{Command: model.CmdStatus})
 	if err != nil {

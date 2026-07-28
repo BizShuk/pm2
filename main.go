@@ -3,11 +3,11 @@ package main
 import (
 	"os"
 
-	rootcmd "github.com/bizshuk/pm2/cmd/root"
+	appcmd "github.com/bizshuk/pm2/cmd"
 )
 
 func main() {
-	if err := rootcmd.Execute(os.Args[1:]); err != nil {
+	if err := appcmd.Execute(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
 }

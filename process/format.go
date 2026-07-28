@@ -99,7 +99,7 @@ func MemCell(p ProcessInfo) string {
 // "default".
 func NamespaceOrDefault(ns string) string {
 	if ns == "" {
-		return "default"
+		return DefaultNamespace
 	}
 	return ns
 }

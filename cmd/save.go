@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -13,7 +14,7 @@ var SaveCmd = &cobra.Command{
 	Aliases: []string{"s"},
 	Short:   "Persist current process list to dump.json (short alias: pm2 s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdSave})
+		resp, err := model.SendRequest(cliruntime.SocketPath(), model.Request{Command: model.CmdSave})
 		if err != nil {
 			return err
 		}

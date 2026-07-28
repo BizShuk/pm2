@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	daemonruntime "github.com/bizshuk/pm2/daemon"
 	"github.com/spf13/cobra"
 )
@@ -44,8 +44,8 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("read --foreground: %w", err)
 	}
 	if foreground {
-		srv := daemonruntime.NewServer(appcmd.PM2Home())
-		return srv.Listen(appcmd.SocketPath())
+		srv := daemonruntime.NewServer(cliruntime.PM2Home())
+		return srv.Listen(cliruntime.SocketPath())
 	}
 	return startAsBackground()
 }
@@ -74,7 +74,7 @@ func startAsBackground() error {
 		return err
 	}
 
-	logDir := appcmd.PM2Home()
+	logDir := cliruntime.PM2Home()
 	_ = os.MkdirAll(logDir, 0o755)
 	logFile := filepath.Join(logDir, "daemon.log")
 	errFile := filepath.Join(logDir, "daemon-err.log")

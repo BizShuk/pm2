@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	appcmd "github.com/bizshuk/pm2/cmd"
+	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/bizshuk/pm2/config"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
@@ -44,7 +44,7 @@ func runTasks(cmd *cobra.Command, args []string) error {
 	// clone/pull into ~/.pm2/repos/ and resolve to the
 	// ecosystem config inside.
 	if config.IsRemoteRef(target) {
-		cacheDir := filepath.Join(appcmd.PM2Home(), "repos")
+		cacheDir := filepath.Join(cliruntime.PM2Home(), "repos")
 		resolved, err := config.ResolveRemote(target, cacheDir)
 		if err != nil {
 			return fmt.Errorf("resolve remote %q: %w", target, err)
@@ -105,7 +105,7 @@ func runTasks(cmd *cobra.Command, args []string) error {
 		// CLI environment snapshot travels in the embedded AppConfig.
 		req.App.AppConfig.BaseEnv = os.Environ()
 
-		client := appcmd.NewCLIClient(appcmd.SocketPath())
+		client := cliruntime.NewCLIClient(cliruntime.SocketPath())
 		if err := client.SendOK(req); err != nil {
 			return err
 		}

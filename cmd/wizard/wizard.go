@@ -3,6 +3,7 @@ package wizard
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	corewizard "github.com/bizshuk/pm2/config/wizard"
 	"github.com/mattn/go-isatty"
@@ -37,7 +38,7 @@ var Cmd = &cobra.Command{
 	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
 		"in the current directory that `pm2 task start` can load directly. " +
 		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, then write to file. " +
-		"Namespace choices: Agent, Backup, Local, Service, AutoP. " +
+		"Namespace choices: " + strings.Join(corewizard.Namespaces(), ", ") + ". " +
 		"Generated names use uppercase NAMESPACE SCRIPT - NAME. " +
 		"Enter r for a random daily time between 2am and 8am. " +
 		"Defaults: max restarts 15; cwd uses the ecosystem file directory; config and log paths follow PM2 defaults. " +
@@ -115,7 +116,7 @@ func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
 		ErrOut: cmd.ErrOrStderr(),
 		YesAll: flags.yesAll,
 	}
-	return corewizard.RunInteractive(ctx, corewizard.RunOptions{
+	return corewizard.RunInteractive(ctx, corewizard.WriteOptions{
 		Output:  flags.output,
 		Format:  flags.format,
 		Force:   flags.force,

@@ -7,6 +7,8 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+
+	"github.com/bizshuk/pm2/process"
 )
 
 const (
@@ -133,7 +135,7 @@ func promptPositiveInt(
 
 // promptInstances reads an instance count and defaults to one.
 func promptInstances(rdr *bufio.Reader, out io.Writer) (int, error) {
-	return promptPositiveInt(rdr, out, "Instances", 1)
+	return promptPositiveInt(rdr, out, "Instances", process.DefaultInstances)
 }
 
 // promptEnvVars loops reading KEY=VAL until blank line.
