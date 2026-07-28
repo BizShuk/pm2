@@ -101,23 +101,39 @@ func promptChoice(
 	)
 }
 
-// promptInstances reads an int with a soft retry loop; falls back to 1.
-func promptInstances(rdr *bufio.Reader, out io.Writer) (int, error) {
+// promptPositiveInt reads a positive integer with a soft retry loop and falls
+// back to def after three invalid answers.
+func promptPositiveInt(
+	rdr *bufio.Reader,
+	out io.Writer,
+	label string,
+	def int,
+) (int, error) {
+	if def <= 0 {
+		return 0, fmt.Errorf("%s default %d must be positive", label, def)
+	}
+
+	defaultValue := strconv.Itoa(def)
 	for i := 0; i < 3; i++ {
-		s, err := promptLine(rdr, out, "Instances", "1")
+		s, err := promptLine(rdr, out, label, defaultValue)
 		if err != nil {
 			return 0, err
 		}
 		if s == "" {
-			return 1, nil
+			return def, nil
 		}
-		n, perr := strconv.Atoi(strings.TrimSpace(s))
-		if perr == nil && n > 0 {
+		n, parseErr := strconv.Atoi(strings.TrimSpace(s))
+		if parseErr == nil && n > 0 {
 			return n, nil
 		}
 		fmt.Fprintln(out, "  (invalid number, try again)")
 	}
-	return 1, nil
+	return def, nil
+}
+
+// promptInstances reads an instance count and defaults to one.
+func promptInstances(rdr *bufio.Reader, out io.Writer) (int, error) {
+	return promptPositiveInt(rdr, out, "Instances", 1)
 }
 
 // promptEnvVars loops reading KEY=VAL until blank line.

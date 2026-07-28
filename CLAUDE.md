@@ -222,7 +222,7 @@ being re-registered, so a daemon restart does not silently undo `pm2 task pause`
 (regression test: `TestPausedCronTaskSurvivesResurrect`).
 
 Pause vs. an in-flight fire (race guard): `executor.Start` (fork/exec) runs
-*before* `launchProcess` takes the registry lock, so a cron fire already
+_before_ `launchProcess` takes the registry lock, so a cron fire already
 in-flight when `PauseByName` runs could reach the map-write + `scheduler.Register`
 and silently re-arm the schedule — the "paused cron still fires" bug.
 `launchProcess` guards against this: under the registry write lock, if the
@@ -247,14 +247,14 @@ child or registering a cron schedule.
 `pm2 task start` applies the policy through `task.selectApps()`
 (`cmd/task/select.go`), a pure function over the loaded app list:
 
-| Input | Result |
-| ----- | ------ |
-| `optional: false` (default) | always started |
-| `optional: true`, no flag | registered with `StatusPaused`, PID 0, no scheduler entry |
-| `optional: true`, `--all` | registered and started |
-| `optional: true`, `--with <name>` | named app starts; other optional apps register paused |
-| `--with` naming no app at all | error — a typo must not silently leave an app paused |
-| `--single` | only the interactively selected app is sent; it starts active |
+| Input                             | Result                                                        |
+| --------------------------------- | ------------------------------------------------------------- |
+| `optional: false` (default)       | always started                                                |
+| `optional: true`, no flag         | registered with `StatusPaused`, PID 0, no scheduler entry     |
+| `optional: true`, `--all`         | registered and started                                        |
+| `optional: true`, `--with <name>` | named app starts; other optional apps register paused         |
+| `--with` naming no app at all     | error — a typo must not silently leave an app paused          |
+| `--single`                        | only the interactively selected app is sent; it starts active |
 
 Two boundaries worth keeping:
 
@@ -276,27 +276,27 @@ Daemon startup and task execution use separate namespaces:
 
 | Canonical root command | Short alias |
 | ---------------------- | ----------- |
-| `pm2 wizard` | `pm2 w` |
-| `pm2 save` | `pm2 s` |
-| `pm2 resurrect` | `pm2 r` |
-| `pm2 task` | `pm2 t` |
-| `pm2 daemon` | `pm2 d` |
-| `pm2 monitor` | `pm2 m` |
-| `pm2 list` | `pm2 l` |
+| `pm2 wizard`           | `pm2 w`     |
+| `pm2 save`             | `pm2 s`     |
+| `pm2 resurrect`        | `pm2 r`     |
+| `pm2 task`             | `pm2 t`     |
+| `pm2 daemon`           | `pm2 d`     |
+| `pm2 monitor`          | `pm2 m`     |
+| `pm2 list`             | `pm2 l`     |
 
 The namespace aliases retain their child command trees, so `pm2 t restart`
 resolves to `pm2 task restart` and `pm2 d status` resolves to
 `pm2 daemon status`.
 
-| Canonical command | Explicit root alias |
-| ----------------- | ------------------- |
-| `pm2 daemon start` | `pm2 start` |
-| `pm2 task start <config>` | `pm2 apply <config>` |
-| `pm2 task restart <target>` | none |
-| `pm2 task stop <target>` | none |
-| `pm2 task pause <target>` | none |
-| `pm2 task resume <target>` | none |
-| `pm2 task delete <target>` | none |
+| Canonical command           | Explicit root alias  |
+| --------------------------- | -------------------- |
+| `pm2 daemon start`          | `pm2 start`          |
+| `pm2 task start <config>`   | `pm2 apply <config>` |
+| `pm2 task restart <target>` | none                 |
+| `pm2 task stop <target>`    | none                 |
+| `pm2 task pause <target>`   | none                 |
+| `pm2 task resume <target>`  | none                 |
+| `pm2 task delete <target>`  | none                 |
 
 Root commands are registered only when the product requirements explicitly
 name an alias. The `cmd/task` sub-package owns the namespaced Cobra nodes,
@@ -342,14 +342,14 @@ layers of the system. Conflating them is a common source of bugs and
 user confusion, so the distinction is encoded in the command tree,
 the wire protocol, and the dispatcher.
 
-| Aspect | `pm2 task stop <name\|id\|all>` | `pm2 daemon kill` |
-| ------ | -------------------------- | ----------------- |
-| Operates on | a managed process | the daemon itself |
-| Daemon afterwards | still running, accepting RPC | exited |
-| Wire code | `model.CmdStop` (+ `Name`) | `model.CmdKill` (no payload) |
-| Manager method | `StopByName(name)` (returns error) | `KillAll()` (no return value) |
-| Signal path | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path applied to every mp, then `os.Exit(0)` |
-| CLI verb location | nested `task stop` command | nested `daemon kill` command |
+| Aspect            | `pm2 task stop <name\|id\|all>`                       | `pm2 daemon kill`                                |
+| ----------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| Operates on       | a managed process                                     | the daemon itself                                |
+| Daemon afterwards | still running, accepting RPC                          | exited                                           |
+| Wire code         | `model.CmdStop` (+ `Name`)                            | `model.CmdKill` (no payload)                     |
+| Manager method    | `StopByName(name)` (returns error)                    | `KillAll()` (no return value)                    |
+| Signal path       | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path applied to every mp, then `os.Exit(0)` |
+| CLI verb location | nested `task stop` command                            | nested `daemon kill` command                     |
 
 The `KillAll` RPC carries no payload and `KillAll()` has no return
 value: it is an idempotent "please shut down" request, not a
@@ -375,14 +375,14 @@ caller always picks an explicit verb.
 
 ## Dependencies
 
-| Package                              | Purpose                               |
-| ------------------------------------ | ------------------------------------- |
+| Package                              | Purpose                                           |
+| ------------------------------------ | ------------------------------------------------- |
 | `github.com/bizshuk/gosdk`           | App config, built-in config command, metrics hook |
-| `github.com/spf13/cobra`             | CLI commands                          |
-| `github.com/robfig/cron/v3`          | Cron scheduler in daemon              |
-| `github.com/dop251/goja`             | JS runtime for `.js` ecosystem config |
-| `github.com/charmbracelet/bubbletea` | TUI event loop                        |
-| `github.com/charmbracelet/lipgloss`  | TUI and `pm2 list` table styling      |
+| `github.com/spf13/cobra`             | CLI commands                                      |
+| `github.com/robfig/cron/v3`          | Cron scheduler in daemon                          |
+| `github.com/dop251/goja`             | JS runtime for `.js` ecosystem config             |
+| `github.com/charmbracelet/bubbletea` | TUI event loop                                    |
+| `github.com/charmbracelet/lipgloss`  | TUI and `pm2 list` table styling                  |
 
 ## State directory (`~/.pm2/`)
 
@@ -425,13 +425,13 @@ caller always picks an explicit verb.
   `TestPauseResumeRunningProcess` exposed). Prefer
   `pm.reg.SnapshotOne(key)` to obtain a `process.ProcessInfo` value copy
   taken under the read lock, and read fields off the copy. Only the hot
-  path that needs to *trigger* stop / restart / `UpdateInfo` (and the rare
+  path that needs to _trigger_ stop / restart / `UpdateInfo` (and the rare
   case that needs the private `paused` flag alongside `Status`) uses
   `pm.reg.Get(key)` for a live `*ManagedProcess` or `UpdateInfo` to read
   atomically under the write lock.
 - `onProcessExit` (the `executor.Watch` callback) is the only place that
-  transitions a process from `online` → `errored` or `stopped` *for processes
-  that exit on their own*. Deliberate stops update status from inside
+  transitions a process from `online` → `errored` or `stopped` _for processes
+  that exit on their own_. Deliberate stops update status from inside
   `stopProcess`'s `onStopping`/`onStopped` callbacks instead.
 - The Status race: when a process is deliberately stopped, both
   `onProcessExit` and `stopProcess.onStopped` race to acquire the

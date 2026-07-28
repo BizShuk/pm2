@@ -60,6 +60,52 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 	}
 }
 
+func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
+	app := process.AppConfig{
+		Name:        "worker",
+		Namespace:   "Service",
+		Script:      "./worker.js",
+		Args:        []string{"--queue", "high"},
+		Instances:   2,
+		Env:         map[string]string{"MODE": "prod"},
+		Cron:        "0 4 * * *",
+		CronRestart: "30 5 * * *",
+		Watch:       true,
+		MaxRestarts: 7,
+		CWD:         "/srv/worker",
+		ConfigDir:   "/var/lib/worker",
+		LogFile:     "/var/log/worker.log",
+		OutFile:     "/var/log/worker.out",
+		ErrorFile:   "/var/log/worker.err",
+		Optional:    true,
+	}
+
+	got := renderEcosystemJS([]process.AppConfig{app})
+
+	for _, want := range []string{
+		`name: "worker"`,
+		`namespace: "Service"`,
+		`script: "./worker.js"`,
+		`args: ["--queue", "high"]`,
+		"instances: 2",
+		`"MODE": "prod"`,
+		`cron: "0 4 * * *"`,
+		`cron_restart: "30 5 * * *"`,
+		"watch: true",
+		"max_restarts: 7",
+		`cwd: "/srv/worker"`,
+		`config_dir: "/var/lib/worker"`,
+		`log_file: "/var/log/worker.log"`,
+		`out_file: "/var/log/worker.out"`,
+		`error_file: "/var/log/worker.err"`,
+		"optional: true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered JS missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
 	app := process.AppConfig{
 		Name:   "minimal",
@@ -115,6 +161,28 @@ func TestRenderEcosystemJSON(t *testing.T) {
 	}
 }
 
+func TestRenderEcosystemJSONOmitsRuntimeManagedFields(t *testing.T) {
+	app := process.AppConfig{
+		Name:       "worker",
+		Script:     "worker.js",
+		Version:    "1.2.3",
+		ConfigFile: "/tmp/ecosystem.config.js",
+		BaseEnv:    []string{"SECRET=value"},
+		Paused:     true,
+	}
+	app.Normalize("")
+
+	out, err := renderEcosystemJSON([]process.AppConfig{app})
+	if err != nil {
+		t.Fatalf("renderEcosystemJSON: %v", err)
+	}
+	for _, excluded := range []string{`"version"`, `"config_file"`, `"base_env"`, `"paused"`} {
+		if strings.Contains(out, excluded) {
+			t.Errorf("runtime-managed field %s leaked into wizard JSON:\n%s", excluded, out)
+		}
+	}
+}
+
 // ---------- render round trip ----------
 
 func TestRenderRoundTrip(t *testing.T) {
@@ -148,6 +216,29 @@ func TestRenderRoundTrip(t *testing.T) {
 				{Name: "sched", Script: "./c.js", Cron: "0 * * * *", CronRestart: "0 3 * * *"},
 			},
 		},
+		{
+			name: "all-options",
+			apps: []process.AppConfig{
+				{
+					Name:        "worker",
+					Namespace:   "Service",
+					Script:      "./worker.js",
+					Args:        []string{"--queue", "high"},
+					Instances:   2,
+					Env:         map[string]string{"MODE": "prod"},
+					Cron:        "0 4 * * *",
+					CronRestart: "30 5 * * *",
+					Watch:       true,
+					MaxRestarts: 7,
+					CWD:         "/srv/worker",
+					ConfigDir:   "/var/lib/worker",
+					LogFile:     "/var/log/worker.log",
+					OutFile:     "/var/log/worker.out",
+					ErrorFile:   "/var/log/worker.err",
+					Optional:    true,
+				},
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -176,8 +267,15 @@ func TestRenderRoundTrip(t *testing.T) {
 			// directory, so we compare by base name only.
 			if want.Name != got.Name || want.Instances != got.Instances ||
 				want.Namespace != got.Namespace || want.Watch != got.Watch ||
-				want.Cron != got.Cron || want.CronRestart != got.CronRestart {
+				want.Cron != got.Cron || want.CronRestart != got.CronRestart ||
+				want.MaxRestarts != got.MaxRestarts ||
+				want.ConfigDir != got.ConfigDir || want.LogFile != got.LogFile ||
+				want.OutFile != got.OutFile || want.ErrorFile != got.ErrorFile ||
+				want.Optional != got.Optional {
 				t.Errorf("%s[%d]: mismatch want=%+v got=%+v", tc.name, i, want, got)
+			}
+			if want.CWD != "" && want.CWD != got.CWD {
+				t.Errorf("%s[%d]: cwd want=%q got=%q", tc.name, i, want.CWD, got.CWD)
 			}
 			if filepath.Base(want.Script) != filepath.Base(got.Script) {
 				t.Errorf("%s[%d]: script base want=%q got=%q", tc.name, i, filepath.Base(want.Script), filepath.Base(got.Script))
@@ -234,9 +332,12 @@ func TestCollectAnswersSingle(t *testing.T) {
 	//   6. watch
 	//   7. env (blank → finish; reads 1 line)
 	//   8. cron (blank → skip)
-	//   9. optional (blank → default true)
+	//   9. cron restart (blank → skip)
+	//  10. max restarts (blank → 15)
+	//  11. cwd (blank → ecosystem file directory)
+	//  12. optional (blank → default true)
 	// Then collectAnswers prompt: "Add another app?" → "n"
-	// Total: 10 lines of input.
+	// Total: 13 lines of input.
 	lines := []string{
 		"",              // namespace → Agent
 		"",              // name → app
@@ -246,6 +347,9 @@ func TestCollectAnswersSingle(t *testing.T) {
 		"",              // watch
 		"",              // env (blank → finish)
 		"",              // cron
+		"",              // cron restart
+		"",              // max restarts
+		"",              // cwd
 		"",              // optional (blank → default yes)
 		"n",             // add another? → no
 	}
@@ -278,6 +382,25 @@ func TestCollectAnswersSingle(t *testing.T) {
 	if got.Cron != "" || got.CronRestart != "" {
 		t.Errorf("Expected no cron, got cron=%q restart=%q", got.Cron, got.CronRestart)
 	}
+	if got.MaxRestarts != 15 {
+		t.Errorf("MaxRestarts = %d, want 15", got.MaxRestarts)
+	}
+	if got.CWD != "" {
+		t.Errorf("CWD = %q, want blank so config loading selects the ecosystem directory", got.CWD)
+	}
+	wantConfigDir := "~/.config/" + process.NormalizeName(got.Name) + "/"
+	if got.ConfigDir != wantConfigDir {
+		t.Errorf("ConfigDir = %q, want %q", got.ConfigDir, wantConfigDir)
+	}
+	if got.LogFile != filepath.Join(wantConfigDir, "logs", "daemon.log") {
+		t.Errorf("LogFile = %q, want derived default", got.LogFile)
+	}
+	if got.OutFile != "" {
+		t.Errorf("OutFile = %q, want blank", got.OutFile)
+	}
+	if got.ErrorFile != filepath.Join(wantConfigDir, "logs", "daemon.err") {
+		t.Errorf("ErrorFile = %q, want derived default", got.ErrorFile)
+	}
 	// The Optional prompt defaults to yes, so a blank answer must opt in.
 	if !got.Optional {
 		t.Errorf("Expected optional true on a blank answer")
@@ -295,6 +418,9 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 		"MODE=prod",    // env
 		"",             // finish env
 		"0 4 * * *",    // custom cron
+		"30 5 * * *",   // cron restart
+		"7",            // max restarts
+		"/srv/worker",  // cwd
 		"2",            // optional → no
 		"n",            // add another app → no
 	}, "\n") + "\n"
@@ -332,8 +458,27 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 	if got.Cron != "0 4 * * *" {
 		t.Errorf("Cron = %q, want %q", got.Cron, "0 4 * * *")
 	}
-	if got.CronRestart != "" {
-		t.Errorf("CronRestart = %q, want empty", got.CronRestart)
+	if got.CronRestart != "30 5 * * *" {
+		t.Errorf("CronRestart = %q, want %q", got.CronRestart, "30 5 * * *")
+	}
+	if got.MaxRestarts != 7 {
+		t.Errorf("MaxRestarts = %d, want 7", got.MaxRestarts)
+	}
+	if got.CWD != "/srv/worker" {
+		t.Errorf("CWD = %q, want /srv/worker", got.CWD)
+	}
+	wantConfigDir := "~/.config/" + process.NormalizeName(got.Name) + "/"
+	if got.ConfigDir != wantConfigDir {
+		t.Errorf("ConfigDir = %q, want derived default %q", got.ConfigDir, wantConfigDir)
+	}
+	if got.LogFile != filepath.Join(wantConfigDir, "logs", "daemon.log") {
+		t.Errorf("LogFile = %q, want derived default", got.LogFile)
+	}
+	if got.OutFile != "" {
+		t.Errorf("OutFile = %q, want blank default", got.OutFile)
+	}
+	if got.ErrorFile != filepath.Join(wantConfigDir, "logs", "daemon.err") {
+		t.Errorf("ErrorFile = %q, want derived default", got.ErrorFile)
 	}
 	if got.Optional {
 		t.Error("Optional = true, want false")
@@ -348,6 +493,9 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 		"Watch mode? [y/N]:",
 		"Env vars?",
 		"Cron schedule (blank to skip, r for random daily between 2am and 8am, or enter cron format):",
+		"Cron restart (blank to skip, r for random daily between 2am and 8am, or enter cron format):",
+		"Max restarts [15]:",
+		"CWD (blank = ecosystem file directory):",
 		"Optional:",
 		"Add another app? [y/N]:",
 	}
@@ -360,13 +508,20 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 		}
 		previous += offset + 1
 	}
-	if strings.Contains(output, "Cron restart") {
-		t.Errorf("unexpected cron-restart prompt:\n%s", output)
+	for _, excluded := range []string{
+		"Config dir [",
+		"Log file [",
+		"Out file (",
+		"Error file [",
+	} {
+		if strings.Contains(output, excluded) {
+			t.Errorf("wizard still prompts for default-managed field %q:\n%s", excluded, output)
+		}
 	}
 }
 
 func TestWizardChoiceMenus(t *testing.T) {
-	input := strings.Repeat("\n", 9) + "n\n"
+	input := strings.Repeat("\n", 12) + "n\n"
 	var out bytes.Buffer
 
 	apps, err := collectAnswers(strings.NewReader(input), &out)
@@ -434,8 +589,8 @@ func TestResolveCronSchedule(t *testing.T) {
 
 // TestCollectAnswersMulti covers two apps in a row.
 func TestCollectAnswersMulti(t *testing.T) {
-	// Each app: 9 lines (namespace, name, script, args, instances, watch,
-	// env-blank, cron-blank, optional). Between apps: 1 line "y" / "n".
+	// Each app: 12 lines (the original eight fields, cron restart,
+	// max restarts, cwd, then optional). Between apps: 1 line "y" / "n".
 	input := strings.Join([]string{
 		"1",         // 1: namespace → Agent
 		"",          // 2: name → app
@@ -445,7 +600,10 @@ func TestCollectAnswersMulti(t *testing.T) {
 		"",          // 6: watch
 		"",          // 7: env (blank → finish)
 		"",          // 8: cron
-		"",          // 9: optional (blank → default yes)
+		"",          // 9: cron restart
+		"",          // 10: max restarts
+		"",          // 11: cwd
+		"",          // 12: optional (blank → default yes)
 		"y",         // add another? → yes
 		"5",         // 1: namespace → AutoP
 		"second",    // 2: name
@@ -455,7 +613,10 @@ func TestCollectAnswersMulti(t *testing.T) {
 		"",          // 6: watch
 		"",          // 7: env
 		"",          // 8: cron
-		"2",         // 9: optional → explicit no
+		"",          // 9: cron restart
+		"",          // 10: max restarts
+		"",          // 11: cwd
+		"2",         // 12: optional → explicit no
 		"n",         // add another? → no
 	}, "\n")
 	in := strings.NewReader(input + "\n")
@@ -760,6 +921,14 @@ func TestRunInteractiveYesAllSynthesizesDefaultApp(t *testing.T) {
 	if !strings.Contains(string(data), "optional: true") {
 		t.Errorf("expected --yes to register the default app paused, got:\n%s", data)
 	}
+	if !strings.Contains(string(data), "max_restarts: 15") {
+		t.Errorf("expected --yes max_restarts default, got:\n%s", data)
+	}
+	for _, excluded := range []string{"config_dir:", "log_file:", "out_file:", "error_file:"} {
+		if strings.Contains(string(data), excluded) {
+			t.Errorf("default-managed field %q should be omitted, got:\n%s", excluded, data)
+		}
+	}
 }
 
 // TestRunInteractiveRejectsBadFormat ensures the format validator fires
@@ -778,7 +947,7 @@ func TestRunInteractiveRejectsBadFormat(t *testing.T) {
 func TestRunInteractiveHonorsFinalWriteAnswer(t *testing.T) {
 	dir := t.TempDir()
 	output := filepath.Join(dir, "ecosystem.config.js")
-	input := strings.Repeat("\n", 9) +
+	input := strings.Repeat("\n", 12) +
 		"n\n" + // add another app
 		"n\n" // write to file
 	var stdout bytes.Buffer

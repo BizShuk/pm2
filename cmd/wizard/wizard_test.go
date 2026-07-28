@@ -170,10 +170,11 @@ func resetCommandForTest(t *testing.T, command *cobra.Command) {
 
 func TestWizardPromptCopy(t *testing.T) {
 	for _, want := range []string{
-		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, optional, add another app, then write to file.",
+		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, then write to file.",
 		"Namespace choices: Agent, Backup, Local, Service, AutoP.",
 		"Generated names use uppercase NAMESPACE SCRIPT - NAME.",
 		"Enter r for a random daily time between 2am and 8am.",
+		"Defaults: max restarts 15; cwd uses the ecosystem file directory; config and log paths follow PM2 defaults.",
 		"Optional choice 1 registers the app paused.",
 	} {
 		if !strings.Contains(Cmd.Long, want) {
@@ -214,7 +215,7 @@ func TestWizardFinalWritePrompt(t *testing.T) {
 	root := newRootForTest(t)
 	root.SetArgs([]string{"wizard", "--output", output})
 	root.SetIn(strings.NewReader(
-		strings.Repeat("\n", 9) +
+		strings.Repeat("\n", 12) +
 			"n\n" + // add another app
 			"n\n", // write to file
 	))
@@ -245,7 +246,7 @@ func TestWizardEndToEndMerge(t *testing.T) {
 	}
 	// askOneApp prompt sequence, then stop app collection and write:
 	//   namespace, name, script, args, instances, watch, env-blank,
-	//   cron-blank, optional → "n" → "y"
+	//   cron-blank, cron restart, max restarts, cwd, optional → "n" → "y"
 	stdin := strings.Join([]string{
 		"3",         // namespace → Local
 		"worker",    // name
@@ -255,6 +256,9 @@ func TestWizardEndToEndMerge(t *testing.T) {
 		"",          // watch
 		"",          // env
 		"",          // cron
+		"",          // cron restart
+		"",          // max restarts
+		"",          // cwd
 		"2",         // optional → no
 		"n",         // add another? → no
 		"y",         // write to file → yes

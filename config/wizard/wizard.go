@@ -168,8 +168,20 @@ func collectAnswers(in io.Reader, out io.Writer) ([]process.AppConfig, error) {
 		}
 		app.Normalize("")
 		apps = append(apps, app)
-		fmt.Fprintf(out, "  -> app #%d: name=%s script=%s instances=%d namespace=%s watch=%t cron=%q optional=%t\n",
-			n, app.Name, app.Script, app.Instances, app.Namespace, app.Watch, app.Cron, app.Optional)
+		fmt.Fprintf(
+			out,
+			"  -> app #%d: name=%s script=%s instances=%d namespace=%s watch=%t cron=%q cron_restart=%q max_restarts=%d optional=%t\n",
+			n,
+			app.Name,
+			app.Script,
+			app.Instances,
+			app.Namespace,
+			app.Watch,
+			app.Cron,
+			app.CronRestart,
+			app.MaxRestarts,
+			app.Optional,
+		)
 		if n == maxApps {
 			fmt.Fprintf(out, "(reached max of %d apps; stopping)\n", maxApps)
 			break
@@ -252,13 +264,17 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 	cron, err := promptLine(
 		rdr,
 		out,
-		"Cron schedule (blank to skip, r for random daily between 2am and 8am, or enter cron format)",
+		"Cron schedule ("+cronOptionPrompt+")",
 		"",
 	)
 	if err != nil {
 		return app, err
 	}
 	app.Cron = resolveCronSchedule(cron)
+
+	if err := promptAdditionalAppOptions(rdr, out, &app); err != nil {
+		return app, err
+	}
 
 	optionalChoice, err := promptChoice(
 		rdr,

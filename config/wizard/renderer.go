@@ -43,6 +43,32 @@ type WriteOptions struct {
 	Format string
 }
 
+// renderedApp is the ecosystem-file contract exposed by the wizard. Runtime
+// state carried by process.AppConfig (version, config_file, base_env, and
+// paused) is intentionally absent.
+type renderedApp struct {
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace"`
+	Script      string            `json:"script"`
+	Args        []string          `json:"args,omitempty"`
+	Instances   int               `json:"instances"`
+	Env         map[string]string `json:"env,omitempty"`
+	Cron        string            `json:"cron,omitempty"`
+	CronRestart string            `json:"cron_restart,omitempty"`
+	Watch       bool              `json:"watch,omitempty"`
+	MaxRestarts int               `json:"max_restarts"`
+	CWD         string            `json:"cwd,omitempty"`
+	ConfigDir   string            `json:"config_dir,omitempty"`
+	LogFile     string            `json:"log_file,omitempty"`
+	OutFile     string            `json:"out_file,omitempty"`
+	ErrorFile   string            `json:"error_file,omitempty"`
+	Optional    bool              `json:"optional,omitempty"`
+}
+
+type renderedEcosystem struct {
+	Apps []renderedApp `json:"apps"`
+}
+
 // DefaultWriteOptions returns sane defaults: JS format, no force, no
 // no-merge. Callers that need different behaviour override fields.
 func DefaultWriteOptions() WriteOptions {
@@ -209,14 +235,14 @@ func detectFormatFromExt(path string) (string, bool) {
 	return "", false
 }
 
-// renderEcosystemJS emits the canonical PM2 JS form. Skips zero-value
-// fields except `script`. Uses 4-space indent and double quotes.
+// renderEcosystemJS emits the canonical PM2 JS form. Uses four-space indent
+// and double quotes.
 func renderEcosystemJS(apps []process.AppConfig) string {
 	var b strings.Builder
 	b.WriteString("module.exports = {\n")
 	b.WriteString("    apps: [\n")
 	for i, a := range apps {
-		writeAppJS(&b, a)
+		writeAppJS(&b, appForRender(a))
 		if i < len(apps)-1 {
 			b.WriteString(",")
 		}
@@ -227,7 +253,49 @@ func renderEcosystemJS(apps []process.AppConfig) string {
 	return b.String()
 }
 
-func writeAppJS(b *strings.Builder, a process.AppConfig) {
+func appForRender(app process.AppConfig) renderedApp {
+	app.Normalize("")
+
+	defaults := process.AppConfig{Name: app.Name, Script: app.Script}
+	defaults.Normalize("")
+
+	configDir := app.ConfigDir
+	if configDir == defaults.ConfigDir {
+		configDir = ""
+	}
+
+	logFile := app.LogFile
+	defaultLogFile := filepath.Join(app.ConfigDir, "logs", "daemon.log")
+	if logFile == defaultLogFile || (app.OutFile != "" && app.OutFile == logFile) {
+		logFile = ""
+	}
+
+	errorFile := app.ErrorFile
+	if errorFile == filepath.Join(app.ConfigDir, "logs", "daemon.err") {
+		errorFile = ""
+	}
+
+	return renderedApp{
+		Name:        app.Name,
+		Namespace:   app.Namespace,
+		Script:      app.Script,
+		Args:        app.Args,
+		Instances:   app.Instances,
+		Env:         app.Env,
+		Cron:        app.Cron,
+		CronRestart: app.CronRestart,
+		Watch:       app.Watch,
+		MaxRestarts: app.MaxRestarts,
+		CWD:         app.CWD,
+		ConfigDir:   configDir,
+		LogFile:     logFile,
+		OutFile:     app.OutFile,
+		ErrorFile:   errorFile,
+		Optional:    app.Optional,
+	}
+}
+
+func writeAppJS(b *strings.Builder, a renderedApp) {
 	ns := a.Namespace
 	if ns == "" {
 		ns = defaultNamespace
@@ -263,9 +331,6 @@ func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	if a.Watch {
 		b.WriteString("            watch: true,\n")
 	}
-	if a.Optional {
-		b.WriteString("            optional: true,\n")
-	}
 	if len(a.Env) > 0 {
 		b.WriteString("            env: {\n")
 		keys := make([]string, 0, len(a.Env))
@@ -292,12 +357,32 @@ func writeAppJS(b *strings.Builder, a process.AppConfig) {
 	if a.Cron != "" {
 		fmt.Fprintf(b, "            cron: %s,\n", strconv.Quote(a.Cron))
 	}
+	fmt.Fprintf(b, "            max_restarts: %d,\n", a.MaxRestarts)
+	if a.ConfigDir != "" {
+		fmt.Fprintf(b, "            config_dir: %s,\n", strconv.Quote(a.ConfigDir))
+	}
+	if a.LogFile != "" {
+		fmt.Fprintf(b, "            log_file: %s,\n", strconv.Quote(a.LogFile))
+	}
+	if a.OutFile != "" {
+		fmt.Fprintf(b, "            out_file: %s,\n", strconv.Quote(a.OutFile))
+	}
+	if a.ErrorFile != "" {
+		fmt.Fprintf(b, "            error_file: %s,\n", strconv.Quote(a.ErrorFile))
+	}
+	if a.Optional {
+		b.WriteString("            optional: true,\n")
+	}
 	b.WriteString("        }")
 }
 
 // renderEcosystemJSON is the JSON counterpart for FormatJSON.
 func renderEcosystemJSON(apps []process.AppConfig) (string, error) {
-	cfg := config.EcosystemConfig{Apps: apps}
+	renderedApps := make([]renderedApp, len(apps))
+	for i, app := range apps {
+		renderedApps[i] = appForRender(app)
+	}
+	cfg := renderedEcosystem{Apps: renderedApps}
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
 		return "", err

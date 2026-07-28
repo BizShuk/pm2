@@ -18,12 +18,17 @@
 //   cron          string   5-field cron expression — one-shot scheduled task
 //   cron_restart  string   5-field cron expression — restarts a running process
 //   watch         bool     Restart on file changes via fsnotify (default: false)
-//   autorestart   bool     Restart on crash (default: true, set false for one-shot)
 //   max_restarts  int      Crash-restart ceiling (default: 15)
-//   cwd           string   Working directory for the spawned process
-//   out_file      string   Custom stdout log path
-//   error_file    string   Custom stderr log path
-//   config_dir    string   Override ~/.config/<name>/ config root
+//   cwd           string   Working directory (default: ecosystem file directory)
+//   config_dir    string   Config root (default: ~/.config/<normalised-name>/)
+//   log_file      string   Stdout path (default: <config_dir>/logs/daemon.log)
+//   out_file      string   Compatibility alias for the stdout path
+//   error_file    string   Stderr path (default: <config_dir>/logs/daemon.err)
+//   optional      bool     Register paused unless selected (default: false)
+//
+// Runtime-managed fields version, config_file, base_env, and paused are
+// intentionally excluded. This Go implementation does not support the
+// Node.js PM2 `autorestart` field.
 //
 // ─── Conventions ───────────────────────────────────────────────────
 //
@@ -78,7 +83,6 @@ module.exports = {
         // Pattern 4: AI agent planner with cron + __dirname
         // ──────────────────────────────────────────────────────────
         // __dirname is available in .js configs (goja runtime).
-        // `autorestart: false` prevents crash-restarts between fires.
         {
             name: "agy-system-planner",
             script: "agy",
@@ -91,7 +95,6 @@ module.exports = {
             namespace: "planner",
             instances: 1,
             cron: "10 0-9 * * *",
-            autorestart: false,
             watch: false
         },
 
