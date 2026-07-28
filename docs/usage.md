@@ -39,6 +39,23 @@ State directory: `~/.pm2/`
 
 ## Command namespaces
 
+Root command short aliases:
+
+| Canonical command | Short alias |
+| ----------------- | ----------- |
+| `pm2 wizard` | `pm2 w` |
+| `pm2 save` | `pm2 s` |
+| `pm2 resurrect` | `pm2 r` |
+| `pm2 task` | `pm2 t` |
+| `pm2 daemon` | `pm2 d` |
+| `pm2 monitor` | `pm2 m` |
+| `pm2 list` | `pm2 l` |
+
+Namespace aliases retain their subcommands, such as `pm2 t start` and
+`pm2 d status`.
+
+Explicit action aliases:
+
 | Namespaced command | Explicit root alias |
 | ------------------ | ------------------- |
 | `pm2 daemon start` | `pm2 start` |
@@ -222,19 +239,21 @@ pm2 logs -n 50        # show last 50 lines instead of default 20
 Prints the last N lines from stdout + stderr log files, then follows the
 first matching log in real time. Press `Ctrl+C` to exit.
 
-### `pm2 save`
+### `pm2 save` / `pm2 s`
 
 ```bash
 pm2 save
+pm2 s
 ```
 
 Persists the current process list to `~/.pm2/dump.json`, including all fields
 needed to restore processes exactly (`cron_restart`, `env`, `args`, etc.).
 
-### `pm2 resurrect`
+### `pm2 resurrect` / `pm2 r`
 
 ```bash
 pm2 resurrect
+pm2 r
 ```
 
 Reads `~/.pm2/dump.json` and starts every entry. Use this after a reboot to

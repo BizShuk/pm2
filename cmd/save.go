@@ -9,8 +9,9 @@ import (
 
 // SaveCmd persists the current process list to dump.json.
 var SaveCmd = &cobra.Command{
-	Use:   "save",
-	Short: "Persist current process list to dump.json",
+	Use:     "save",
+	Aliases: []string{"s"},
+	Short:   "Persist current process list to dump.json (short alias: pm2 s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdSave})
 		if err != nil {

@@ -15,7 +15,7 @@ var monitorSortBy string
 var MonitorCmd = &cobra.Command{
 	Use:     "monitor",
 	Aliases: []string{"m", "dashboard"},
-	Short:   "Live process detail and log dashboard",
+	Short:   "Live process detail and log dashboard (short alias: pm2 m)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := tui.SortField(strings.ToLower(monitorSortBy))
 		switch s {

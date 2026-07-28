@@ -9,8 +9,9 @@ import (
 
 // ResurrectCmd restores the process list from dump.json.
 var ResurrectCmd = &cobra.Command{
-	Use:   "resurrect",
-	Short: "Restore previously saved process list",
+	Use:     "resurrect",
+	Aliases: []string{"r"},
+	Short:   "Restore previously saved process list (short alias: pm2 r)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := model.SendRequest(socketPath(), model.Request{Command: model.CmdResurrect})
 		if err != nil {

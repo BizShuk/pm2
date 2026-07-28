@@ -8,9 +8,10 @@ import (
 
 // Cmd groups task lifecycle commands under `pm2 task`.
 var Cmd = &cobra.Command{
-	Use:   "task",
-	Short: "Manage task lifecycle commands",
-	Args:  cobra.NoArgs,
+	Use:     "task",
+	Aliases: []string{"t"},
+	Short:   "Manage task lifecycle commands (short alias: pm2 t)",
+	Args:    cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("pm2 task requires a subcommand (start | restart | stop | pause | resume | delete)")
 	},

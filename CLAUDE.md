@@ -10,7 +10,7 @@ Daemon + CLI over a Unix socket. The CLI is a thin RPC client; all process state
 
 ```mermaid
 flowchart TD
-    subgraph CLI ["CLI Process (cmd/ + cmd/daemon/ + cmd/task/ + cmd/wizard/)"]
+    subgraph CLI ["CLI Process (cmd/root/ + command packages)"]
         direction TB
         C["Cobra Commands"]
     end
@@ -41,6 +41,9 @@ Import direction (no cycles):
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`
 - `executor` -> `model` only
+- `main` -> `cmd/root` as the thin executable boundary
+- `cmd/root` -> `cmd`, `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose
+  the complete Cobra tree
 - `cmd/task` and `cmd/daemon` -> `cmd` for shared CLI runtime paths and daemon
   auto-start client; `cmd` never imports either command sub-package
 - `cmd/daemon` -> `daemon` for the foreground server runtime
@@ -52,10 +55,15 @@ The lock and import invariants are spelled out in the Conventions section below.
 
 ```tree
 pm2/
-├── main.go                   CLI composition root — RootCmd, config.Default(WithAppName("pm2")),
-│                             gosdk/cmd.ConfigCmd registration, metric hook, Execute
+├── main.go                   thin executable boundary — forwards os.Args[1:]
+│                             to root.Execute and maps errors to exit 1
 ├── cmd/                      cobra commands (CLI layer)
-│   ├── root.go               pm2Home initialization + shared PM2Home/SocketPath/
+│   ├── root/                 customized Cobra composition root
+│   │   ├── root.go           Cmd, config initialization, command registration,
+│   │   │                     traverse hooks, and metrics hook
+│   │   ├── execute.go        Execute(args) + version argument dispatch
+│   │   └── root_test.go      root tree, alias, config, and version tests
+│   ├── state.go              pm2Home initialization + shared PM2Home/SocketPath/
 │   │                         DaemonStopMarkerPath
 │   ├── client.go             shared CLIClient socket RPC wrapper
 │   ├── client_autostart.go   silent daemon auto-spawn + readiness wait
@@ -266,6 +274,20 @@ restart cannot silently activate it.
 
 Daemon startup and task execution use separate namespaces:
 
+| Canonical root command | Short alias |
+| ---------------------- | ----------- |
+| `pm2 wizard` | `pm2 w` |
+| `pm2 save` | `pm2 s` |
+| `pm2 resurrect` | `pm2 r` |
+| `pm2 task` | `pm2 t` |
+| `pm2 daemon` | `pm2 d` |
+| `pm2 monitor` | `pm2 m` |
+| `pm2 list` | `pm2 l` |
+
+The namespace aliases retain their child command trees, so `pm2 t restart`
+resolves to `pm2 task restart` and `pm2 d status` resolves to
+`pm2 daemon status`.
+
 | Canonical command | Explicit root alias |
 | ----------------- | ------------------- |
 | `pm2 daemon start` | `pm2 start` |
@@ -303,10 +325,11 @@ No persistent connection — each CLI invocation is a fresh dial.
 
 Bubbletea tick every 2 s → `doRefresh()` → `daemon.SendRequest(CmdList)`.
 Log tailing reads the log file directly (not via daemon) on process selection change.
-`pm2 monitor` (including alias `pm2 m`) always starts in the two-pane detail/log
+`pm2 monitor` (short alias `pm2 m`) always starts in the two-pane detail/log
 layout. `views.RenderDetail` shows the selected task's `cwd` directly below
 its script. The former wide-table presentation is exposed as the one-shot
-`pm2 list` output through `views.RenderProcessTable`; `monitor` has no `-d` flag.
+`pm2 list` (short alias `pm2 l`) output through `views.RenderProcessTable`;
+`monitor` has no `-d` flag.
 `doAction()` (r/p/d) calls RPC then immediately calls `doRefresh()()` inline so the
 list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
@@ -374,9 +397,10 @@ caller always picks an explicit verb.
 
 ## Conventions
 
-- `main.go` is the only Cobra composition root. Commands under `cmd/` and
-  `cmd/task/` are package-level exported `*cobra.Command` vars; flags and child
-  commands bind in `init()`. Do not reintroduce `NewXxxCmd()` /
+- `cmd/root` is the only Cobra composition root; `main.go` is only the process
+  entry/exit boundary. Commands under `cmd/`, `cmd/daemon/`, `cmd/task/`, and
+  `cmd/wizard/` are package-level exported `*cobra.Command` vars; flags and
+  child commands bind in `init()`. Do not reintroduce `NewXxxCmd()` /
   `newXxxCmd()` constructors.
 - All process state is owned by `daemon.ProcessRegistry` (defined in
   `daemon/process_registry.go`). `daemon.ProcessManager` holds a `*ProcessRegistry` and delegates

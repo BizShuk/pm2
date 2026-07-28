@@ -33,7 +33,7 @@ var wizardFlags = defaultInteractiveFlags()
 var Cmd = &cobra.Command{
 	Use:     "wizard",
 	Aliases: []string{"w"},
-	Short:   "Interactively build an ecosystem.config.js (or .json)",
+	Short:   "Interactively build an ecosystem.config.js (or .json) (short alias: pm2 w)",
 	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
 		"in the current directory that `pm2 task start` can load directly. " +
 		"If the output file already exists, wizard merges the new apps into it " +

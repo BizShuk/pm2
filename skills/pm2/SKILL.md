@@ -23,6 +23,21 @@ When NOT to use:
 
 ## Command Reference
 
+### Root Short Aliases
+
+| Canonical command | Short alias |
+| ----------------- | ----------- |
+| `pm2 wizard` | `pm2 w` |
+| `pm2 save` | `pm2 s` |
+| `pm2 resurrect` | `pm2 r` |
+| `pm2 task` | `pm2 t` |
+| `pm2 daemon` | `pm2 d` |
+| `pm2 monitor` | `pm2 m` |
+| `pm2 list` | `pm2 l` |
+
+Namespace aliases retain their subcommands, such as `pm2 t pause` and
+`pm2 d status`.
+
 | Command                                      | Purpose                                           | Usage / Key Flags                                                        |
 | -------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ |
 | `pm2 start` / `pm2 daemon start`             | Spawn the daemon process                          | `--foreground` to run blocking in foreground                             |

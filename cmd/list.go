@@ -25,10 +25,11 @@ var listOpts listOptions
 // ListCmd renders all managed processes as a non-interactive table.
 var ListCmd = &cobra.Command{
 	Use:     "list",
-	Aliases: []string{"ls", "status"},
-	Short:   "List all managed processes (non-interactive)",
+	Aliases: []string{"l", "ls", "status"},
+	Short:   "List all managed processes (non-interactive) (short alias: pm2 l)",
 	Long: "Print a table of every process currently known to the daemon.\n" +
-		"Aliased as `pm2 ls` and `pm2 status`. Column set matches the\n" +
+		"Short alias: `pm2 l`; also aliased as `pm2 ls` and `pm2 status`.\n" +
+		"Column set matches the\n" +
 		"former `pm2 m` wide table. Returns exit code 1 if the daemon is\n" +
 		"unreachable, unlike `pm2 daemon status` which is an idempotent\n" +
 		"probe (exit 0 even when the daemon is down).",

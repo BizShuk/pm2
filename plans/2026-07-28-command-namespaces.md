@@ -620,3 +620,197 @@ git diff --check
 Expected: all commands exit successfully; root help retains `wizard`, wizard
 help retains `install`, and no wizard command implementation remains directly
 in package `cmd`.
+
+### Task 13: Add explicit one-letter command aliases
+
+**Files:**
+
+- Modify: `main_test.go`
+- Modify: `cmd/wizard/wizard.go`
+- Modify: `cmd/save.go`
+- Modify: `cmd/resurrect.go`
+- Modify: `cmd/task/task.go`
+- Modify: `cmd/daemon/daemon.go`
+- Modify: `cmd/monitor.go`
+- Modify: `cmd/list.go`
+
+**Interfaces:**
+
+- Consumes: the seven canonical root command singletons.
+- Produces: exact one-letter aliases `w`, `s`, `r`, `t`, `d`, `m`, and `l`,
+  with each alias named in the command's root-help description.
+
+- [x] **Step 1: Write a failing alias contract test**
+
+For each requested mapping, assert that `RootCmd.Find` resolves the alias to
+the canonical command singleton and that `Short` contains
+`short alias: pm2 <letter>`.
+
+- [x] **Step 2: Verify RED**
+
+Run:
+
+```bash
+go test . -run 'TestRootCmdShortAliases$' -count=1
+```
+
+Expected: FAIL because several aliases are absent and every command
+description still omits the exact short-alias phrase.
+
+- [x] **Step 3: Implement the aliases**
+
+Add the exact alias to each Cobra command's `Aliases` field without removing
+existing aliases, and append `(short alias: pm2 <letter>)` to `Short`.
+
+- [x] **Step 4: Verify GREEN**
+
+Run:
+
+```bash
+go test . -run 'TestRootCmdShortAliases$' -count=1
+```
+
+Expected: PASS for all seven mappings.
+
+### Task 14: Synchronize and verify short-alias usage
+
+**Files:**
+
+- Modify: `README.md`
+- Modify: `docs/usage.md`
+- Modify: `skills/pm2/SKILL.md`
+- Modify: `CLAUDE.md`
+- Modify: `plans/2026-07-28-command-namespaces.md`
+
+**Interfaces:**
+
+- Consumes: the verified Cobra aliases and descriptions.
+- Produces: one exact alias table across all active usage surfaces.
+
+- [x] **Step 1: Refresh drifted usage descriptions**
+
+Document all seven mappings and retain the separate explicit aliases
+`pm2 start` and `pm2 apply`.
+
+- [x] **Step 2: Run fresh verification**
+
+Run:
+
+```bash
+gofmt -w main_test.go cmd/wizard/wizard.go cmd/save.go cmd/resurrect.go \
+  cmd/task/task.go cmd/daemon/daemon.go cmd/monitor.go cmd/list.go
+go test ./... -count=1
+go test -race ./... -count=1
+go build ./...
+go vet ./...
+go run . --help
+go run . w --help
+go run . s --help
+go run . r --help
+go run . t --help
+go run . d --help
+go run . m --help
+go run . l --help
+git diff --check
+```
+
+Expected: all commands exit successfully; root help names every short alias,
+each one-letter command resolves, and active usage docs contain the same exact
+mapping.
+
+### Task 15: Create the custom root command package
+
+**Files:**
+
+- Modify: `main_test.go`
+- Create: `cmd/root/root.go`
+- Create: `cmd/root/execute.go`
+- Create: `cmd/root/root_test.go`
+- Move: `cmd/root.go` to `cmd/state.go`
+- Modify: `main.go`
+
+**Interfaces:**
+
+- Consumes: shared commands from package `cmd` and the daemon/task/wizard
+  command subpackages.
+- Produces: `root.Cmd *cobra.Command` and `root.Execute(args []string) error`;
+  `main.go` only forwards `os.Args[1:]` and maps an execution error to exit 1.
+
+- [x] **Step 1: Write a failing package-ownership test**
+
+Assert that `cmd/root` exists with `root.go`, `execute.go`, and
+`root_test.go`; shared PM2 paths live in `cmd/state.go`; and the misleading
+legacy `cmd/root.go` state file is absent.
+
+- [x] **Step 2: Verify RED**
+
+Run:
+
+```bash
+go test . -run 'TestCustomRootCommandLivesInSubpackage$' -count=1
+```
+
+Expected: FAIL because `cmd/root` and `cmd/state.go` do not exist yet.
+
+- [x] **Step 3: Implement the custom root**
+
+Move Cobra construction, gosdk config initialization, command registration,
+traverse-hook configuration, and the metrics hook into `cmd/root/root.go`.
+Move version argument dispatch into `cmd/root/execute.go`, preserving
+`version`, `-v`, `--v`, `--version`, and `-version`. Reduce `main.go` to the
+executable boundary.
+
+- [x] **Step 4: Move and extend root tests**
+
+Move command-tree/config/alias tests from package `main` to
+`cmd/root/root_test.go`, keep repository structure tests in `main_test.go`,
+and cover every preserved version spelling through `Execute`.
+
+- [x] **Step 5: Verify GREEN**
+
+Run:
+
+```bash
+go test . ./cmd/root -run 'TestCustomRootCommandLivesInSubpackage|TestRootCmd|TestExecute' -count=1
+```
+
+Expected: PASS with the existing command tree and version output owned by the
+custom root package.
+
+### Task 16: Refresh and verify the custom root boundary
+
+**Files:**
+
+- Modify: `CLAUDE.md`
+- Modify: `plans/2026-07-28-command-namespaces.md`
+
+**Interfaces:**
+
+- Consumes: the verified `cmd/root` package.
+- Produces: a current package map and fully verified executable bootstrap.
+
+- [x] **Step 1: Refresh the technical package map**
+
+Document `cmd/root` as the only Cobra composition root, `cmd/state.go` as
+shared CLI runtime state, and `main.go` as the thin process exit boundary.
+
+- [x] **Step 2: Run fresh verification**
+
+Run:
+
+```bash
+gofmt -w main.go main_test.go cmd/state.go cmd/root/*.go
+go test ./... -count=1
+go test -race ./... -count=1
+go build ./...
+go vet ./...
+go run . --help
+go run . --version
+go run . t --help
+go run . d --help
+go run . w --help
+git diff --check
+```
+
+Expected: all commands exit successfully; help and aliases remain unchanged,
+version prints `model.PM2Version`, and `main.go` contains no Cobra composition.

@@ -16,6 +16,22 @@ State directory: `~/.pm2/` (created automatically on first run)
 
 ## Commands
 
+### Root command short aliases
+
+| Canonical command | Short alias |
+| ----------------- | ----------- |
+| `pm2 wizard` | `pm2 w` |
+| `pm2 save` | `pm2 s` |
+| `pm2 resurrect` | `pm2 r` |
+| `pm2 task` | `pm2 t` |
+| `pm2 daemon` | `pm2 d` |
+| `pm2 monitor` | `pm2 m` |
+| `pm2 list` | `pm2 l` |
+
+Namespace aliases retain their subcommands: for example, `pm2 t restart api`
+is the short form of `pm2 task restart api`, and `pm2 d status` is the short
+form of `pm2 daemon status`.
+
 ### `pm2 config`
 
 Inspect the merged application configuration or update one of the configuration files managed by `gosdk/cmd`.
@@ -86,20 +102,21 @@ pm2 task start ./ecosystem.config.js --all           # start every optional app 
 
 ---
 
-### `pm2 task`
+### `pm2 task` / `pm2 t`
 
 The task namespace is the canonical home for task lifecycle commands:
 
 | Canonical command | Short alias | Purpose |
 | ----------------- | ----------- | ------- |
-| `pm2 task start <config>` | `pm2 apply <config>` | Register and start tasks |
-| `pm2 task restart <target>` | none | Restart a task with its stored config |
-| `pm2 task stop <target>` | none | Stop a task |
-| `pm2 task pause <target>` | none | Pause a task and its cron schedule |
-| `pm2 task resume <target>` | none | Resume a paused task |
-| `pm2 task delete <target>` | none | Delete a task |
+| `pm2 task start <config>` | `pm2 t start <config>`; `pm2 apply <config>` | Register and start tasks |
+| `pm2 task restart <target>` | `pm2 t restart <target>` | Restart a task with its stored config |
+| `pm2 task stop <target>` | `pm2 t stop <target>` | Stop a task |
+| `pm2 task pause <target>` | `pm2 t pause <target>` | Pause a task and its cron schedule |
+| `pm2 task resume <target>` | `pm2 t resume <target>` | Resume a paused task |
+| `pm2 task delete <target>` | `pm2 t delete <target>` | Delete a task |
 
-Only the explicitly documented `pm2 apply` task alias is registered at the root.
+`pm2 t` aliases the task namespace. Only `pm2 apply` is a standalone task
+action alias registered at the root.
 
 ---
 
@@ -118,12 +135,13 @@ The daemon itself keeps running — to stop it, use `pm2 daemon kill` (see below
 
 ---
 
-### `pm2 daemon` — manage the daemon
+### `pm2 daemon` / `pm2 d` — manage the daemon
 
 The daemon is the long-running process that owns the socket, the registry, and the cron scheduler:
 
 ```bash
 pm2 start                  # short form of pm2 daemon start
+pm2 d start                # namespace short alias
 pm2 daemon start           # spawn the daemon (background by default)
 pm2 daemon start --foreground   # run in foreground (blocking; Ctrl+C stops it)
 pm2 daemon kill            # gracefully stop every process, then exit the daemon
@@ -171,13 +189,14 @@ Does not affect `~/.pm2/dump.json`.
 
 ---
 
-### `pm2 list` / `pm2 ls` / `pm2 status`
+### `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`
 
 Print one non-interactive process snapshot using the bordered, status-coloured
 table formerly shown by the wide `pm2 m` view.
 
 ```bash
 pm2 list
+pm2 l                 # short alias
 pm2 list --no-color   # plain output for logs and pipelines
 ```
 
@@ -242,22 +261,24 @@ pm2 monitor  4 processes · 10:24:51
 
 ---
 
-### `pm2 save`
+### `pm2 save` / `pm2 s`
 
 Persist the current process list to `~/.pm2/dump.json`.
 
 ```bash
 pm2 save
+pm2 s
 ```
 
 ---
 
-### `pm2 resurrect`
+### `pm2 resurrect` / `pm2 r`
 
 Restore the last saved process list from `~/.pm2/dump.json`.
 
 ```bash
 pm2 resurrect
+pm2 r
 ```
 
 ---

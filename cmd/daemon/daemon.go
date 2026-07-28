@@ -18,8 +18,9 @@ import (
 //   - stop.go   — StopCmd + runStop + marker management
 //   - status.go — StatusCmd + runStatus
 var Cmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "Manage the PM2 daemon",
+	Use:     "daemon",
+	Aliases: []string{"d"},
+	Short:   "Manage the PM2 daemon (short alias: pm2 d)",
 	Long: "Start or stop the PM2 daemon. Subcommands: start, kill, stop, status.\n" +
 		"`pm2 daemon start` spawns the daemon in the background (or in\n" +
 		"the foreground with --foreground). `pm2 daemon kill` asks the\n" +
