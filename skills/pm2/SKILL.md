@@ -1,20 +1,23 @@
 ---
 name: pm2
-description: Use when running, stopping, restarting, saving, restoring, pausing, or monitoring background processes, cron schedules, or ecosystem files via the pm2 command-line tool.
+description: Use when managing background processes, daemon lifecycle, cron schedules, ecosystem files, logs, saved process state, or PM2 application configuration through the pm2 command-line tool.
 ---
 
 # pm2 Commands
 
 ## Overview
 
-A reference guide for managing background processes, daemon lifecycle, and application configurations using the `pm2` command-line utility.
+A reference guide for the Go-based `pm2` command-line utility in this project.
+Its command tree differs from the Node.js PM2 CLI, so use the commands and
+fields documented here instead of assuming upstream PM2 compatibility.
 
 ## When to Use
 
 - Spawning, stopping, killing, or checking the status of the `pm2` daemon.
 - Registering, starting, stopping, restarting, pausing, resuming, or deleting processes.
 - Tailing or viewing application logs.
-- Saving active configurations or resurrecting them on boot.
+- Saving the registered process list or resurrecting it after daemon startup.
+- Inspecting or updating layered PM2 application settings with `pm2 config`.
 - Designing ecosystem files interactively or installing planner agents.
 
 When NOT to use:
@@ -35,29 +38,40 @@ When NOT to use:
 | `pm2 monitor` | `pm2 m` |
 | `pm2 list` | `pm2 l` |
 
+Root help renders these as dedicated command, alias, and description columns.
 Namespace aliases retain their subcommands, such as `pm2 t pause` and
 `pm2 d status`.
+
+`pm2 start` and `pm2 apply` are separate, explicit root aliases:
+
+- `pm2 start` is equivalent to `pm2 daemon start`.
+- `pm2 apply [target]` is equivalent to `pm2 task start [target]`.
+
+Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
+`pm2 restart`; the same rule applies to `stop`, `pause`, `resume`, and
+`delete`.
 
 | Command                                      | Purpose                                           | Usage / Key Flags                                                        |
 | -------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ |
 | `pm2 start` / `pm2 daemon start`             | Spawn the daemon process                          | `--foreground` to run blocking in foreground                             |
-| `pm2 task start <target>` / `pm2 apply <target>` | Apply apps from an ecosystem file or GitHub repo | `apply` is the explicit short alias; accepts `--all`, `--with`, `--single` |
+| `pm2 task start [target]` / `pm2 apply [target]` | Apply apps from an ecosystem file or GitHub repo | Defaults to `./ecosystem.config.js`; accepts `--all`, `--with`, `--single` |
 | `pm2 task restart <name\|id\|all>`           | Restart a task                                   | Closes, re-spawns, and re-registers scheduler                            |
 | `pm2 task stop <target>`                     | Stop a task gracefully                           | `SIGTERM` escalated to `SIGKILL` after 5 seconds                         |
 | `pm2 task pause <target>`                    | Suspend a task and its cron schedule             | Removes scheduler entries; status becomes `paused`                       |
 | `pm2 task resume <target>`                   | Resume a paused task                             | Re-registers cron and launches the process                               |
 | `pm2 task delete <target>`                   | Remove a task from the registry                  | Removes configuration and stops process                                  |
-| `pm2 list`                                   | Print styled non-interactive process table        | Bordered snapshot; `--no-color` for plain output                         |
+| `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status` | Print a non-interactive process table           | Bordered snapshot; `--no-color` for plain output                         |
 | `pm2 logs [name\|id]`                        | Tail log files directly                           | `--lines N` to specify trailing lines                                    |
 | `pm2 save`                                   | Persist current app configs                       | Saves to `~/.pm2/dump.json`                                              |
 | `pm2 resurrect`                              | Restore saved app configs                         | Loads from `~/.pm2/dump.json`                                            |
-| `pm2 monitor` / `pm2 m`                      | Launch Bubbletea terminal dashboard               | Opens the two-pane process detail/log view directly; no `-d` flag        |
+| `pm2 monitor` / `pm2 m` / `pm2 dashboard`    | Launch Bubbletea terminal dashboard               | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag               |
 | `pm2 startup`                                | Generate OS boot startup scripts                  | Creates `plist` on macOS, systemd unit on Linux                          |
+| `pm2 config`                                 | Inspect or mutate layered application settings    | `--source`, `--update`, `--delete`, `--file`, `--local`                  |
 | `pm2 daemon kill`                            | Gracefully exit all apps and daemon               | CLI commands can still auto-start the daemon                             |
 | `pm2 daemon stop`                            | Shutdown all apps, daemon and block auto-start     | Writes a stop marker to suppress auto-respawn                            |
 | `pm2 daemon status`                          | Read-only daemon status check                     | Works whether or not the daemon is running                               |
-| `pm2 wizard`                                 | Interactively build ecosystem config              | `-o, --output`, `-f, --force`, `-y, --yes`                              |
-| `pm2 wizard install <scr>`                   | Register pre-configured planner agent             | `--system-planner` or `--business-planner`                               |
+| `pm2 wizard`                                 | Interactively build ecosystem config              | `--format`, `--output`, `--force`, `--no-merge`, `--yes`                 |
+| `pm2 wizard install <script> [prompt]`        | Register a pre-configured planner agent            | Requires exactly one of `--system-planner`, `--business-planner`         |
 
 ## Key Differences
 
@@ -69,34 +83,52 @@ Namespace aliases retain their subcommands, such as `pm2 t pause` and
 
 ### `pm2 task pause` vs `pm2 task stop`
 
-- For cron-triggered tasks, `pm2 task stop` leaves the scheduler registered, meaning the cron task will still fire at its next scheduled time.
-- `pm2 task pause` removes the task from the cron scheduler and marks its state as `paused`. The process will not run again until `pm2 task resume` is executed.
+- Both commands stop a running child and remove its active cron schedule.
+- `pm2 task stop` leaves the task in `stopped` state. `pm2 task resume` is a
+  no-op for it; use `pm2 task restart` or re-apply its ecosystem config.
+- `pm2 task pause` records the reversible `paused` state. `pm2 task resume`
+  re-registers the schedule and launches regular processes again.
+
+### `pm2 config` vs ecosystem configuration
+
+- `pm2 config` manages the application's layered gosdk settings. With no
+  mutation flags it prints the merged settings; writes target
+  `~/.config/pm2/settings.local.json` by default.
+- `ecosystem.config.js` and `ecosystem.config.json` define managed tasks. Apply
+  them with `pm2 task start` or `pm2 apply`.
+- `pm2 config` does not register, start, or modify ecosystem tasks.
 
 ## Ecosystem Configurations
 
-Ecosystem files (`ecosystem.config.js` or `ecosystem.config.json`) let you define multiple applications at once. Place one at the repo root; relative `script` paths resolve against the config file's directory.
+Ecosystem files (`ecosystem.config.js` or `ecosystem.config.json`) define one
+or more applications. Relative `script` paths resolve against the config
+file's directory. When `cwd` is omitted, that directory also becomes the
+task's working directory.
 
-See [references/ecosystem.config.js](references/ecosystem.config.js) for the full annotated reference covering all supported fields and patterns.
+### User-Facing AppConfig Fields
 
-### Supported AppConfig Fields
+| Field          | Type          | Default                                | Description                                          |
+| -------------- | ------------- | -------------------------------------- | ---------------------------------------------------- |
+| `name`         | string        | script filename without extension      | Process name shown in `pm2 list`                     |
+| `namespace`    | string        | `"default"`                            | Group label for organising processes                 |
+| `script`       | string        | —                                      | Path or `$PATH`-resolvable command (required)        |
+| `args`         | string[]      | `[]`                                   | Arguments passed to the script                       |
+| `instances`    | int           | `1`                                    | Number of process copies to spawn                    |
+| `env`          | object        | `{}`                                   | Environment variables as key-value pairs             |
+| `cron`         | string        | `""`                                   | 5-field cron expression for a one-shot scheduled task |
+| `cron_restart` | string        | `""`                                   | 5-field cron expression that restarts a running task |
+| `watch`        | bool          | `false`                                | Restart on script file changes via fsnotify          |
+| `max_restarts` | int           | `15`                                   | Non-zero-exit restart ceiling                        |
+| `cwd`          | string        | ecosystem file directory               | Effective working directory for the child            |
+| `log_file`     | string        | `<config_dir>/logs/daemon.log`         | stdout log path                                      |
+| `out_file`     | string        | `""`                                   | Alias used as stdout path when `log_file` is empty    |
+| `error_file`   | string        | `<config_dir>/logs/daemon.err`         | stderr log path                                      |
+| `config_dir`   | string        | `~/.config/<normalised-name>/`         | Base directory used to derive default log paths      |
+| `optional`     | bool          | `false`                                | Register paused unless selected by start flags       |
 
-| Field          | Type          | Default                       | Description                                          |
-| -------------- | ------------- | ----------------------------- | ---------------------------------------------------- |
-| `name`         | string        | script filename               | Process name shown in `pm2 list`                     |
-| `namespace`    | string        | `"default"`                   | Group label for organising processes                  |
-| `script`       | string        | —                             | Path or `$PATH`-resolvable command (required)         |
-| `args`         | string[]      | `[]`                          | Arguments passed to the script                       |
-| `instances`    | int           | `1`                           | Number of process copies to spawn                    |
-| `env`          | object        | `{}`                          | Environment variables as key-value pairs             |
-| `cron`         | string        | `""`                          | 5-field cron expression — one-shot scheduled task    |
-| `cron_restart` | string        | `""`                          | 5-field cron expression — restarts a running process |
-| `watch`        | bool          | `false`                       | Restart on file changes via fsnotify                 |
-| `autorestart`  | bool          | `true`                        | Restart on crash; set `false` for one-shot tasks     |
-| `max_restarts` | int           | `15`                          | Crash-restart ceiling before giving up               |
-| `cwd`          | string        | config file dir               | Working directory for the spawned process            |
-| `out_file`     | string        | `~/.config/<name>/logs/...`   | Custom stdout log path                               |
-| `error_file`   | string        | `~/.config/<name>/logs/...`   | Custom stderr log path                               |
-| `config_dir`   | string        | `~/.config/<name>/`           | Override the config/log root directory               |
+This implementation does not define an `autorestart` field. A clean exit stays
+stopped; a non-zero exit restarts up to `max_restarts`. Copying
+`autorestart` from Node.js PM2 examples has no effect here.
 
 ### `cron` vs `cron_restart`
 
@@ -156,12 +188,12 @@ Relative paths resolve against the ecosystem config file's directory, not the CW
     namespace: "planner",
     instances: 1,
     cron: "10 0-9 * * *",
-    autorestart: false,
     watch: false
 }
 ```
 
-`__dirname` is available in `.js` configs (goja runtime). `autorestart: false` prevents crash-restarts between cron fires.
+`__dirname` is available in `.js` configs through the embedded goja runtime.
+The task remains idle between `cron` fires.
 
 #### Pattern 5 — CLI tool with arguments (Go binary via `$PATH`)
 
@@ -266,10 +298,14 @@ Multiple apps in one config file. Each gets its own name, schedule, and lifecycl
 ### Run all required apps from an ecosystem file
 
 ```bash
-pm2 task start ecosystem.config.js
-pm2 apply                   # explicit short alias; uses ./ecosystem.config.js
-pm2 apply --single          # choose and apply one app only
+pm2 task start              # defaults to ./ecosystem.config.js
+pm2 apply                   # explicit root alias; same default
+pm2 apply --single          # choose and apply exactly one app
 ```
+
+`--single` cannot be combined with `--all` or `--with`. It sends only the
+chosen app, starts it even when `optional: true`, and leaves every other
+registered app untouched.
 
 ### Suspend a cron task temporarily
 
@@ -284,7 +320,26 @@ pm2 task resume "Disk Analysis Daily"
 ```bash
 pm2 list              # one-shot table
 pm2 monitor           # interactive TUI dashboard
+pm2 monitor --sort cpu
 ```
+
+The monitor detail pane shows the executor-resolved effective `cwd`. For a
+legacy saved task with no recorded `cwd`, it displays the directory containing
+that task's `config_file` as a compatibility inference.
+
+### Inspect or update application settings
+
+```bash
+pm2 config
+pm2 config --source
+pm2 config --update server.port=8080
+pm2 config --delete server.host
+pm2 config --local --update server.host=127.0.0.1
+```
+
+Mutation flags write `settings.local.json` under `~/.config/pm2/` unless
+`--file` chooses another supported layer or `--local` targets the current
+working directory.
 
 ### Persist and restore across reboots
 
@@ -330,18 +385,26 @@ module.exports = {
 - `pm2 task start ./ecosystem.config.js --all` — starts every app
 - `pm2 apply --single` — choose one app from `./ecosystem.config.js`; leave every other app untouched
 
-`--with` matches `name` or `namespace:name`. A name that matches no app is an
-error, so a typo does not silently leave the app unstarted. The same rules
-apply to remote installs (`pm2 task start owner/repo`).
+`--with` is repeatable or comma-separated and matches `name` or
+`namespace:name`. A name that matches no app is an error, so a typo does not
+silently leave the app unstarted. The same rules apply to remote installs
+(`pm2 task start owner/repo`).
 
 `--single` is interactive, starts an explicitly selected optional app as
 active, and cannot be combined with `--all` or `--with`.
 
 ## Common Mistakes
 
+- Using `pm2 start ecosystem.config.js`. Root `pm2 start` starts the daemon;
+  use `pm2 task start` or `pm2 apply` for ecosystem files.
+- Calling removed root task verbs such as `pm2 restart` or `pm2 pause`. Put
+  lifecycle actions under `pm2 task`.
 - Confusing `pm2 task stop` with `pm2 daemon kill` or `pm2 daemon stop`. Always double check if you want to stop a single process or the entire daemon.
-- Expecting a cron task to stop firing with `pm2 task stop`. Use `pm2 task pause` to suspend cron schedules.
+- Expecting `pm2 task resume` to reactivate a task that was stopped rather than
+  paused.
 - Starting a script with a duplicate name but different code. Use `pm2 task delete` first to remove the old entry.
 - Using `cron` when you mean `cron_restart` (or vice versa). `cron` = one-shot scheduled run; `cron_restart` = restart an already-running process on schedule.
-- Setting `autorestart: true` (default) for a cron task that exits after each run — this causes an unnecessary immediate restart. Set `autorestart: false` for one-shot cron tasks.
+- Copying Node.js PM2's unsupported `autorestart` field into an ecosystem file.
+- Using `pm2 config` to change process definitions; it manages application
+  settings, not ecosystem tasks.
 - Forgetting that relative `script` paths resolve against the config file's directory, not the shell's CWD when running `pm2 task start`.
