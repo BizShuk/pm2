@@ -13,10 +13,10 @@ import (
 // (cheap — no I/O at construction time) and reuse for the same
 // socket path.
 //
-// CLIClient lives only in the `cmd` package. The TUI layer continues
-// to call `model.SendRequest` directly to avoid a `tui/ -> cmd/`
-// reverse dependency; cross-cutting concerns (test stubs, retry
-// policies) belong in a higher layer when they're needed.
+// CLIClient lives in `cmd` as shared CLI runtime infrastructure; the
+// `cmd/task` subpackage uses it for daemon auto-start. The TUI layer
+// continues to call `model.SendRequest` directly to avoid a
+// `tui/ -> cmd/` reverse dependency.
 type CLIClient struct {
 	socketPath string
 }
@@ -36,7 +36,7 @@ func NewCLIClient(socketPath string) *CLIClient {
 // marker: when present, the helper returns an error and Send
 // surfaces it as "cannot start daemon: ..." rather than silently
 // respawning. This preserves the existing UX contract documented at
-// `cmd/daemon_start.go:117-122`.
+// `cmd/client_autostart.go`.
 func (c *CLIClient) Send(req model.Request) (*model.Response, error) {
 	resp, err := model.SendRequest(c.socketPath, req)
 	if err != nil {

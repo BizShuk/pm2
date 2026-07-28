@@ -59,7 +59,7 @@ func TestRequestRoundTrip(t *testing.T) {
 }
 
 // TestAppStartReqRoundTrip locks down the wire shape used by
-// `pm2 start` / `pm2 save` / `pm2 resurrect`. Schema drift here
+// `pm2 task start` / `pm2 save` / `pm2 resurrect`. Schema drift here
 // breaks dump.json compatibility with existing installations.
 func TestAppStartReqRoundTrip(t *testing.T) {
 	req := &AppStartReq{

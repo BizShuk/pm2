@@ -1,4 +1,4 @@
-package cmd
+package wizard
 
 import "github.com/spf13/cobra"
 
@@ -9,7 +9,7 @@ const ecoPlannerSystemPrefix = "run /system-planner for current workspace, and o
 // bindSystemPlannerFlag wires the --system-planner flag onto cmd.
 // Lives in its own file so the two planner profiles can evolve
 // independently (different help text, different validation rules,
-// different args in the future) without touching eco_install.go.
+// different args in the future) without touching install.go.
 func bindSystemPlannerFlag(cmd *cobra.Command, target *bool) {
 	cmd.Flags().BoolVar(target, "system-planner", false,
 		"wrap the process with the system-planner prompt prefix")

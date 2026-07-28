@@ -253,7 +253,7 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 	// one machine's choice, so opt-in is the safer thing to publish. An
 	// app that must run everywhere is the deliberate answer here.
 	optional, err := promptYesNo(rdr, out,
-		"Optional? (skipped by `pm2 start` unless --all or --with names it)", true)
+		"Optional? (registered paused by `pm2 task start` unless --all or --with names it)", true)
 	if err != nil {
 		return app, err
 	}

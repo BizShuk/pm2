@@ -1,10 +1,10 @@
-package cmd
+package wizard
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/bizshuk/pm2/config/wizard"
+	corewizard "github.com/bizshuk/pm2/config/wizard"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -27,15 +27,15 @@ type interactiveFlags struct {
 
 var wizardFlags = defaultInteractiveFlags()
 
-// WizardCmd is the `pm2 wizard` command. It only wires Cobra
+// Cmd is the `pm2 wizard` command. It only wires Cobra
 // flags + I/O streams and delegates every behavioural step to
 // config/wizard (see plans/architecture-wizard-decoupling.md).
-var WizardCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:     "wizard",
 	Aliases: []string{"w"},
 	Short:   "Interactively build an ecosystem.config.js (or .json)",
 	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
-		"in the current directory that `pm2 start` can load directly. " +
+		"in the current directory that `pm2 task start` can load directly. " +
 		"If the output file already exists, wizard merges the new apps into it " +
 		"by default; pass --force to replace, or --no-merge to abort.",
 	Args: cobra.NoArgs,
@@ -43,12 +43,12 @@ var WizardCmd = &cobra.Command{
 }
 
 func init() {
-	bindInteractiveFlags(WizardCmd, &wizardFlags)
-	WizardCmd.AddCommand(WizardInstallCmd)
+	bindInteractiveFlags(Cmd, &wizardFlags)
+	Cmd.AddCommand(InstallCmd)
 }
 
 func defaultInteractiveFlags() interactiveFlags {
-	return interactiveFlags{format: wizard.FormatJS}
+	return interactiveFlags{format: corewizard.FormatJS}
 }
 
 func bindInteractiveFlags(cmd *cobra.Command, f *interactiveFlags) {
@@ -103,13 +103,13 @@ func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
 		return fmt.Errorf("non-interactive mode requires --yes")
 	}
 
-	ctx := wizard.WizardContext{
+	ctx := corewizard.WizardContext{
 		In:     cmd.InOrStdin(),
 		Out:    cmd.OutOrStdout(),
 		ErrOut: cmd.ErrOrStderr(),
 		YesAll: flags.yesAll,
 	}
-	return wizard.RunInteractive(ctx, wizard.RunOptions{
+	return corewizard.RunInteractive(ctx, corewizard.RunOptions{
 		Output:  flags.output,
 		Format:  flags.format,
 		Force:   flags.force,

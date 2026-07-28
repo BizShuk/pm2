@@ -1,4 +1,4 @@
-package cmd
+package wizard
 
 import (
 	"bytes"
@@ -150,11 +150,11 @@ func runWizard(t *testing.T, dir, stdin, args string) (string, error) {
 // (e.g. metric hook, default pm2Home) don't leak into tests.
 func newRootForTest(t *testing.T) *cobra.Command {
 	t.Helper()
-	resetCommandForTest(t, WizardCmd)
-	resetCommandForTest(t, WizardInstallCmd)
+	resetCommandForTest(t, Cmd)
+	resetCommandForTest(t, InstallCmd)
 
 	root := &cobra.Command{Use: "pm2"}
-	root.AddCommand(WizardCmd)
+	root.AddCommand(Cmd)
 	return root
 }
 

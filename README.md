@@ -32,46 +32,45 @@ Writes target `~/.config/pm2/` by default; use `--local` to target the current w
 
 ---
 
-### `pm2 start`
+### `pm2 start` / `pm2 daemon start`
 
-Start a process from a script path or an ecosystem config file.
+Start the PM2 daemon. The top-level command is the short form:
 
 ```bash
-pm2 start <script|ecosystem.config.js|ecosystem.config.json> [flags]
+pm2 start                    # same as: pm2 daemon start
+pm2 start --foreground       # same as: pm2 daemon start --foreground
+```
+
+### `pm2 task start` / `pm2 apply`
+
+Run tasks from an ecosystem config file or remote GitHub repository. When no
+target is given, `ecosystem.config.js` in the current directory is used.
+`pm2 apply` is the explicitly supported short alias.
+
+```bash
+pm2 task start [ecosystem.config.js|ecosystem.config.json|owner/repo] [flags]
+pm2 apply [ecosystem.config.js|ecosystem.config.json|owner/repo] [flags]
 
 Flags:
-  -n, --name string           process name (default: script filename)
-  -i, --instances int         number of parallel instances
-      --cron-restart string   cron schedule for automatic restart
-  -e, --env stringArray       environment variable  KEY=VAL  (repeatable)
-      --all                   start optional apps instead of registering them paused
-      --with strings          start named optional apps instead of registering them paused
+      --all            run optional apps instead of registering them paused
+      --single         choose and apply exactly one app
+      --with strings   run named optional apps instead of registering them paused
 ```
-
-Examples:
 
 ```bash
-# Bare binary
-pm2 start /usr/local/bin/myserver
-
-# Named, with env vars
-pm2 start /usr/local/bin/myserver --name api --env PORT=8080 --env ENV=prod
-
-# 3 parallel workers
-pm2 start ./worker --name worker -i 3
-
-# Cron-based restart every hour
-pm2 start ./server --name api --cron-restart "0 * * * *"
-
-# Pass extra args to the process
-pm2 start /bin/sleep 3600
-
-# Ecosystem config (JSON or JS)
-pm2 start ./ecosystem.config.json
-pm2 start ./ecosystem.config.js
+pm2 task start ./ecosystem.config.json
+pm2 apply ./ecosystem.config.json
+pm2 apply --single
+pm2 task start ./ecosystem.config.js
+pm2 task start owner/repo
 ```
 
-Process identity is `name + script path`. Re-starting with the same name and script replaces the existing process. Re-starting with the same name but a different script returns an error — use `pm2 delete` first.
+`pm2 apply --single` reads the current `./ecosystem.config.js`, shows its apps,
+and applies only the selected app. The selected app starts active even when it
+has `optional: true`; all other apps are left untouched. `--single` cannot be
+combined with `--all` or `--with`.
+
+Process identity is `name + script path`. Re-starting with the same name and script replaces the existing process. Re-starting with the same name but a different script returns an error — use `pm2 task delete` first.
 
 An ecosystem app with `optional: true` is always registered, but starts in
 `paused` state by default. It has no child process or active cron schedule until
@@ -79,21 +78,38 @@ resumed. Use `--all` to start every optional app immediately, or `--with
 <name>` to start selected optional apps:
 
 ```bash
-pm2 start ./ecosystem.config.js                # optional apps register paused
-pm2 resume default:planner                     # activate one registered app
-pm2 start ./ecosystem.config.js --with planner # start one optional app now
-pm2 start ./ecosystem.config.js --all          # start every optional app now
+pm2 task start ./ecosystem.config.js                 # optional apps register paused
+pm2 task resume default:planner                      # activate one registered app
+pm2 task start ./ecosystem.config.js --with planner # start one optional app now
+pm2 task start ./ecosystem.config.js --all           # start every optional app now
 ```
 
 ---
 
-### `pm2 stop`
+### `pm2 task`
 
-Stop a process by name or stop all.
+The task namespace is the canonical home for task lifecycle commands:
+
+| Canonical command | Short alias | Purpose |
+| ----------------- | ----------- | ------- |
+| `pm2 task start <config>` | `pm2 apply <config>` | Register and start tasks |
+| `pm2 task restart <target>` | none | Restart a task with its stored config |
+| `pm2 task stop <target>` | none | Stop a task |
+| `pm2 task pause <target>` | none | Pause a task and its cron schedule |
+| `pm2 task resume <target>` | none | Resume a paused task |
+| `pm2 task delete <target>` | none | Delete a task |
+
+Only the explicitly documented `pm2 apply` task alias is registered at the root.
+
+---
+
+### `pm2 task stop`
+
+Stop a task by name or stop all.
 
 ```bash
-pm2 stop <name>
-pm2 stop all
+pm2 task stop <name>
+pm2 task stop all
 ```
 
 Sends `SIGTERM`; escalates to `SIGKILL` after 5 seconds. A deliberately stopped process is never auto-restarted.
@@ -104,50 +120,51 @@ The daemon itself keeps running — to stop it, use `pm2 daemon kill` (see below
 
 ### `pm2 daemon` — manage the daemon
 
-The daemon is the long-running process that owns the socket, the registry, and the cron scheduler. Lifecycle is a two-verb command group:
+The daemon is the long-running process that owns the socket, the registry, and the cron scheduler:
 
 ```bash
+pm2 start                  # short form of pm2 daemon start
 pm2 daemon start           # spawn the daemon (background by default)
 pm2 daemon start --foreground   # run in foreground (blocking; Ctrl+C stops it)
 pm2 daemon kill            # gracefully stop every process, then exit the daemon
 ```
 
-Bare `pm2 daemon` (no subcommand) errors out — pick a verb. The internal auto-start paths (`pm2 start` on a fresh install) call `pm2 daemon start --foreground` via `exec`, so the verb is always present in argv.
+Bare `pm2 daemon` (no subcommand) errors out — pick a verb. The internal auto-start paths (`pm2 task start` on a fresh install) call `pm2 daemon start --foreground` via `exec`, so the verb is always present in argv.
 
 #### `stop` vs `daemon kill` — which one do I want?
 
 These two look similar but operate on different layers of the system:
 
-| Aspect | `pm2 stop <name\|id\|all>` | `pm2 daemon kill` |
+| Aspect | `pm2 task stop <name\|id\|all>` | `pm2 daemon kill` |
 | ------ | -------------------------- | ----------------- |
 | Operates on | a managed process | the daemon itself |
 | Daemon afterwards | still running, still accepting RPC | exited (process count drops to zero) |
 | Signal path | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path, applied to every mp, then `os.Exit(0)` |
-| Restartability | re-launchable with `pm2 start` | requires `pm2 daemon start` to bring it back |
+| Restartability | re-launchable with `pm2 task start` | requires `pm2 daemon start` to bring it back |
 | When the daemon is unreachable | error: cannot dial socket | idempotent: prints "PM2 daemon is not running." and returns nil |
 
 > **Removed in this revision:** the legacy top-level `pm2 kill` command has been deleted. It was always equivalent to `pm2 daemon kill` plus a `Deprecated:` marker; the canonical entry point is now exclusively under the `daemon` group. Scripts calling `pm2 kill` will see `Error: unknown command "kill" for "pm2"`.
 
 ---
 
-### `pm2 restart`
+### `pm2 task restart`
 
 Stop then immediately re-launch, preserving all config including `cron_restart`.
 
 ```bash
-pm2 restart <name>
-pm2 restart all
+pm2 task restart <name>
+pm2 task restart all
 ```
 
 ---
 
-### `pm2 delete` / `pm2 del`
+### `pm2 task delete`
 
 Stop and remove from the process list.
 
 ```bash
-pm2 delete <name>
-pm2 delete all
+pm2 task delete <name>
+pm2 task delete all
 ```
 
 Does not affect `~/.pm2/dump.json`.
@@ -330,7 +347,7 @@ module.exports = {
 | `config_dir`   | string   | `"~/.config/<name>/"`         | Base directory for log files                   |
 | `config_file`  | string   | `"<cwd>/ecosystem.config.js"` | Path to ecosystem config file (auto-set)       |
 | `cwd`          | string   | ecosystem file directory      | Working directory used to run the process      |
-| `optional`     | bool     | `false`                       | Register paused unless selected by start flags |
+| `optional`     | bool     | `false`                       | Register paused unless selected by run flags   |
 
 ---
 
@@ -340,7 +357,7 @@ module.exports = {
 | ------------------------------ | -------------------------------------------- |
 | Non-zero exit code (`errored`) | Auto-restart after 1 s, up to `max_restarts` |
 | Zero exit code (`stopped`)     | No restart — treated as intentional          |
-| `pm2 stop` (any exit code)     | No restart — `stopping` flag suppresses it   |
+| `pm2 task stop` (any exit code)     | No restart — `stopping` flag suppresses it   |
 | `cron_restart` fires           | Forced restart regardless of current status  |
 
 ---
@@ -377,14 +394,14 @@ cat > ecosystem.config.json << 'EOF'
 }
 EOF
 
-# 2. Start
-pm2 start ecosystem.config.json
+# 2. Run tasks
+pm2 task start ecosystem.config.json
 
 # 3. Monitor
 pm2 monitor
 
 # 4. Deploy new build
-pm2 restart api
+pm2 task restart api
 
 # 5. Persist + enable on boot
 pm2 save

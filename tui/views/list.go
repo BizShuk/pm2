@@ -334,7 +334,7 @@ func RenderWideTable(ctx ViewContext) string {
 		body := lipgloss.NewStyle().Width(ctx.Width).Height(ctx.Height-3).
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(theme.Muted).
-			Render("No processes running\nstart one: pm2 start <script>")
+			Render("No tasks running\nrun config: pm2 task start [ecosystem.config.js]")
 		return lipgloss.JoinVertical(lipgloss.Left,
 			RenderHeader(ctx),
 			RenderNamespaceBar(ctx, ctx.Width),

@@ -1,16 +1,17 @@
-package cmd
+package daemon
 
 import (
 	"encoding/json"
 	"fmt"
 	"time"
 
+	appcmd "github.com/bizshuk/pm2/cmd"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
 
-// DaemonStatusCmd is `pm2 daemon status`.
+// StatusCmd is `pm2 daemon status`.
 //
 // Semantics: send `model.CmdStatus` to the running daemon; on success
 // the daemon replies with a `process.DaemonInfo` payload (PID, started
@@ -21,7 +22,7 @@ import (
 //
 // This verb is read-only. It operates on the DAEMON's own metadata,
 // not on any managed process.
-var DaemonStatusCmd = &cobra.Command{
+var StatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the running PM2 daemon's identity and counters",
 	Long: "Sends CmdStatus to the running daemon and renders its reply " +
@@ -31,10 +32,10 @@ var DaemonStatusCmd = &cobra.Command{
 		"the command prints a 'not running' notice with the socket path " +
 		"and a hint to start it. This verb never mutates state.",
 	Args: cobra.NoArgs,
-	RunE: runDaemonStatus,
+	RunE: runStatus,
 }
 
-// runDaemonStatus is the RunE body for `pm2 daemon status`. Behaviour:
+// runStatus is the RunE body for `pm2 daemon status`. Behaviour:
 //
 //   - Daemon reachable → decode the CmdStatus payload and print the
 //     formatted summary.
@@ -44,8 +45,8 @@ var DaemonStatusCmd = &cobra.Command{
 // The command never returns an error for the unreachable case; that
 // matches `pm2 daemon kill`'s contract and keeps the verb safe for
 // shell scripts that probe the daemon before launching.
-func runDaemonStatus(cmd *cobra.Command, args []string) error {
-	sock := socketPath()
+func runStatus(_ *cobra.Command, _ []string) error {
+	sock := appcmd.SocketPath()
 
 	resp, err := model.SendRequest(sock, model.Request{Command: model.CmdStatus})
 	if err != nil {

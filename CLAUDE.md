@@ -10,7 +10,7 @@ Daemon + CLI over a Unix socket. The CLI is a thin RPC client; all process state
 
 ```mermaid
 flowchart TD
-    subgraph CLI ["CLI Process (cmd/)"]
+    subgraph CLI ["CLI Process (cmd/ + cmd/daemon/ + cmd/task/ + cmd/wizard/)"]
         direction TB
         C["Cobra Commands"]
     end
@@ -41,6 +41,10 @@ Import direction (no cycles):
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`
 - `executor` -> `model` only
+- `cmd/task` and `cmd/daemon` -> `cmd` for shared CLI runtime paths and daemon
+  auto-start client; `cmd` never imports either command sub-package
+- `cmd/daemon` -> `daemon` for the foreground server runtime
+- `cmd/wizard` -> `config/wizard` for prompt, render, merge, and install logic
 
 The lock and import invariants are spelled out in the Conventions section below.
 
@@ -51,30 +55,42 @@ pm2/
 ├── main.go                   CLI composition root — RootCmd, config.Default(WithAppName("pm2")),
 │                             gosdk/cmd.ConfigCmd registration, metric hook, Execute
 ├── cmd/                      cobra commands (CLI layer)
-│   ├── root.go               pm2Home initialization + socketPath()
-│   ├── start.go              StartCmd — builds AppStartReq, sends to daemon;
-│   │                         optional apps register paused by default
-│   ├── start_select.go       selectApps() — maps AppConfig.Optional to Paused;
-│   │                         --all / --with opt selected apps into active start
-│   ├── stop.go               StopCmd
-│   ├── restart.go            RestartCmd
-│   ├── pause.go              PauseCmd
-│   ├── resume.go             ResumeCmd
-│   ├── delete.go             DeleteCmd
+│   ├── root.go               pm2Home initialization + shared PM2Home/SocketPath/
+│   │                         DaemonStopMarkerPath
+│   ├── client.go             shared CLIClient socket RPC wrapper
+│   ├── client_autostart.go   silent daemon auto-spawn + readiness wait
+│   ├── daemon/               daemon command sub-package
+│   │   ├── daemon.go         Cmd parent for daemon lifecycle commands
+│   │   ├── start.go          daemon start command + foreground/background runtime
+│   │   ├── start_alias.go    explicit root `pm2 start` short alias
+│   │   ├── kill.go           daemon kill command node
+│   │   ├── stop.go           daemon stop command + durable stop marker management
+│   │   └── status.go         daemon status command node
+│   ├── task/                 task command sub-package
+│   │   ├── task.go           Cmd parent for task lifecycle commands
+│   │   ├── start.go          task start command + AppStartReq RPC flow
+│   │   ├── apply.go          explicit root short alias for task start
+│   │   ├── select.go         maps AppConfig.Optional to Paused;
+│   │   │                     selects one app by index/name for --single
+│   │   ├── single.go         renders and reads the interactive single-app choice
+│   │   ├── restart.go        task restart command node
+│   │   ├── stop.go           task stop command node
+│   │   ├── pause.go          task pause command node
+│   │   ├── resume.go         task resume command node
+│   │   └── delete.go         task delete command node
+│   ├── wizard/               wizard command sub-package
+│   │   ├── wizard.go         Cmd parent + interactive wizard Cobra shell
+│   │   ├── install.go        install subcommand + AppConfig assembly
+│   │   ├── install_system.go system-planner profile flag and prompt
+│   │   ├── install_business.go business-planner profile flag and prompt
+│   │   └── wizard_test.go    Cobra-level wizard integration tests
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
 │   ├── logs.go               pm2 logs  — reads log files directly
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
-│   ├── daemon.go             DaemonCmd parent; attaches daemon subcommands in init()
-│   ├── daemon_*.go           DaemonStart/Kill/Stop/StatusCmd + daemon lifecycle helpers
-│   ├── startup.go            StartupCmd — launchd/systemd service generation
-│   ├── eco.go                WizardCmd — thin Cobra wrapper, delegates to config/wizard
-│   ├── eco_install.go        WizardInstallCmd — delegates to config/wizard
-│   ├── eco_install_system.go helper to install system-planner profile
-│   ├── eco_install_business.go helper to install business-planner profile
-│   └── eco_test.go           CLI-level integration tests for wizard and install commands
+│   └── startup.go            StartupCmd — launchd/systemd service generation
 ├── config/
 │   ├── ecosystem.go          Load() — parses .json and .js (goja) ecosystem files
 │   │                         Normalize() fills defaults; resolves relative script paths
@@ -159,7 +175,7 @@ pm2/
 
 Keyed by `namespace:name` in `ProcessManager.reg.processes` map.
 Override rule in `StartApp()`: same name + same script → stop-and-replace.
-Same name + different script → error (caller must `pm2 delete` first).
+Same name + different script → error (caller must `pm2 task delete` first).
 
 ### Auto-restart suppression
 
@@ -167,7 +183,7 @@ Same name + different script → error (caller must `pm2 delete` first).
 `executor.Stop`'s `onStopping` callback) before SIGTERM.
 `onProcessExit` (the executor.Watch callback) skips auto-restart when
 `stopping == true`.
-This prevents deliberate `pm2 stop` from triggering the crash-restart loop.
+This prevents deliberate `pm2 task stop` from triggering the crash-restart loop.
 
 ### Cron restart lifecycle
 
@@ -178,7 +194,7 @@ This prevents deliberate `pm2 stop` from triggering the crash-restart loop.
 
 ### Pause / resume (cron suspension)
 
-`pm2 pause <target>` suspends a process: `PauseByName()` reuses `stopProcess()`
+`pm2 task pause <target>` suspends a process: `PauseByName()` reuses `stopProcess()`
 (which removes the scheduler entry and stops any running instance) then sets
 `ManagedProcess.paused = true` and `Status = StatusPaused`.
 
@@ -187,14 +203,14 @@ from one merely idle between fires — both a running-then-stopped process and a
 idle cron task otherwise sit at `StatusStopped`. A paused task has NO scheduler
 entry, so it will not fire until resumed.
 
-`pm2 resume <target>` re-launches via `launchProcess()` with `CronTriggered =
+`pm2 task resume <target>` re-launches via `launchProcess()` with `CronTriggered =
 false`, which re-registers the cron schedule and returns a cron task to idle
 `StatusStopped` (or a regular process to `StatusOnline`). Resume on a
 non-paused process is a no-op. The `paused` flag round-trips through
 `dump.json` via `process.AppConfig.Paused` — `SnapshotAppConfigs` copies it
 from `ManagedProcess.paused` at save time, and `Resurrect` re-applies it via
 `AppStartReq.Paused`. A paused cron task resurrects without its cron schedule
-being re-registered, so a daemon restart does not silently undo `pm2 pause`
+being re-registered, so a daemon restart does not silently undo `pm2 task pause`
 (regression test: `TestPausedCronTaskSurvivesResurrect`).
 
 Pause vs. an in-flight fire (race guard): `executor.Start` (fork/exec) runs
@@ -207,7 +223,9 @@ file-watch restart — never an explicit resume/start), it aborts before
 replacing the entry or registering any schedule, and reaps the racing child in
 the background. Because both the guard and `PauseByName`'s `paused=true` mutate
 under the same lock, the decision is atomic (regression test:
-`TestPauseDuringCronFireLeavesNoSchedule`).
+`TestPauseDuringCronFireLeavesNoSchedule`). The stop callbacks also preserve
+`StatusPaused` whenever the live entry is paused, so an in-flight cron stop
+cannot overwrite the completed pause with `StatusStopped`.
 
 ### Install policy: required vs optional apps
 
@@ -218,8 +236,8 @@ An optional app is still registered; the CLI sets `Paused = true` on its
 `AppStartReq`, so the daemon creates the registry entry without spawning a
 child or registering a cron schedule.
 
-`pm2 start` applies the policy through `cmd.selectApps()`
-(`cmd/start_select.go`), a pure function over the loaded app list:
+`pm2 task start` applies the policy through `task.selectApps()`
+(`cmd/task/select.go`), a pure function over the loaded app list:
 
 | Input | Result |
 | ----- | ------ |
@@ -228,6 +246,7 @@ child or registering a cron schedule.
 | `optional: true`, `--all` | registered and started |
 | `optional: true`, `--with <name>` | named app starts; other optional apps register paused |
 | `--with` naming no app at all | error — a typo must not silently leave an app paused |
+| `--single` | only the interactively selected app is sent; it starts active |
 
 Two boundaries worth keeping:
 
@@ -242,6 +261,30 @@ Two boundaries worth keeping:
 `Optional` and the derived paused state ride along in `dump.json` via
 `AppConfig`. `resurrect` restores the optional entry as paused, so a daemon
 restart cannot silently activate it.
+
+### Command namespaces
+
+Daemon startup and task execution use separate namespaces:
+
+| Canonical command | Explicit root alias |
+| ----------------- | ------------------- |
+| `pm2 daemon start` | `pm2 start` |
+| `pm2 task start <config>` | `pm2 apply <config>` |
+| `pm2 task restart <target>` | none |
+| `pm2 task stop <target>` | none |
+| `pm2 task pause <target>` | none |
+| `pm2 task resume <target>` | none |
+| `pm2 task delete <target>` | none |
+
+Root commands are registered only when the product requirements explicitly
+name an alias. The `cmd/task` sub-package owns the namespaced Cobra nodes,
+handlers, and the explicit `ApplyCmd` alias; other task lifecycle commands are
+not duplicated at the root.
+
+With no target, both task-start entry points load `./ecosystem.config.js`.
+`--single` lists the loaded apps and sends only the chosen app to the daemon;
+the explicit choice clears its derived paused state, including for an
+`optional: true` app. It is mutually exclusive with `--all` and `--with`.
 
 ### Relative path resolution
 
@@ -276,14 +319,14 @@ layers of the system. Conflating them is a common source of bugs and
 user confusion, so the distinction is encoded in the command tree,
 the wire protocol, and the dispatcher.
 
-| Aspect | `pm2 stop <name\|id\|all>` | `pm2 daemon kill` |
+| Aspect | `pm2 task stop <name\|id\|all>` | `pm2 daemon kill` |
 | ------ | -------------------------- | ----------------- |
 | Operates on | a managed process | the daemon itself |
 | Daemon afterwards | still running, accepting RPC | exited |
 | Wire code | `model.CmdStop` (+ `Name`) | `model.CmdKill` (no payload) |
 | Manager method | `StopByName(name)` (returns error) | `KillAll()` (no return value) |
 | Signal path | `executor.Stop` → SIGTERM → 5 s → SIGKILL (same path) | same path applied to every mp, then `os.Exit(0)` |
-| CLI verb location | top-level `stop` group | nested `daemon` group |
+| CLI verb location | nested `task stop` command | nested `daemon kill` command |
 
 The `KillAll` RPC carries no payload and `KillAll()` has no return
 value: it is an idempotent "please shut down" request, not a
@@ -331,9 +374,10 @@ caller always picks an explicit verb.
 
 ## Conventions
 
-- `main.go` is the only Cobra composition root. Commands under `cmd/` are
-  package-level exported `*cobra.Command` vars; flags and child commands bind in
-  `init()`. Do not reintroduce `NewXxxCmd()` / `newXxxCmd()` constructors.
+- `main.go` is the only Cobra composition root. Commands under `cmd/` and
+  `cmd/task/` are package-level exported `*cobra.Command` vars; flags and child
+  commands bind in `init()`. Do not reintroduce `NewXxxCmd()` /
+  `newXxxCmd()` constructors.
 - All process state is owned by `daemon.ProcessRegistry` (defined in
   `daemon/process_registry.go`). `daemon.ProcessManager` holds a `*ProcessRegistry` and delegates
   lock primitives via `pm.Lock()`/`pm.Unlock()`/`pm.RLock()`/`pm.RUnlock()` for

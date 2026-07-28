@@ -11,15 +11,18 @@ cd ~/projects/pm2
 go build -buildvcs=false -o /usr/local/bin/pm2 .
 ```
 
-The daemon starts automatically on first `pm2 start`. Alternatively start it explicitly:
+The daemon starts automatically on first `pm2 task start`. Start it explicitly with
+the short command or the daemon namespace:
 
 ```bash
+pm2 start                       # same as: pm2 daemon start
+pm2 start --foreground          # same as: pm2 daemon start --foreground
 pm2 daemon start                # background (detached)
 pm2 daemon start --foreground   # foreground (blocking; Ctrl+C stops it)
 pm2 daemon kill                 # gracefully stop all processes and exit the daemon
 ```
 
-> **Lifecycle verbs are split:** `pm2 stop <name|id|all>` operates on a managed process (daemon keeps running). `pm2 daemon kill` operates on the daemon itself (everything exits). They share the same `executor.Stop` signal path (SIGTERM → 5s → SIGKILL); the only difference is the post-response `os.Exit(0)` hook in `daemon/network/handler.go:36-42`. The legacy top-level `pm2 kill` command has been removed; use `pm2 daemon kill`.
+> **Lifecycle verbs are split:** `pm2 task stop <name|id|all>` operates on a managed process (daemon keeps running). `pm2 daemon kill` operates on the daemon itself (everything exits). They share the same `executor.Stop` signal path (SIGTERM → 5s → SIGKILL); the only difference is the post-response `os.Exit(0)` hook in `daemon/network/handler.go:36-42`. The legacy top-level `pm2 kill` command has been removed; use `pm2 daemon kill`.
 
 State directory: `~/.pm2/`
 
@@ -34,25 +37,17 @@ State directory: `~/.pm2/`
 
 ---
 
-## Quick-start: single process
+## Command namespaces
 
-```bash
-# Start a binary directly
-pm2 start /usr/local/bin/myserver
-
-# With a name, args, and env vars
-pm2 start /usr/local/bin/myserver --name api-server --env PORT=8080 --env ENV=prod
-
-# Multiple instances
-pm2 start /usr/local/bin/myserver --name worker -i 3
-
-# With cron-based auto-restart (every hour on the hour)
-pm2 start /usr/local/bin/myserver --name api --cron-restart "0 * * * *"
-
-# Pass extra arguments to the process after --
-pm2 start /usr/bin/node --name web 300
-#           ^script       ^extra arg forwarded to process
-```
+| Namespaced command | Explicit root alias |
+| ------------------ | ------------------- |
+| `pm2 daemon start` | `pm2 start` |
+| `pm2 task start <config>` | `pm2 apply <config>` |
+| `pm2 task restart <target>` | none |
+| `pm2 task stop <target>` | none |
+| `pm2 task pause <target>` | none |
+| `pm2 task resume <target>` | none |
+| `pm2 task delete <target>` | none |
 
 ---
 
@@ -93,7 +88,7 @@ paths are resolved relative to the config file location (not CWD).
 ```
 
 ```bash
-pm2 start /path/to/ecosystem.config.json
+pm2 task start /path/to/ecosystem.config.json
 ```
 
 ### Also supported: `ecosystem.config.js`
@@ -126,7 +121,7 @@ module.exports = {
 ```
 
 ```bash
-pm2 start /path/to/ecosystem.config.js
+pm2 task start /path/to/ecosystem.config.js
 ```
 
 ### All `AppConfig` fields
@@ -147,63 +142,70 @@ pm2 start /path/to/ecosystem.config.js
 
 ## Full CLI reference
 
-### `pm2 start`
+### `pm2 task start` / `pm2 apply`
 
 ```bash
-pm2 start <script|ecosystem.config.json|ecosystem.config.js> [flags] [-- extra args]
+pm2 task start [ecosystem.config.json|ecosystem.config.js|owner/repo] [flags]
+pm2 apply [ecosystem.config.json|ecosystem.config.js|owner/repo] [flags]
 
 Flags:
-  -n, --name string           Process name (single-script mode only)
-  -i, --instances int         Parallel instance count
-      --cron-restart string   Cron expression for scheduled restart
-  -e, --env stringArray       Env var KEY=VAL (repeatable)
+      --all            run optional apps instead of registering them paused
+      --single         choose and apply exactly one app
+      --with strings   run named optional apps instead of registering them paused
 ```
 
 Examples:
 
 ```bash
-# Bare script
-pm2 start /usr/bin/python3 --name pyworker
-
-# With args passed through to the script
-pm2 start /bin/sleep 3600
-
 # Ecosystem file (both formats)
-pm2 start ~/myapp/ecosystem.config.json
-pm2 start ~/myapp/ecosystem.config.js
+pm2 task start ~/myapp/ecosystem.config.json
+pm2 task start ~/myapp/ecosystem.config.js
 
-# Cron restart every day at midnight
-pm2 start /usr/local/bin/myapp --name myapp --cron-restart "0 0 * * *"
+# Default target: ./ecosystem.config.js
+pm2 task start
 
-# 3 parallel workers with env
-pm2 start ./worker -i 3 --name worker --env QUEUE=jobs --env DB_URL=postgres://...
+# Explicit short alias; defaults to ./ecosystem.config.js
+pm2 apply
+
+# Interactively choose one app; other apps are not registered or changed
+pm2 apply --single
+
+# Remote GitHub repository
+pm2 task start owner/repo
 ```
 
-### `pm2 stop`
+Task scripts, arguments, instances, environment variables, and cron schedules
+are defined inside the ecosystem file.
+
+`--single` can also be used with `pm2 task start`. It activates the chosen app
+even if the app is marked `optional: true`, and cannot be combined with
+`--all` or `--with`.
+
+### `pm2 task stop`
 
 ```bash
-pm2 stop <name>      # stop by name
-pm2 stop all         # stop every process
+pm2 task stop <name>      # stop by name
+pm2 task stop all         # stop every process
 ```
 
 Sends `SIGTERM`; if the process does not exit within 5 seconds, sends `SIGKILL`.
 A deliberately stopped process is NOT auto-restarted even if `max_restarts > 0`.
 
-### `pm2 restart`
+### `pm2 task restart`
 
 ```bash
-pm2 restart <name>
-pm2 restart all
+pm2 task restart <name>
+pm2 task restart all
 ```
 
 Performs a clean stop then immediately re-launches with the same config.
 The `cron_restart` schedule is re-registered for the new process.
 
-### `pm2 delete` / `pm2 del`
+### `pm2 task delete`
 
 ```bash
-pm2 delete <name>
-pm2 delete all
+pm2 task delete <name>
+pm2 task delete all
 ```
 
 Stops the process and removes it from the in-memory list. It will not appear
@@ -273,31 +275,27 @@ pm2 save
 A process is identified by the combination of **name + script path**.
 Both must match for an override to be allowed.
 
-```bash
-pm2 start ./server --name api   # registers "api" (script=./server)
-pm2 start ./server --name api   # same name + same script → stop old, start new ✓
-pm2 start ./other  --name api   # same name, DIFFERENT script → error ✗
-# Error: process "api" already exists with script "./server";
-#        use 'pm2 delete api' first or use a different name
-```
+Re-running an ecosystem file with the same name and script stop-and-replaces
+the existing entry. If the same name points at a different script, the daemon
+returns an error.
 
 To replace a process with a different binary, delete it first:
 
 ```bash
-pm2 delete api
-pm2 start ./other --name api
+pm2 task delete api
+pm2 task start ./ecosystem.config.js
 ```
 
-When starting an ecosystem file with `instances > 1`, instances are named
+When running an ecosystem file with `instances > 1`, instances are named
 `<name>-0`, `<name>-1`, … and each is independently identified:
 
 ```bash
-pm2 stop worker-0    # stops only the first worker instance
-pm2 restart worker-1 # restarts only the second
-pm2 stop all         # stops every process
+pm2 task stop worker-0    # stops only the first worker instance
+pm2 task restart worker-1 # restarts only the second
+pm2 task stop all         # stops every process
 ```
 
-Re-running `pm2 start ecosystem.config.json` when the apps are already running
+Re-running `pm2 task start ecosystem.config.json` when the apps are already running
 will stop-and-replace each entry by name.
 
 ---
@@ -316,8 +314,8 @@ not the shell's current working directory:
 
 ```bash
 # Works from any directory:
-pm2 start /home/user/myapp/ecosystem.config.json
-cd /tmp && pm2 start /home/user/myapp/ecosystem.config.json  # same result
+pm2 task start /home/user/myapp/ecosystem.config.json
+cd /tmp && pm2 task start /home/user/myapp/ecosystem.config.json  # same result
 ```
 
 > Paths are resolved at parse time in the CLI process before being sent to
@@ -353,10 +351,10 @@ Key rules:
 
 - Zero exit code → `stopped` — treated as intentional, never auto-restarted
 - Non-zero exit code → `errored` → auto-restarted with 30 seconds delay
-- `pm2 stop` sets a `stopping` flag before sending SIGTERM — even though the
+- `pm2 task stop` sets a `stopping` flag before sending SIGTERM — even though the
   process exits non-zero (killed), the flag suppresses auto-restart
 - Counter `restarts` accumulates across the life of the entry (not reset on
-  `pm2 restart`); `max_restarts` default is 15
+  `pm2 task restart`); `max_restarts` default is 15
 
 ---
 
@@ -406,7 +404,7 @@ Common examples:
 | `30 6 1 * *`  | 1st of every month at 06:30 |
 
 > The cron entry is removed when the process is stopped or deleted, and
-> re-registered when it is restarted. So `pm2 stop` cancels the schedule
+> re-registered when it is restarted. So `pm2 task stop` cancels the schedule
 > until the process is started again.
 
 ---
@@ -433,8 +431,8 @@ cat > ~/myapp/ecosystem.config.json <<'EOF'
 }
 EOF
 
-# 3. Start
-pm2 start ~/myapp/ecosystem.config.json
+# 3. Run tasks
+pm2 task start ~/myapp/ecosystem.config.json
 
 # 4. Check status
 pm2 list
@@ -450,8 +448,8 @@ pm2 startup
 launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist
 
 # 8. Rolling restart after a deploy
-pm2 restart api
+pm2 task restart api
 
 # 9. Teardown
-pm2 delete all
+pm2 task delete all
 ```

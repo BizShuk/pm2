@@ -1,11 +1,11 @@
-package cmd
+package wizard
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/bizshuk/pm2/config/wizard"
+	corewizard "github.com/bizshuk/pm2/config/wizard"
 	"github.com/bizshuk/pm2/process"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +14,7 @@ const (
 	// ecoPlannerNS is the namespace assigned to processes installed via
 	// `wizard install --system-planner` / `--business-planner`. The
 	// prefix text itself is owned by per-planner files
-	// (eco_install_system.go, eco_install_business.go).
+	// (install_system.go, install_business.go).
 	ecoPlannerNS = "planner"
 )
 
@@ -26,10 +26,10 @@ var (
 	installNoMerge         bool
 )
 
-// WizardInstallCmd is the `pm2 wizard install <script> [user_prompt]`
+// InstallCmd is the `pm2 wizard install <script> [user_prompt]`
 // subcommand. It registers a single pre-configured AppConfig and
 // (currently) just writes the ecosystem file. Daemon RPC startup is
-// left to the existing `pm2 start` flow so the install command stays
+// left to the existing `pm2 task start` flow so the install command stays
 // synchronous and inspectable.
 //
 // The wizard shell (config/wizard) owns the merge-vs-replace decision
@@ -39,7 +39,7 @@ var (
 //   - assembles the AppConfig from a script + planner prefix +
 //     optional user_prompt, and
 //   - delegates the write step to wizard.RunInstall.
-var WizardInstallCmd = &cobra.Command{
+var InstallCmd = &cobra.Command{
 	Use:   "install <script> [user_prompt]",
 	Short: "Register a pre-configured process in ecosystem.config.js",
 	Long: "Writes a single AppConfig built from the given script and a " +
@@ -74,16 +74,16 @@ var WizardInstallCmd = &cobra.Command{
 
 		out := cmd.OutOrStdout()
 		errOut := cmd.ErrOrStderr()
-		if err := wizard.RunInstall(
-			wizard.WizardContext{
+		if err := corewizard.RunInstall(
+			corewizard.WizardContext{
 				In:     cmd.InOrStdin(),
 				Out:    out,
 				ErrOut: errOut,
 			},
 			app,
-			wizard.InstallOptions{
+			corewizard.InstallOptions{
 				Output:  installOutput,
-				Format:  wizard.FormatJS,
+				Format:  corewizard.FormatJS,
 				Force:   installForce,
 				NoMerge: installNoMerge,
 			},
@@ -91,18 +91,18 @@ var WizardInstallCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintf(out, "Installed %s -> %s\n", app.Name, installOutput)
-		fmt.Fprintf(out, "Next: pm2 start %s\n", installOutput)
+		fmt.Fprintf(out, "Next: pm2 task start %s\n", installOutput)
 		return nil
 	},
 }
 
 func init() {
-	bindSystemPlannerFlag(WizardInstallCmd, &installSystemPlanner)
-	bindBusinessPlannerFlag(WizardInstallCmd, &installBusinessPlanner)
-	WizardInstallCmd.Flags().StringVarP(&installOutput, "output", "o", "", "output file path (default: ./ecosystem.config.js)")
-	WizardInstallCmd.Flags().BoolVarP(&installForce, "force", "f", false,
+	bindSystemPlannerFlag(InstallCmd, &installSystemPlanner)
+	bindBusinessPlannerFlag(InstallCmd, &installBusinessPlanner)
+	InstallCmd.Flags().StringVarP(&installOutput, "output", "o", "", "output file path (default: ./ecosystem.config.js)")
+	InstallCmd.Flags().BoolVarP(&installForce, "force", "f", false,
 		"replace the entire output file instead of merging")
-	WizardInstallCmd.Flags().BoolVar(&installNoMerge, "no-merge", false,
+	InstallCmd.Flags().BoolVar(&installNoMerge, "no-merge", false,
 		"abort if the output file already exists (legacy behavior)")
 }
 
@@ -116,7 +116,7 @@ func init() {
 // so multiple installs of the same script in different folders don't
 // collide.
 func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
-	name := wizard.DeriveName(script)
+	name := corewizard.DeriveName(script)
 	if cwdBasename != "" {
 		name = name + "-" + cwdBasename
 	}
@@ -137,12 +137,12 @@ func buildInstallApp(script, prefix, userPrompt, namespace, cwdBasename, cwd str
 		Args:      args,
 		Instances: 1,
 		Namespace: namespace,
-		Version:   wizard.DefaultVersion,
+		Version:   corewizard.DefaultVersion,
 		CWD:       cwd,
 		// A planner agent is a per-machine choice, not something every
 		// consumer of this ecosystem file should be handed. Publishing it
-		// as opt-in means `pm2 start owner/repo` skips it and prints the
-		// `--with <name>` command instead.
+		// as opt-in means `pm2 task start owner/repo` registers it paused and
+		// prints the resume command instead.
 		Optional: true,
 	}
 	a.Normalize("")

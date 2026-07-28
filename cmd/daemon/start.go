@@ -1,4 +1,4 @@
-package cmd
+package daemon
 
 import (
 	"fmt"
@@ -6,16 +6,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
-	"time"
 
-	"github.com/bizshuk/pm2/daemon"
-	"github.com/bizshuk/pm2/model"
+	appcmd "github.com/bizshuk/pm2/cmd"
+	daemonruntime "github.com/bizshuk/pm2/daemon"
 	"github.com/spf13/cobra"
 )
 
-var daemonStartForeground bool
-
-// DaemonStartCmd is `pm2 daemon start [--foreground]`.
+// StartCmd is `pm2 daemon start [--foreground]`.
 //
 // In background mode (default) the CLI spawns itself with the
 // `daemon start --foreground` argv so the foreground path is the
@@ -26,30 +23,40 @@ var daemonStartForeground bool
 // In `--foreground` mode we call `daemon.NewServer(...).Listen(...)`
 // directly so Ctrl+C / SIGTERM cleanly tears the daemon down. This
 // is also the path the launchd / systemd units use.
-var DaemonStartCmd = &cobra.Command{
+var StartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the PM2 daemon (background by default)",
+	Short: "Start the PM2 daemon (alias: pm2 start)",
 	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if daemonStartForeground {
-			srv := daemon.NewServer(pm2Home)
-			return srv.Listen(socketPath())
-		}
-		return startDaemonAsBackground()
-	},
+	RunE:  runStart,
 }
 
 func init() {
-	DaemonStartCmd.Flags().BoolVarP(&daemonStartForeground, "foreground", "f", false, "Run the daemon in the foreground (blocking)")
+	bindStartFlags(StartCmd)
 }
 
-// startDaemonAsBackground re-execs the current binary with
+func bindStartFlags(command *cobra.Command) {
+	command.Flags().BoolP("foreground", "f", false, "Run the daemon in the foreground (blocking)")
+}
+
+func runStart(cmd *cobra.Command, _ []string) error {
+	foreground, err := cmd.Flags().GetBool("foreground")
+	if err != nil {
+		return fmt.Errorf("read --foreground: %w", err)
+	}
+	if foreground {
+		srv := daemonruntime.NewServer(appcmd.PM2Home())
+		return srv.Listen(appcmd.SocketPath())
+	}
+	return startAsBackground()
+}
+
+// startAsBackground re-execs the current binary with
 // `daemon start --foreground` and detaches it. Stdout/stderr are
 // redirected to `~/.pm2/daemon.log` / `~/.pm2/daemon-err.log` so
 // the user can `tail -f` them after the fact. Setpgid ensures the
 // daemon is its own process group leader (so `pm2 daemon kill` can
 // later signal the whole tree if needed).
-func startDaemonAsBackground() error {
+func startAsBackground() error {
 	// Clear the stop marker so future CLI invocations can auto-respawn
 	// again. The user just explicitly asked for a daemon — the
 	// auto-spawn opt-out from a previous `pm2 daemon stop` is no
@@ -67,7 +74,7 @@ func startDaemonAsBackground() error {
 		return err
 	}
 
-	logDir := pm2Home
+	logDir := appcmd.PM2Home()
 	_ = os.MkdirAll(logDir, 0o755)
 	logFile := filepath.Join(logDir, "daemon.log")
 	errFile := filepath.Join(logDir, "daemon-err.log")
@@ -97,54 +104,4 @@ func startDaemonAsBackground() error {
 
 	fmt.Println("PM2 daemon started in the background.")
 	return nil
-}
-
-// autoStartDaemon is the silent variant of startDaemonAsBackground
-// used by other CLI commands (e.g. `pm2 start`) when they detect no
-// daemon is reachable on the socket. Unlike the user-facing
-// `pm2 daemon start`, this path does not redirect logs (they'd
-// duplicate with the foreground daemon's own redirect), and it
-// pings the socket until the daemon is ready to accept RPC — so the
-// caller can immediately send a StartApp request without a race.
-//
-// Kept in this file (not daemon.go) because it is mechanically a
-// "spawn the daemon binary" helper, just with different I/O and a
-// readiness wait.
-func autoStartDaemon() error {
-	// Honour `pm2 daemon stop`: if the user wrote the stop marker,
-	// refuse to silently respawn. Auto-spawn is a UX shortcut for the
-	// happy path; when the user has explicitly opted out, surface a
-	// clear error pointing them at `pm2 daemon start`.
-	if hasStopMarker() {
-		return fmt.Errorf(
-			"daemon was stopped via 'pm2 daemon stop'; " +
-				"auto-respawn is suppressed. Run 'pm2 daemon start' to re-enable",
-		)
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(exe, "daemon", "start", "--foreground")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn daemon: %w", err)
-	}
-	_ = cmd.Process.Release()
-
-	// Wait until daemon is ready (up to 3 seconds)
-	sock := socketPath()
-	for i := 0; i < 30; i++ {
-		time.Sleep(100 * time.Millisecond)
-		resp, err := model.SendRequest(sock, model.Request{Command: model.CmdPing})
-		if err == nil && resp.OK {
-			return nil
-		}
-	}
-	return fmt.Errorf("daemon did not start in time")
 }

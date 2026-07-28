@@ -47,7 +47,7 @@ func RenderLayout(ctx ViewContext) string {
 func RenderRightPane(ctx ViewContext, w, h int) string {
 	if len(ctx.Procs) == 0 {
 		return lipgloss.NewStyle().Width(w).Padding(1, 2).Foreground(theme.Muted).
-			Render("no processes\nstart one: pm2 start <script>")
+			Render("no tasks\nrun config: pm2 task start [ecosystem.config.js]")
 	}
 	p := ctx.Procs[ctx.Selected]
 	if ctx.LogFocus {

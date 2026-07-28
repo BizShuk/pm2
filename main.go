@@ -8,6 +8,9 @@ import (
 	sdkconfig "github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/gosdk/metric"
 	appcmd "github.com/bizshuk/pm2/cmd"
+	daemoncmd "github.com/bizshuk/pm2/cmd/daemon"
+	taskcmd "github.com/bizshuk/pm2/cmd/task"
+	wizardcmd "github.com/bizshuk/pm2/cmd/wizard"
 	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
@@ -22,20 +25,17 @@ func init() {
 	sdkconfig.Default(sdkconfig.WithAppName("pm2"))
 
 	RootCmd.AddCommand(
-		appcmd.StartCmd,
-		appcmd.StopCmd,
-		appcmd.RestartCmd,
-		appcmd.PauseCmd,
-		appcmd.ResumeCmd,
-		appcmd.DeleteCmd,
+		daemoncmd.RootStartCmd,
+		taskcmd.ApplyCmd,
 		appcmd.ListCmd,
 		appcmd.LogsCmd,
 		appcmd.SaveCmd,
 		appcmd.ResurrectCmd,
 		appcmd.StartupCmd,
-		appcmd.DaemonCmd,
+		daemoncmd.Cmd,
+		taskcmd.Cmd,
 		appcmd.MonitorCmd,
-		appcmd.WizardCmd,
+		wizardcmd.Cmd,
 		sdkcmd.ConfigCmd,
 	)
 

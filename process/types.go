@@ -18,10 +18,10 @@ const (
 	StatusErrored   Status = "errored"
 	StatusLaunching Status = "launching"
 	// StatusPaused marks a process (typically a cron task) whose cron
-	// schedule has been deliberately suspended via `pm2 pause`. Unlike
+	// schedule has been deliberately suspended via `pm2 task pause`. Unlike
 	// StatusStopped — which a cron task also carries while idle between
 	// fires — a paused task has NO scheduler entry and will not fire
-	// until `pm2 resume` re-registers it.
+	// until `pm2 task resume` re-registers it.
 	StatusPaused Status = "paused"
 )
 
@@ -56,10 +56,10 @@ type AppConfig struct {
 	// which would otherwise spawn with its own minimal environment.
 	BaseEnv []string `json:"base_env,omitempty"`
 	// Paused indicates the process (typically a cron task) was deliberately
-	// suspended via `pm2 pause`. Persisted across save/resurrect so a daemon
+	// suspended via `pm2 task pause`. Persisted across save/resurrect so a daemon
 	// restart does not silently re-enable a cron schedule the user paused.
 	Paused bool `json:"paused,omitempty"`
-	// Optional marks an app as inactive by default: `pm2 start` registers
+	// Optional marks an app as inactive by default: `pm2 task start` registers
 	// it paused unless the caller passes --all or names it via --with. The
 	// zero value (false) means required, so an app that says nothing starts
 	// immediately.

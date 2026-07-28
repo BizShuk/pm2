@@ -8,6 +8,8 @@ import (
 
 var pm2Home string
 
+const daemonStopMarkerFile = "daemon.stopped"
+
 func init() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -20,4 +22,20 @@ func init() {
 
 func socketPath() string {
 	return filepath.Join(pm2Home, "pm2.sock")
+}
+
+// PM2Home returns the shared state directory used by CLI command packages.
+func PM2Home() string {
+	return pm2Home
+}
+
+// SocketPath returns the daemon socket used by CLI command packages.
+func SocketPath() string {
+	return socketPath()
+}
+
+// DaemonStopMarkerPath returns the durable marker that disables silent
+// daemon auto-spawn after an explicit `pm2 daemon stop`.
+func DaemonStopMarkerPath() string {
+	return filepath.Join(pm2Home, daemonStopMarkerFile)
 }

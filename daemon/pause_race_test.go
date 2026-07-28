@@ -47,9 +47,9 @@ func TestPauseDuringCronFireLeavesNoSchedule(t *testing.T) {
 		// Let any in-flight fire finish its (guarded) relaunch attempt.
 		time.Sleep(20 * time.Millisecond)
 
-		mp, _ := s.reg.Get("default:racecron")
-		if mp.Info.Status != process.StatusPaused {
-			t.Fatalf("iter %d: status=%s, want paused", i, mp.Info.Status)
+		info, _ := s.reg.SnapshotOne("default:racecron")
+		if info.Status != process.StatusPaused {
+			t.Fatalf("iter %d: status=%s, want paused", i, info.Status)
 		}
 		if got := s.scheduler.EntryCount(); got != 0 {
 			t.Fatalf("iter %d: paused task has %d scheduler entries, want 0 — it would keep firing", i, got)

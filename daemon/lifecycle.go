@@ -74,12 +74,16 @@ func (pm *ProcessManager) stopProcess(mp *ManagedProcess) error {
 		func() {
 			pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 				mp.stopping = true
-				mp.Info.Status = process.StatusStopping
+				if !mp.paused {
+					mp.Info.Status = process.StatusStopping
+				}
 			})
 		},
 		func() {
 			pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
-				mp.Info.Status = process.StatusStopped
+				if !mp.paused {
+					mp.Info.Status = process.StatusStopped
+				}
 				mp.Info.PID = 0
 			})
 		},

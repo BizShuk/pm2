@@ -23,39 +23,39 @@ When NOT to use:
 
 ## Command Reference
 
-| Command                       | Purpose                                      | Usage / Key Flags                                                                        |
-| ----------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `pm2 start <target>`          | Start apps from an ecosystem file or GitHub repo | `--all` (include optional apps), `--with name1,name2` (opt into specific ones) |
-| `pm2 stop <name\|id\|all>`    | Stop a process gracefully                    | `SIGTERM` escalated to `SIGKILL` after 5 seconds                                         |
-| `pm2 restart <name\|id\|all>` | Restart a process                            | Closes, re-spawns, and re-registers scheduler                                            |
-| `pm2 pause <name\|id\|all>`   | Suspend a process and its cron schedule      | Removes scheduler entries; status becomes `paused`                                       |
-| `pm2 resume <name\|id\|all>`  | Resume a paused process                      | Re-registers cron and launches the process                                               |
-| `pm2 delete <name\|id\|all>`  | Remove a process from the registry           | Removes configuration and stops process                                                  |
-| `pm2 list`                    | Print styled non-interactive process table   | Bordered snapshot; `--no-color` for plain output                                         |
-| `pm2 logs [name\|id]`         | Tail log files directly                      | `--lines N` to specify trailing lines                                                    |
-| `pm2 save`                    | Persist current app configs                  | Saves to `~/.pm2/dump.json`                                                              |
-| `pm2 resurrect`               | Restore saved app configs                    | Loads from `~/.pm2/dump.json`                                                            |
-| `pm2 monitor` / `pm2 m`       | Launch Bubbletea terminal dashboard          | Opens the two-pane process detail/log view directly; no `-d` flag                        |
-| `pm2 startup`                 | Generate OS boot startup scripts             | Creates `plist` on macOS, systemd unit on Linux                                          |
-| `pm2 daemon start`            | Spawn the daemon process                     | `--foreground` to run blocking in foreground                                             |
-| `pm2 daemon kill`             | Gracefully exit all apps and daemon          | CLI commands can still auto-start the daemon                                             |
-| `pm2 daemon stop`             | Shutdown all apps, daemon & block auto-start | Writes a stop marker to suppress auto-respawn                                            |
-| `pm2 daemon status`           | Read-only daemon status check                | Works whether the daemon is running or not                                               |
-| `pm2 wizard`                  | Interactively build ecosystem config         | `-o, --output`, `-f, --force`, `-y, --yes` (accept all defaults)                         |
-| `pm2 wizard install <scr>`    | Register pre-configured planner agent        | `--system-planner` or `--business-planner`                                               |
+| Command                                      | Purpose                                           | Usage / Key Flags                                                        |
+| -------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ |
+| `pm2 start` / `pm2 daemon start`             | Spawn the daemon process                          | `--foreground` to run blocking in foreground                             |
+| `pm2 task start <target>` / `pm2 apply <target>` | Apply apps from an ecosystem file or GitHub repo | `apply` is the explicit short alias; accepts `--all`, `--with`, `--single` |
+| `pm2 task restart <name\|id\|all>`           | Restart a task                                   | Closes, re-spawns, and re-registers scheduler                            |
+| `pm2 task stop <target>`                     | Stop a task gracefully                           | `SIGTERM` escalated to `SIGKILL` after 5 seconds                         |
+| `pm2 task pause <target>`                    | Suspend a task and its cron schedule             | Removes scheduler entries; status becomes `paused`                       |
+| `pm2 task resume <target>`                   | Resume a paused task                             | Re-registers cron and launches the process                               |
+| `pm2 task delete <target>`                   | Remove a task from the registry                  | Removes configuration and stops process                                  |
+| `pm2 list`                                   | Print styled non-interactive process table        | Bordered snapshot; `--no-color` for plain output                         |
+| `pm2 logs [name\|id]`                        | Tail log files directly                           | `--lines N` to specify trailing lines                                    |
+| `pm2 save`                                   | Persist current app configs                       | Saves to `~/.pm2/dump.json`                                              |
+| `pm2 resurrect`                              | Restore saved app configs                         | Loads from `~/.pm2/dump.json`                                            |
+| `pm2 monitor` / `pm2 m`                      | Launch Bubbletea terminal dashboard               | Opens the two-pane process detail/log view directly; no `-d` flag        |
+| `pm2 startup`                                | Generate OS boot startup scripts                  | Creates `plist` on macOS, systemd unit on Linux                          |
+| `pm2 daemon kill`                            | Gracefully exit all apps and daemon               | CLI commands can still auto-start the daemon                             |
+| `pm2 daemon stop`                            | Shutdown all apps, daemon and block auto-start     | Writes a stop marker to suppress auto-respawn                            |
+| `pm2 daemon status`                          | Read-only daemon status check                     | Works whether or not the daemon is running                               |
+| `pm2 wizard`                                 | Interactively build ecosystem config              | `-o, --output`, `-f, --force`, `-y, --yes`                              |
+| `pm2 wizard install <scr>`                   | Register pre-configured planner agent             | `--system-planner` or `--business-planner`                               |
 
 ## Key Differences
 
-### `pm2 stop` vs `pm2 daemon kill` vs `pm2 daemon stop`
+### `pm2 task stop` vs `pm2 daemon kill` vs `pm2 daemon stop`
 
-- `pm2 stop` terminates a single managed process. The daemon keeps running.
+- `pm2 task stop` terminates a single managed process. The daemon keeps running.
 - `pm2 daemon kill` terminates all managed processes, then gracefully exits the daemon itself. Subsequent CLI commands can still auto-respawn it.
 - `pm2 daemon stop` terminates all managed processes, exits the daemon, and writes a stop marker that blocks silent auto-spawning from other CLI commands. Use `pm2 daemon start` to clear the marker and allow auto-spawning again.
 
-### `pm2 pause` vs `pm2 stop`
+### `pm2 task pause` vs `pm2 task stop`
 
-- For cron-triggered tasks, `pm2 stop` leaves the scheduler registered, meaning the cron task will still fire at its next scheduled time.
-- `pm2 pause` removes the task from the cron scheduler and marks its state as `paused`. The process will not run again until `pm2 resume` is executed.
+- For cron-triggered tasks, `pm2 task stop` leaves the scheduler registered, meaning the cron task will still fire at its next scheduled time.
+- `pm2 task pause` removes the task from the cron scheduler and marks its state as `paused`. The process will not run again until `pm2 task resume` is executed.
 
 ## Ecosystem Configurations
 
@@ -116,7 +116,7 @@ Start and forget. pm2 auto-restarts on crash up to `max_restarts`.
 }
 ```
 
-Runs once at 06:00 daily, exits, waits for the next schedule. Use `pm2 pause` to suspend, `pm2 resume` to reactivate.
+Runs once at 06:00 daily, exits, waits for the next schedule. Use `pm2 task pause` to suspend, `pm2 task resume` to reactivate.
 
 #### Pattern 3 — Shell script with weekly schedule
 
@@ -248,24 +248,20 @@ Multiple apps in one config file. Each gets its own name, schedule, and lifecycl
 
 ## Workflow Examples
 
-### Start all apps from ecosystem file
+### Run all required apps from an ecosystem file
 
 ```bash
-pm2 start ecosystem.config.js
-```
-
-### Start a single script with inline options
-
-```bash
-pm2 start ./worker.js -n "bg-worker" --cron-restart "0 */2 * * *" -e LOG_LEVEL=debug
+pm2 task start ecosystem.config.js
+pm2 apply                   # explicit short alias; uses ./ecosystem.config.js
+pm2 apply --single          # choose and apply one app only
 ```
 
 ### Suspend a cron task temporarily
 
 ```bash
-pm2 pause "Disk Analysis Daily"
+pm2 task pause "Disk Analysis Daily"
 # ... later ...
-pm2 resume "Disk Analysis Daily"
+pm2 task resume "Disk Analysis Daily"
 ```
 
 ### Check what is running
@@ -300,10 +296,10 @@ pm2 daemon stop        # stop all + exit daemon + block auto-respawn
 
 ### Optional apps
 
-An app may set `optional: true` to become opt-in. `pm2 start` skips it and
-prints the command to enable it; everything else in the file still starts.
-This is useful when a repo ships both mandatory tasks (a daily report) and
-tasks a given machine may not want (a planner agent).
+An app may set `optional: true` to become opt-in. `pm2 task start` registers it in
+the `paused` state and prints the command to resume it; everything else in the
+file starts. This is useful when a repo ships both mandatory tasks (a daily
+report) and tasks a given machine may not want (a planner agent).
 
 ```javascript
 module.exports = {
@@ -314,19 +310,23 @@ module.exports = {
 };
 ```
 
-- `pm2 start ./ecosystem.config.js` — starts `daily-report` only
-- `pm2 start ./ecosystem.config.js --with planner` — also starts `planner`
-- `pm2 start ./ecosystem.config.js --all` — starts every app
+- `pm2 task start ./ecosystem.config.js` — starts `daily-report` and registers `planner` paused
+- `pm2 task start ./ecosystem.config.js --with planner` — also starts `planner`
+- `pm2 task start ./ecosystem.config.js --all` — starts every app
+- `pm2 apply --single` — choose one app from `./ecosystem.config.js`; leave every other app untouched
 
 `--with` matches `name` or `namespace:name`. A name that matches no app is an
 error, so a typo does not silently leave the app unstarted. The same rules
-apply to remote installs (`pm2 start owner/repo`).
+apply to remote installs (`pm2 task start owner/repo`).
+
+`--single` is interactive, starts an explicitly selected optional app as
+active, and cannot be combined with `--all` or `--with`.
 
 ## Common Mistakes
 
-- Confusing `pm2 stop` with `pm2 daemon kill` or `pm2 daemon stop`. Always double check if you want to stop a single process or the entire daemon.
-- Expecting a cron task to stop firing with `pm2 stop`. Use `pm2 pause` to suspend cron schedules.
-- Starting a script with a duplicate name but different code. Use `pm2 delete` first to remove the old entry.
+- Confusing `pm2 task stop` with `pm2 daemon kill` or `pm2 daemon stop`. Always double check if you want to stop a single process or the entire daemon.
+- Expecting a cron task to stop firing with `pm2 task stop`. Use `pm2 task pause` to suspend cron schedules.
+- Starting a script with a duplicate name but different code. Use `pm2 task delete` first to remove the old entry.
 - Using `cron` when you mean `cron_restart` (or vice versa). `cron` = one-shot scheduled run; `cron_restart` = restart an already-running process on schedule.
 - Setting `autorestart: true` (default) for a cron task that exits after each run — this causes an unnecessary immediate restart. Set `autorestart: false` for one-shot cron tasks.
-- Forgetting that relative `script` paths resolve against the config file's directory, not the shell's CWD when running `pm2 start`.
+- Forgetting that relative `script` paths resolve against the config file's directory, not the shell's CWD when running `pm2 task start`.

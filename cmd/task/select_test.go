@@ -1,6 +1,7 @@
-package cmd
+package task
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -133,5 +134,80 @@ func TestSelectAppsNoOptionalIsUnchanged(t *testing.T) {
 	}
 	if len(selected) != 2 || len(paused) != 0 {
 		t.Errorf("selected = %v, paused = %v", names(selected), names(paused))
+	}
+}
+
+func TestSelectSingleAppByNumberActivatesOptionalApp(t *testing.T) {
+	app, err := selectSingleApp(fixtureApps(), "2")
+	if err != nil {
+		t.Fatalf("selectSingleApp: %v", err)
+	}
+	if app.Name != "planner" {
+		t.Fatalf("selected app = %q, want planner", app.Name)
+	}
+	if app.Paused {
+		t.Error("an explicitly selected optional app must be active")
+	}
+}
+
+func TestSelectSingleAppByNamespacedKey(t *testing.T) {
+	app, err := selectSingleApp(fixtureApps(), "infra:auditor")
+	if err != nil {
+		t.Fatalf("selectSingleApp: %v", err)
+	}
+	if app.Name != "auditor" {
+		t.Fatalf("selected app = %q, want auditor", app.Name)
+	}
+}
+
+func TestSelectSingleAppRejectsAmbiguousName(t *testing.T) {
+	apps := []process.AppConfig{
+		{Namespace: "one", Name: "worker", Script: "./one.sh"},
+		{Namespace: "two", Name: "worker", Script: "./two.sh"},
+	}
+
+	_, err := selectSingleApp(apps, "worker")
+	if err == nil {
+		t.Fatal("expected an ambiguous bare name to fail")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error = %q, want ambiguity explanation", err)
+	}
+}
+
+func TestSelectSingleAppRejectsInvalidChoice(t *testing.T) {
+	_, err := selectSingleApp(fixtureApps(), "99")
+	if err == nil {
+		t.Fatal("expected an out-of-range choice to fail")
+	}
+	if !strings.Contains(err.Error(), "99") {
+		t.Errorf("error = %q, want invalid choice", err)
+	}
+}
+
+func TestChooseSingleAppListsAndReturnsOnlyChosenApp(t *testing.T) {
+	var out bytes.Buffer
+	app, err := chooseSingleApp(fixtureApps(), strings.NewReader("3\n"), &out)
+	if err != nil {
+		t.Fatalf("chooseSingleApp: %v", err)
+	}
+	if app.Name != "auditor" {
+		t.Fatalf("selected app = %q, want auditor", app.Name)
+	}
+	for _, want := range []string{"1) default:daily-report", "2) default:planner", "3) infra:auditor", "Choose one app"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("prompt output %q does not contain %q", out.String(), want)
+		}
+	}
+}
+
+func TestChooseSingleAppRejectsEmptyEcosystem(t *testing.T) {
+	var out bytes.Buffer
+	_, err := chooseSingleApp(nil, strings.NewReader(""), &out)
+	if err == nil {
+		t.Fatal("expected an empty ecosystem to fail")
+	}
+	if !strings.Contains(err.Error(), "no apps") {
+		t.Errorf("error = %q, want no apps explanation", err)
 	}
 }
