@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -225,22 +226,22 @@ func TestRenderEscapes(t *testing.T) {
 
 func TestCollectAnswersSingle(t *testing.T) {
 	// askOneApp prompt sequence (all blanks → defaults):
-	//   1. script
+	//   1. namespace
 	//   2. name
-	//   3. args
-	//   4. namespace
+	//   3. script
+	//   4. args
 	//   5. instances
 	//   6. watch
 	//   7. env (blank → finish; reads 1 line)
-	//   8. cron (blank → skip restart)
+	//   8. cron (blank → skip)
 	//   9. optional (blank → default true)
 	// Then collectAnswers prompt: "Add another app?" → "n"
 	// Total: 10 lines of input.
 	lines := []string{
+		"",              // namespace → Agent
+		"",              // name → app
 		"name-only-one", // script
-		"",              // name (derive)
 		"",              // args
-		"",              // namespace
 		"",              // instances
 		"",              // watch
 		"",              // env (blank → finish)
@@ -262,11 +263,11 @@ func TestCollectAnswersSingle(t *testing.T) {
 	if got.Script != "name-only-one" {
 		t.Errorf("Expected script 'name-only-one', got %q", got.Script)
 	}
-	if got.Name != "name-only-one" {
-		t.Errorf("Expected derived name 'name-only-one', got %q", got.Name)
+	if got.Name != "AGENT NAME-ONLY-ONE - APP" {
+		t.Errorf("Name = %q, want %q", got.Name, "AGENT NAME-ONLY-ONE - APP")
 	}
-	if got.Namespace != "default" {
-		t.Errorf("Expected namespace 'default', got %q", got.Namespace)
+	if got.Namespace != "Agent" {
+		t.Errorf("Expected namespace 'Agent', got %q", got.Namespace)
 	}
 	if got.Instances != 1 {
 		t.Errorf("Expected instances 1, got %d", got.Instances)
@@ -283,30 +284,178 @@ func TestCollectAnswersSingle(t *testing.T) {
 	}
 }
 
+func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
+	input := strings.Join([]string{
+		"5",            // namespace → AutoP
+		"daily sync",   // name
+		"./worker.js",  // script
+		"--queue high", // args
+		"2",            // instances
+		"y",            // watch mode
+		"MODE=prod",    // env
+		"",             // finish env
+		"0 4 * * *",    // custom cron
+		"2",            // optional → no
+		"n",            // add another app → no
+	}, "\n") + "\n"
+	var out bytes.Buffer
+
+	apps, err := collectAnswers(strings.NewReader(input), &out)
+	if err != nil {
+		t.Fatalf("collectAnswers: %v", err)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("len(apps) = %d, want 1", len(apps))
+	}
+	got := apps[0]
+	if got.Namespace != "AutoP" {
+		t.Errorf("Namespace = %q, want AutoP", got.Namespace)
+	}
+	if got.Name != "AUTOP WORKER - DAILY SYNC" {
+		t.Errorf("Name = %q, want %q", got.Name, "AUTOP WORKER - DAILY SYNC")
+	}
+	if got.Script != "./worker.js" {
+		t.Errorf("Script = %q, want ./worker.js", got.Script)
+	}
+	if strings.Join(got.Args, "|") != "--queue|high" {
+		t.Errorf("Args = %v, want [--queue high]", got.Args)
+	}
+	if got.Instances != 2 {
+		t.Errorf("Instances = %d, want 2", got.Instances)
+	}
+	if !got.Watch {
+		t.Error("Watch = false, want true")
+	}
+	if got.Env["MODE"] != "prod" {
+		t.Errorf("Env[MODE] = %q, want prod", got.Env["MODE"])
+	}
+	if got.Cron != "0 4 * * *" {
+		t.Errorf("Cron = %q, want %q", got.Cron, "0 4 * * *")
+	}
+	if got.CronRestart != "" {
+		t.Errorf("CronRestart = %q, want empty", got.CronRestart)
+	}
+	if got.Optional {
+		t.Error("Optional = true, want false")
+	}
+
+	promptOrder := []string{
+		"Namespace:",
+		"Name [app]:",
+		"Script [app.js]:",
+		"Args (space-separated):",
+		"Instances [1]:",
+		"Watch mode? [y/N]:",
+		"Env vars?",
+		"Cron schedule (blank to skip, r for random daily between 2am and 8am, or enter cron format):",
+		"Optional:",
+		"Add another app? [y/N]:",
+	}
+	output := out.String()
+	previous := -1
+	for _, prompt := range promptOrder {
+		offset := strings.Index(output[previous+1:], prompt)
+		if offset < 0 {
+			t.Fatalf("missing prompt %q after offset %d:\n%s", prompt, previous, output)
+		}
+		previous += offset + 1
+	}
+	if strings.Contains(output, "Cron restart") {
+		t.Errorf("unexpected cron-restart prompt:\n%s", output)
+	}
+}
+
+func TestWizardChoiceMenus(t *testing.T) {
+	input := strings.Repeat("\n", 9) + "n\n"
+	var out bytes.Buffer
+
+	apps, err := collectAnswers(strings.NewReader(input), &out)
+	if err != nil {
+		t.Fatalf("collectAnswers: %v", err)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("len(apps) = %d, want 1", len(apps))
+	}
+	if apps[0].Namespace != "Agent" {
+		t.Errorf("blank namespace selected %q, want Agent", apps[0].Namespace)
+	}
+	if !apps[0].Optional {
+		t.Error("blank optional selection = false, want true")
+	}
+
+	output := out.String()
+	for _, menu := range []string{
+		"Namespace:\n" +
+			"  1. Agent\n" +
+			"  2. Backup\n" +
+			"  3. Local\n" +
+			"  4. Service\n" +
+			"  5. AutoP\n" +
+			"Choose namespace [1]: ",
+		"Optional:\n" +
+			"  1. Yes (registered but paused)\n" +
+			"  2. No\n" +
+			"Choose optional [1]: ",
+	} {
+		if !strings.Contains(output, menu) {
+			t.Errorf("missing menu:\n%s\nfull output:\n%s", menu, output)
+		}
+	}
+}
+
+func TestResolveCronSchedule(t *testing.T) {
+	if got := resolveCronSchedule(""); got != "" {
+		t.Errorf("resolveCronSchedule(empty) = %q, want empty", got)
+	}
+	if got := resolveCronSchedule("  15 6 * * 1-5  "); got != "15 6 * * 1-5" {
+		t.Errorf("custom cron = %q, want trimmed custom expression", got)
+	}
+
+	for i := 0; i < 100; i++ {
+		got := resolveCronSchedule("r")
+		fields := strings.Fields(got)
+		if len(fields) != 5 || fields[2] != "*" || fields[3] != "*" || fields[4] != "*" {
+			t.Fatalf("random cron = %q, want five-field daily expression", got)
+		}
+		minute, err := strconv.Atoi(fields[0])
+		if err != nil {
+			t.Fatalf("random cron minute %q: %v", fields[0], err)
+		}
+		hour, err := strconv.Atoi(fields[1])
+		if err != nil {
+			t.Fatalf("random cron hour %q: %v", fields[1], err)
+		}
+		minuteOfDay := hour*60 + minute
+		if minuteOfDay < 2*60 || minuteOfDay > 8*60 {
+			t.Fatalf("random cron = %q, outside inclusive 02:00-08:00 window", got)
+		}
+	}
+}
+
 // TestCollectAnswersMulti covers two apps in a row.
 func TestCollectAnswersMulti(t *testing.T) {
-	// Each app: 9 lines (script, name, args, namespace, instances, watch,
+	// Each app: 9 lines (namespace, name, script, args, instances, watch,
 	// env-blank, cron-blank, optional). Between apps: 1 line "y" / "n".
 	input := strings.Join([]string{
-		"first.js",  // 1: script
-		"",          // 2: name
-		"",          // 3: args
-		"",          // 4: namespace
+		"1",         // 1: namespace → Agent
+		"",          // 2: name → app
+		"first.js",  // 3: script
+		"",          // 4: args
 		"",          // 5: instances
 		"",          // 6: watch
 		"",          // 7: env (blank → finish)
 		"",          // 8: cron
 		"",          // 9: optional (blank → default yes)
 		"y",         // add another? → yes
-		"second.js", // 1: script
+		"5",         // 1: namespace → AutoP
 		"second",    // 2: name
-		"",          // 3: args
-		"",          // 4: namespace
+		"second.js", // 3: script
+		"",          // 4: args
 		"",          // 5: instances
 		"",          // 6: watch
 		"",          // 7: env
 		"",          // 8: cron
-		"n",         // 9: optional → explicit no
+		"2",         // 9: optional → explicit no
 		"n",         // add another? → no
 	}, "\n")
 	in := strings.NewReader(input + "\n")
@@ -325,8 +474,14 @@ func TestCollectAnswersMulti(t *testing.T) {
 	if apps[1].Script != "second.js" {
 		t.Errorf("apps[1].Script = %q, want %q", apps[1].Script, "second.js")
 	}
-	if apps[1].Name != "second" {
-		t.Errorf("apps[1].Name = %q, want %q", apps[1].Name, "second")
+	if apps[0].Name != "AGENT FIRST - APP" {
+		t.Errorf("apps[0].Name = %q, want %q", apps[0].Name, "AGENT FIRST - APP")
+	}
+	if apps[1].Name != "AUTOP SECOND - SECOND" {
+		t.Errorf("apps[1].Name = %q, want %q", apps[1].Name, "AUTOP SECOND - SECOND")
+	}
+	if apps[0].Namespace != "Agent" || apps[1].Namespace != "AutoP" {
+		t.Errorf("namespaces = [%q %q], want [Agent AutoP]", apps[0].Namespace, apps[1].Namespace)
 	}
 	// Per-app answers must not leak: #1 took the default (yes), #2 said no.
 	if !apps[0].Optional {
@@ -596,8 +751,14 @@ func TestRunInteractiveYesAllSynthesizesDefaultApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(data), `name: "app"`) {
+	if !strings.Contains(string(data), `name: "AGENT APP - APP"`) {
 		t.Errorf("expected default app in output, got:\n%s", data)
+	}
+	if !strings.Contains(string(data), `namespace: "Agent"`) {
+		t.Errorf("expected --yes to select the first namespace, got:\n%s", data)
+	}
+	if !strings.Contains(string(data), "optional: true") {
+		t.Errorf("expected --yes to register the default app paused, got:\n%s", data)
 	}
 }
 
@@ -614,8 +775,35 @@ func TestRunInteractiveRejectsBadFormat(t *testing.T) {
 	}
 }
 
+func TestRunInteractiveHonorsFinalWriteAnswer(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "ecosystem.config.js")
+	input := strings.Repeat("\n", 9) +
+		"n\n" + // add another app
+		"n\n" // write to file
+	var stdout bytes.Buffer
+	ctx := WizardContext{
+		In:     strings.NewReader(input),
+		Out:    &stdout,
+		ErrOut: &bytes.Buffer{},
+	}
+
+	if err := RunInteractive(ctx, RunOptions{Output: output}); err != nil {
+		t.Fatalf("RunInteractive: %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("output file exists after declining final write: err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), "Write to file "+output+"? [Y/n]: ") {
+		t.Errorf("missing write-to-file prompt:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Aborted.") {
+		t.Errorf("missing aborted confirmation:\n%s", stdout.String())
+	}
+}
+
 // TestRunInstallForcesNonInteractive confirms RunInstall never blocks
-// on the "Write?" prompt even when ctx.In is a closed reader.
+// on the "Write to file?" prompt even when ctx.In is a closed reader.
 func TestRunInstallForcesNonInteractive(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "ecosystem.config.js")
@@ -635,8 +823,29 @@ func TestRunInstallForcesNonInteractive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(data), `name: "app"`) {
+	if !strings.Contains(string(data), `name: "AGENT APP - APP"`) {
 		t.Errorf("expected default app in output, got:\n%s", data)
+	}
+}
+
+func TestWriteEcosystemFilePromptsToWriteToFile(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "ecosystem.config.js")
+	var stdout bytes.Buffer
+	ctx := WizardContext{
+		In:     strings.NewReader("n\n"),
+		Out:    &stdout,
+		ErrOut: &bytes.Buffer{},
+	}
+
+	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, output, DefaultWriteOptions()); err != nil {
+		t.Fatalf("WriteEcosystemFile: %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("output file exists after declining write: err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), "Write to file "+output+"? [Y/n]: ") {
+		t.Errorf("missing write-to-file prompt:\n%s", stdout.String())
 	}
 }
 

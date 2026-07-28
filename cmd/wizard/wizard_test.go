@@ -168,6 +168,74 @@ func resetCommandForTest(t *testing.T, command *cobra.Command) {
 	})
 }
 
+func TestWizardPromptCopy(t *testing.T) {
+	for _, want := range []string{
+		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, optional, add another app, then write to file.",
+		"Namespace choices: Agent, Backup, Local, Service, AutoP.",
+		"Generated names use uppercase NAMESPACE SCRIPT - NAME.",
+		"Enter r for a random daily time between 2am and 8am.",
+		"Optional choice 1 registers the app paused.",
+	} {
+		if !strings.Contains(Cmd.Long, want) {
+			t.Errorf("wizard long help missing %q:\n%s", want, Cmd.Long)
+		}
+	}
+
+	previousTTY := isTerminalFunc
+	isTerminalFunc = func(fd uintptr) bool { return false }
+	t.Cleanup(func() { isTerminalFunc = previousTTY })
+
+	root := newRootForTest(t)
+	root.SetArgs([]string{"wizard"})
+	root.SetIn(strings.NewReader(""))
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("wizard without a terminal or --yes returned nil error")
+	}
+	if !strings.Contains(stderr.String(), "pm2 wizard requires an interactive terminal") {
+		t.Errorf("non-terminal prompt does not name pm2 wizard:\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "pm2 eco") {
+		t.Errorf("non-terminal prompt retains stale pm2 eco name:\n%s", stderr.String())
+	}
+}
+
+func TestWizardFinalWritePrompt(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "ecosystem.config.js")
+
+	previousTTY := isTerminalFunc
+	isTerminalFunc = func(fd uintptr) bool { return true }
+	t.Cleanup(func() { isTerminalFunc = previousTTY })
+
+	root := newRootForTest(t)
+	root.SetArgs([]string{"wizard", "--output", output})
+	root.SetIn(strings.NewReader(
+		strings.Repeat("\n", 9) +
+			"n\n" + // add another app
+			"n\n", // write to file
+	))
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("wizard: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("output file exists after declining final write: err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), "Write to file "+output+"? [Y/n]: ") {
+		t.Errorf("missing write-to-file prompt:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Aborted.") {
+		t.Errorf("missing aborted confirmation:\n%s", stdout.String())
+	}
+}
+
 func TestWizardEndToEndMerge(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
@@ -175,19 +243,21 @@ func TestWizardEndToEndMerge(t *testing.T) {
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// askOneApp prompt sequence (blanks → defaults), then "n" to stop:
-	//   script, name, args, namespace, instances, watch, env-blank, cron-blank
-	//   → "n"
+	// askOneApp prompt sequence, then stop app collection and write:
+	//   namespace, name, script, args, instances, watch, env-blank,
+	//   cron-blank, optional → "n" → "y"
 	stdin := strings.Join([]string{
+		"3",         // namespace → Local
+		"worker",    // name
 		"worker.js", // script
-		"",          // name → derive "worker"
 		"",          // args
-		"",          // namespace
 		"",          // instances
 		"",          // watch
 		"",          // env
 		"",          // cron
+		"2",         // optional → no
 		"n",         // add another? → no
+		"y",         // write to file → yes
 	}, "\n") + "\n"
 
 	got, err := runWizard(t, dir, stdin,
@@ -198,8 +268,11 @@ func TestWizardEndToEndMerge(t *testing.T) {
 	if !strings.Contains(got, `name: "api"`) {
 		t.Errorf("merged output missing 'api':\n%s", got)
 	}
-	if !strings.Contains(got, `name: "worker"`) {
-		t.Errorf("merged output missing 'worker':\n%s", got)
+	if !strings.Contains(got, `name: "LOCAL WORKER - WORKER"`) {
+		t.Errorf("merged output missing composed worker name:\n%s", got)
+	}
+	if !strings.Contains(got, `namespace: "Local"`) {
+		t.Errorf("merged output missing Local namespace:\n%s", got)
 	}
 }
 
@@ -221,7 +294,7 @@ func TestWizardEndToEndForce(t *testing.T) {
 	if strings.Contains(got, "old-a") || strings.Contains(got, "old-b") {
 		t.Errorf("--force did not replace existing apps:\n%s", got)
 	}
-	if !strings.Contains(got, "name: \"app\"") {
+	if !strings.Contains(got, `name: "AGENT APP - APP"`) {
 		t.Errorf("expected default app name, got:\n%s", got)
 	}
 }
@@ -271,7 +344,7 @@ func TestWizardEndToEndNoMergeWithForce(t *testing.T) {
 	if strings.Contains(got, "old") {
 		t.Errorf("--no-merge --force did not overwrite:\n%s", got)
 	}
-	if !strings.Contains(got, "name: \"app\"") {
+	if !strings.Contains(got, `name: "AGENT APP - APP"`) {
 		t.Errorf("expected default app, got:\n%s", got)
 	}
 }

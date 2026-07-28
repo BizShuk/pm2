@@ -4,8 +4,15 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"strconv"
 	"strings"
+)
+
+const (
+	maxChoiceAttempts     = 5
+	randomCronStartMinute = 2 * 60
+	randomCronEndMinute   = 8 * 60
 )
 
 // promptLine reads a single line, trims whitespace, returns it.
@@ -51,6 +58,49 @@ func promptYesNo(rdr *bufio.Reader, out io.Writer, label string, def bool) (bool
 	return def, nil
 }
 
+// promptChoice renders a numbered menu and returns a one-based selection.
+// Blank input selects defaultChoice; invalid input is retried up to five times.
+func promptChoice(
+	rdr *bufio.Reader,
+	out io.Writer,
+	label string,
+	options []string,
+	defaultChoice int,
+) (int, error) {
+	if len(options) == 0 {
+		return 0, fmt.Errorf("%s has no options", label)
+	}
+	if defaultChoice < 1 || defaultChoice > len(options) {
+		return 0, fmt.Errorf("%s default choice %d is out of range", label, defaultChoice)
+	}
+
+	fmt.Fprintf(out, "%s:\n", label)
+	for i, option := range options {
+		fmt.Fprintf(out, "  %d. %s\n", i+1, option)
+	}
+
+	choiceLabel := "Choose " + strings.ToLower(label)
+	for attempt := 0; attempt < maxChoiceAttempts; attempt++ {
+		raw, err := promptLine(rdr, out, choiceLabel, strconv.Itoa(defaultChoice))
+		if err != nil {
+			return 0, err
+		}
+		if strings.TrimSpace(raw) == "" {
+			return defaultChoice, nil
+		}
+		choice, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err == nil && choice >= 1 && choice <= len(options) {
+			return choice, nil
+		}
+		fmt.Fprintf(out, "  (invalid choice, enter 1-%d)\n", len(options))
+	}
+	return 0, fmt.Errorf(
+		"invalid %s choice after %d attempts",
+		strings.ToLower(label),
+		maxChoiceAttempts,
+	)
+}
+
 // promptInstances reads an int with a soft retry loop; falls back to 1.
 func promptInstances(rdr *bufio.Reader, out io.Writer) (int, error) {
 	for i := 0; i < 3; i++ {
@@ -93,4 +143,18 @@ func promptEnvVars(rdr *bufio.Reader, out io.Writer) (map[string]string, error) 
 		return nil, nil
 	}
 	return env, nil
+}
+
+// resolveCronSchedule maps the wizard's r shortcut to one concrete daily
+// schedule in the inclusive 02:00-08:00 window. Other input is returned
+// trimmed so callers can supply any custom cron expression.
+func resolveCronSchedule(raw string) string {
+	schedule := strings.TrimSpace(raw)
+	if !strings.EqualFold(schedule, "r") {
+		return schedule
+	}
+
+	minuteOfDay := randomCronStartMinute +
+		rand.IntN(randomCronEndMinute-randomCronStartMinute+1)
+	return fmt.Sprintf("%d %d * * *", minuteOfDay%60, minuteOfDay/60)
 }

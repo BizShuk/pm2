@@ -36,6 +36,11 @@ var Cmd = &cobra.Command{
 	Short:   "Interactively build an ecosystem.config.js (or .json) (short alias: pm2 w)",
 	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
 		"in the current directory that `pm2 task start` can load directly. " +
+		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, optional, add another app, then write to file. " +
+		"Namespace choices: Agent, Backup, Local, Service, AutoP. " +
+		"Generated names use uppercase NAMESPACE SCRIPT - NAME. " +
+		"Enter r for a random daily time between 2am and 8am. " +
+		"Optional choice 1 registers the app paused. " +
 		"If the output file already exists, wizard merges the new apps into it " +
 		"by default; pass --force to replace, or --no-merge to abort.",
 	Args: cobra.NoArgs,
@@ -98,7 +103,7 @@ func runInteractive(cmd *cobra.Command, flags *interactiveFlags) error {
 	tty := isTerminalFunc(os.Stdin.Fd())
 	if !tty && !flags.yesAll {
 		fmt.Fprintln(cmd.ErrOrStderr(),
-			"pm2 eco requires an interactive terminal. "+
+			"pm2 wizard requires an interactive terminal. "+
 				"Re-run with --yes to generate a config with all defaults.")
 		return fmt.Errorf("non-interactive mode requires --yes")
 	}

@@ -73,6 +73,32 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | `pm2 wizard`                                 | Interactively build ecosystem config              | `--format`, `--output`, `--force`, `--no-merge`, `--yes`                 |
 | `pm2 wizard install <script> [prompt]`        | Register a pre-configured planner agent            | Requires exactly one of `--system-planner`, `--business-planner`         |
 
+### `pm2 wizard` prompt flow
+
+The interactive wizard asks for each app in this order:
+
+1. Namespace — choose `Agent`, `Backup`, `Local`, `Service`, or `AutoP`
+2. Name
+3. Script
+4. Args
+5. Instances
+6. Watch mode
+7. Environment variables
+8. Cron schedule — blank skips; `r` chooses one daily time from 02:00 through
+   08:00; any other value is kept as the custom cron expression
+9. Optional — option 1 registers the app paused; option 2 makes it required
+10. Add another app
+11. Write to file
+
+Blank namespace input selects `Agent`. Blank optional input selects option 1,
+so the generated app has `optional: true` and is registered paused by
+`pm2 task start`.
+
+The generated `name` field uses the uppercase convention
+`NAMESPACE SCRIPT - NAME`. `SCRIPT` is the script filename without its path or
+extension. For example, namespace `AutoP`, script `./worker.js`, and name
+`daily sync` produce `AUTOP WORKER - DAILY SYNC`.
+
 ## Key Differences
 
 ### `pm2 task stop` vs `pm2 daemon kill` vs `pm2 daemon stop`

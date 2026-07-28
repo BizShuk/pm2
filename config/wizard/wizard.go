@@ -11,6 +11,11 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
+var (
+	namespaceOptions = []string{"Agent", "Backup", "Local", "Service", "AutoP"}
+	optionalOptions  = []string{"Yes (registered but paused)", "No"}
+)
+
 // RunOptions drives RunInteractive. Field semantics match the former
 // CLI flags 1:1. All fields except the (Format, Output) defaults are
 // optional.
@@ -60,7 +65,7 @@ func DefaultInstallOptions() InstallOptions {
 //   - otherwise: walks the per-app question block in collectAnswers.
 //
 // The collected apps are then passed through WriteEcosystemFile,
-// which handles the merge-vs-replace decision and the final "Write?"
+// which handles the merge-vs-replace decision and the final "Write to file?"
 // confirmation unless ctx.YesAll short-circuits it.
 func RunInteractive(ctx WizardContext, opts RunOptions) error {
 	if opts.Format == "" {
@@ -81,11 +86,13 @@ func RunInteractive(ctx WizardContext, opts RunOptions) error {
 	if ctx.YesAll {
 		apps = []process.AppConfig{DefaultApp()}
 	} else {
+		rdr := bufio.NewReader(ctx.In)
 		var err error
-		apps, err = collectAnswers(ctx.In, ctx.Out)
+		apps, err = collectAnswers(rdr, ctx.Out)
 		if err != nil {
 			return err
 		}
+		ctx.In = rdr
 	}
 
 	return WriteEcosystemFile(ctx, apps, opts.Output, WriteOptions{
@@ -97,7 +104,7 @@ func RunInteractive(ctx WizardContext, opts RunOptions) error {
 
 // RunInstall is the entry point for `pm2 wizard install`. It writes
 // a single AppConfig through WriteEcosystemFile with ctx.YesAll
-// forced to true so no "Write?" prompt is shown — the install flow
+// forced to true so no "Write to file?" prompt is shown — the install flow
 // is always non-interactive.
 //
 // Pass an already-populated AppConfig; the CLI layer is responsible
@@ -116,7 +123,7 @@ func RunInstall(ctx WizardContext, app process.AppConfig, opts InstallOptions) e
 	}
 
 	// Force non-interactive: install callers should never block on
-	// a "Write?" prompt. ctx is passed through but YesAll is
+	// a "Write to file?" prompt. ctx is passed through but YesAll is
 	// overridden for this call only.
 	installCtx := ctx
 	installCtx.YesAll = true
@@ -128,12 +135,12 @@ func RunInstall(ctx WizardContext, app process.AppConfig, opts InstallOptions) e
 	})
 }
 
-// defaultApp returns a single AppConfig pre-filled with safe defaults.
+// DefaultApp returns a single AppConfig pre-filled with safe defaults.
 func DefaultApp() process.AppConfig {
 	a := process.AppConfig{
 		Script:    defaultScript,
 		Name:      defaultName,
-		Namespace: defaultNamespace,
+		Namespace: namespaceOptions[0],
 		Instances: 1,
 		Version:   DefaultVersion,
 		// Matches the interactive default for the Optional prompt in
@@ -141,13 +148,17 @@ func DefaultApp() process.AppConfig {
 		// by pressing Enter through the wizard".
 		Optional: true,
 	}
+	a.Name = formatWizardName(a.Namespace, a.Script, a.Name)
 	a.Normalize("")
 	return a
 }
 
 // collectAnswers walks the per-app question block and loops on "add another app?".
 func collectAnswers(in io.Reader, out io.Writer) ([]process.AppConfig, error) {
-	rdr := bufio.NewReader(in)
+	rdr, ok := in.(*bufio.Reader)
+	if !ok {
+		rdr = bufio.NewReader(in)
+	}
 	var apps []process.AppConfig
 	for n := 1; n <= maxApps; n++ {
 		fmt.Fprintf(out, "\n=== App #%d ===\n", n)
@@ -178,7 +189,28 @@ func collectAnswers(in io.Reader, out io.Writer) ([]process.AppConfig, error) {
 func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 	var app process.AppConfig
 
-	script, err := promptLine(rdr, out, "Script path", defaultScript)
+	namespaceChoice, err := promptChoice(
+		rdr,
+		out,
+		"Namespace",
+		namespaceOptions,
+		1,
+	)
+	if err != nil {
+		return app, err
+	}
+	app.Namespace = namespaceOptions[namespaceChoice-1]
+
+	name, err := promptLine(rdr, out, "Name", defaultName)
+	if err != nil {
+		return app, err
+	}
+	if name == "" {
+		name = defaultName
+	}
+	app.Name = name
+
+	script, err := promptLine(rdr, out, "Script", defaultScript)
 	if err != nil {
 		return app, err
 	}
@@ -189,15 +221,7 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 		fmt.Fprintf(out, "  (warning: %q not found locally — continuing anyway)\n", script)
 	}
 	app.Script = script
-
-	name, err := promptLine(rdr, out, "Process name", DeriveName(script))
-	if err != nil {
-		return app, err
-	}
-	if name == "" {
-		name = DeriveName(script)
-	}
-	app.Name = name
+	app.Name = formatWizardName(app.Namespace, app.Script, app.Name)
 
 	argsRaw, err := promptLine(rdr, out, "Args (space-separated)", "")
 	if err != nil {
@@ -206,15 +230,6 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 	if argsRaw != "" {
 		app.Args = strings.Fields(argsRaw)
 	}
-
-	ns, err := promptLine(rdr, out, "Namespace", defaultNamespace)
-	if err != nil {
-		return app, err
-	}
-	if ns == "" {
-		ns = defaultNamespace
-	}
-	app.Namespace = ns
 
 	inst, err := promptInstances(rdr, out)
 	if err != nil {
@@ -234,33 +249,41 @@ func askOneApp(rdr *bufio.Reader, out io.Writer) (process.AppConfig, error) {
 	}
 	app.Env = env
 
-	cron, err := promptLine(rdr, out, "Cron schedule (e.g. \"*/5 * * * *\", blank to skip)", "")
+	cron, err := promptLine(
+		rdr,
+		out,
+		"Cron schedule (blank to skip, r for random daily between 2am and 8am, or enter cron format)",
+		"",
+	)
 	if err != nil {
 		return app, err
 	}
-	if cron != "" {
-		app.Cron = cron
-		restart, err := promptYesNo(rdr, out, "Cron restart (re-spawn the process on this schedule)?", false)
-		if err != nil {
-			return app, err
-		}
-		if restart {
-			app.CronRestart = cron
-		}
-	}
+	app.Cron = resolveCronSchedule(cron)
 
-	// Install policy. Defaults to yes: a wizard-authored app is usually
-	// one machine's choice, so opt-in is the safer thing to publish. An
-	// app that must run everywhere is the deliberate answer here.
-	optional, err := promptYesNo(rdr, out,
-		"Optional? (registered paused by `pm2 task start` unless --all or --with names it)", true)
+	optionalChoice, err := promptChoice(
+		rdr,
+		out,
+		"Optional",
+		optionalOptions,
+		1,
+	)
 	if err != nil {
 		return app, err
 	}
-	app.Optional = optional
+	app.Optional = optionalChoice == 1
 
 	app.Version = DefaultVersion
 	return app, nil
+}
+
+func formatWizardName(namespace, script, name string) string {
+	scriptName := DeriveName(strings.TrimSpace(script))
+	return strings.ToUpper(fmt.Sprintf(
+		"%s %s - %s",
+		strings.TrimSpace(namespace),
+		scriptName,
+		strings.TrimSpace(name),
+	))
 }
 
 // DeriveName produces a process name from a script path. The

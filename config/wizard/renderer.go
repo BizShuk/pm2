@@ -61,7 +61,7 @@ func DefaultWriteOptions() WriteOptions {
 //     emit a preview to ctx.ErrOut, prompt for confirmation unless
 //     ctx.YesAll is set, then write.
 //
-// The "Write?" confirmation reads from ctx.In via a bufio.Reader; if
+// The "Write to file?" confirmation reads from ctx.In via a bufio.Reader; if
 // the caller pre-set ctx.YesAll (non-interactive install, or
 // --yes/--format pipes) the prompt is skipped and the file is
 // written unconditionally.
@@ -123,7 +123,7 @@ func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, output stri
 
 	if !ctx.YesAll {
 		rdr := bufio.NewReader(ctx.In)
-		ok, err := promptYesNo(rdr, ctx.Out, fmt.Sprintf("Write %s?", output), true)
+		ok, err := promptYesNo(rdr, ctx.Out, fmt.Sprintf("Write to file %s?", output), true)
 		if err != nil {
 			return err
 		}
