@@ -10,7 +10,7 @@ Daemon + CLI over a Unix socket. The CLI is a thin RPC client; all process state
 
 ```mermaid
 flowchart TD
-    subgraph CLI ["CLI Process (cmd/root/ + command packages)"]
+    subgraph CLI ["CLI Process (cmd/ composition root + command packages)"]
         direction TB
         C["Cobra Commands"]
     end
@@ -41,11 +41,12 @@ Import direction (no cycles):
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`
 - `executor` -> `model` only
-- `main` -> `cmd/root` as the thin executable boundary
-- `cmd/root` -> `cmd`, `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose
-  the complete Cobra tree
-- `cmd/task` and `cmd/daemon` -> `cmd` for shared CLI runtime paths and daemon
-  auto-start client; `cmd` never imports either command sub-package
+- `main` -> `cmd` as the thin executable boundary
+- `cmd` -> `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose the complete
+  Cobra tree
+- `cmd`, `cmd/task`, and `cmd/daemon` -> `cmd/runtime` for shared CLI paths and
+  the daemon auto-start client
+- `cmd/runtime` -> `model` for daemon RPC transport
 - `cmd/daemon` -> `daemon` for the foreground server runtime
 - `cmd/wizard` -> `cmd/wizard/prompt` for Cobra-free planner prompt templates
 - `cmd/wizard` -> `config/wizard` for prompt, render, merge, and install logic
@@ -57,17 +58,18 @@ The lock and import invariants are spelled out in the Conventions section below.
 ```tree
 pm2/
 ├── main.go                   thin executable boundary — forwards os.Args[1:]
-│                             to root.Execute and maps errors to exit 1
+│                             to cmd.Execute and maps errors to exit 1
 ├── cmd/                      cobra commands (CLI layer)
-│   ├── root/                 customized Cobra composition root
-│   │   ├── root.go           Cmd, config initialization, command registration,
-│   │   │                     traverse hooks, and metrics hook
-│   │   ├── execute.go        Execute(args) + version argument dispatch
-│   │   └── root_test.go      root tree, alias, config, and version tests
-│   ├── state.go              pm2Home initialization + shared PM2Home/SocketPath/
-│   │                         DaemonStopMarkerPath
-│   ├── client.go             shared CLIClient socket RPC wrapper
-│   ├── client_autostart.go   silent daemon auto-spawn + readiness wait
+│   ├── root.go               Cmd, config initialization, command registration,
+│   │                         traverse hooks, and metrics hook
+│   ├── execute.go            Execute(args) + version argument dispatch
+│   ├── root_test.go          root tree, alias, config, and version tests
+│   ├── runtime/              shared CLI runtime infrastructure
+│   │   ├── state.go          pm2Home initialization + PM2Home/SocketPath/
+│   │   │                     DaemonStopMarkerPath
+│   │   ├── client.go         CLIClient socket RPC wrapper
+│   │   └── client_autostart.go
+│   │                         silent daemon auto-spawn + readiness wait
 │   ├── daemon/               daemon command sub-package
 │   │   ├── daemon.go         Cmd parent for daemon lifecycle commands
 │   │   ├── start.go          daemon start command + foreground/background runtime
@@ -418,11 +420,14 @@ caller always picks an explicit verb.
 
 ## Conventions
 
-- `cmd/root` is the only Cobra composition root; `main.go` is only the process
+- `cmd/root.go` is the only Cobra composition root; `main.go` is only the process
   entry/exit boundary. Commands under `cmd/`, `cmd/daemon/`, `cmd/task/`, and
   `cmd/wizard/` are package-level exported `*cobra.Command` vars; flags and
   child commands bind in `init()`. Do not reintroduce `NewXxxCmd()` /
   `newXxxCmd()` constructors.
+- Shared CLI paths and daemon auto-start RPC infrastructure live in
+  `cmd/runtime`; command sub-packages must depend on that package instead of
+  importing their parent `cmd` package.
 - All process state is owned by `daemon.ProcessRegistry` (defined in
   `daemon/process_registry.go`). `daemon.ProcessManager` holds a `*ProcessRegistry` and delegates
   lock primitives via `pm.Lock()`/`pm.Unlock()`/`pm.RLock()`/`pm.RUnlock()` for

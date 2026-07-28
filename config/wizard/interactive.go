@@ -6,11 +6,6 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
-// DefaultRunOptions returns the default interactive wizard options.
-func DefaultRunOptions() WriteOptions {
-	return DefaultWriteOptions()
-}
-
 // RunInteractive collects apps or accepts defaults, then writes the ecosystem
 // file using the selected merge and format behavior.
 func RunInteractive(ctx WizardContext, opts WriteOptions) error {
