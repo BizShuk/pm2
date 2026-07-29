@@ -4,6 +4,11 @@
 
 ## Architecture
 
+- [ ] [P1] `pm2-event-stream`: 以 CloudEvents JSON 建立唯讀事件面，提供 process / cron lifecycle 的 recent + incremental subscription，以及 offset-based log recent + follow。 @2026-07-23 @Architecture
+    - 計畫：[plans/2026-07-23-pm2-event-stream.md](./plans/2026-07-23-pm2-event-stream.md)
+    - 邊界：既有 `pm2.sock` 保持控制面；新增 `~/.pm2/events.sock`，slow consumer 與 log burst 不得阻塞 process control。
+    - 首個 consumer：msgHub `@msgHub/channel-pm2`；PM2 不反向依賴 msgHub。
+
 - [x] `test-direct-info-read-fix`: 修正 `daemon/server_test.go` 79 處直接 `mp.Info.*` 讀取違反 CLAUDE.md §Conventions 問題，並新增 `ProcessRegistry.SnapshotOne` API 提供安全的值副本讀取。 @2026-07-10 @Completed @Architecture
     - 來源：[docs/specs/2026-07-10-test-direct-info-read-fix.md](./docs/specs/2026-07-10-test-direct-info-read-fix.md)
     - 目標：消除 `go test -race -count=3 ./...` 中必觸發的 race warning（`TestPauseResumeRunningProcess` 在 `daemon/server_test.go:1648` 直接讀 `mp.Info.PID` 與 `onProcessExit` 寫 `PID=0` 競爭）。

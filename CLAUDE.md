@@ -177,6 +177,9 @@ pm2/
 │   └── format.go             process display formatters
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
+├── plans/
+│   └── 2026-07-23-pm2-event-stream.md  Draft architecture for the read-only
+│                                       CloudEvents event/log subscription plane
 └── tui/
     ├── model.go              Bubbletea Model — controller: Update event branches,
     │                         Cmd dispatch, View() delegates to tui/views
