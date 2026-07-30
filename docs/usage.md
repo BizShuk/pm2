@@ -231,18 +231,72 @@ in the dashboard until started again. Does not affect `dump.json`.
 ### `pm2 logs`
 
 ```bash
-pm2 logs              # open at the application list
-pm2 logs api-server   # initially select one application
+pm2 logs              # stream every managed application
+pm2 logs api-server   # stream one application
 ```
 
-This opens the application → log file → viewer TUI. Use `Enter` to open,
-`↑`/`↓` or `j`/`k` to navigate, `Esc` to go back, and `q` to exit. `d`
-requests file deletion and requires an explicit `y` confirmation; `n` or
-`Esc` cancels.
+This continuously follows new current-file lines until `Ctrl+C`. stdout sources
+stay on command stdout and stderr sources stay on command stderr. Output uses:
+
+```text
+[YYYY-MM-DD HH:MM:SS] app_name | log
+```
+
+Following starts at the current EOF and survives path replacement or
+truncation.
 
 Every managed stdout/stderr line starts with `[YYYY-MM-DD HH:MM:SS]`.
 `daemon.log` / `daemon.err` keep the latest date, while older leading date
 blocks rotate beside them as `daemon.<YYYY-MM-DD>.log` / `.err`.
+
+### `pm2 logs monitor` / `pm2 logs m`
+
+```bash
+pm2 logs monitor              # open the application/log-file Tree Explorer
+pm2 logs m api-server         # initially select one application
+```
+
+The application/log-file Tree stays on the left and the selected log stays on
+the right. Application rows begin with `[<id>]`; current files use `🔶`.
+Use `→` to expand an application or load a file, or press `Enter` on a file to
+load it and focus the right-hand Viewer. `↑`/`↓` or `j`/`k` controls whichever
+pane has focus. `←` returns Viewer focus to the Tree or collapses a Tree branch;
+`PageUp`/`PageDown` moves one Viewer page. On a Tree file row, `d` opens
+deletion confirmation; only `y` deletes, while `n`/`Esc` cancels. The Viewer
+does not expose delete.
+
+### Go channel integration
+
+External Go services can follow the same files without invoking the CLI:
+
+```go
+sources := []logfile.Source{{
+	AppName: "api-server",
+	Path:    "/path/to/daemon.log",
+	Stream:  logfile.StreamStdout,
+}}
+entries, errs := logfile.Follow(ctx, sources)
+
+for entries != nil || errs != nil {
+	select {
+	case entry, ok := <-entries:
+		if !ok {
+			entries = nil
+			continue
+		}
+		fmt.Println(entry.String())
+	case err, ok := <-errs:
+		if !ok {
+			errs = nil
+			continue
+		}
+		handle(err)
+	}
+}
+```
+
+`Entry` exposes `Time`, `AppName`, `Stream`, and `Message`. Its `String`
+method returns `[YYYY-MM-DD HH:MM:SS] app_name | log`.
 
 ### `pm2 save` / `pm2 s`
 
@@ -461,8 +515,11 @@ pm2 task start ~/myapp/ecosystem.config.json
 # 4. Check status
 pm2 list
 
-# 5. Browse logs
+# 5. Stream logs
 pm2 logs api
+
+# Or browse/manage log files interactively
+pm2 logs m api
 
 # 6. Save for resurrection on reboot
 pm2 save

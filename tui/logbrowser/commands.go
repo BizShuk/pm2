@@ -33,10 +33,14 @@ func loadApplications(socket string) tea.Cmd {
 	}
 }
 
-func loadFiles(application process.ProcessInfo) tea.Cmd {
+func loadFiles(applicationIndex int, application process.ProcessInfo) tea.Cmd {
 	return func() tea.Msg {
 		files, err := logfile.ListRelated(application.LogFile, application.ErrorFile)
-		return filesMsg{files: files, err: err}
+		return filesMsg{
+			applicationIndex: applicationIndex,
+			files:            files,
+			err:              err,
+		}
 	}
 }
 
@@ -47,13 +51,17 @@ func loadFile(path string) tea.Cmd {
 	}
 }
 
-func deleteFile(path string) tea.Cmd {
+func deleteFile(applicationIndex int, path string) tea.Cmd {
 	return func() tea.Msg {
 		err := os.Remove(path)
 		if err != nil {
 			err = fmt.Errorf("delete log file %q: %w", path, err)
 		}
-		return deletedMsg{path: path, err: err}
+		return deletedMsg{
+			applicationIndex: applicationIndex,
+			path:             path,
+			err:              err,
+		}
 	}
 }
 

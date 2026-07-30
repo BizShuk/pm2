@@ -23,20 +23,33 @@
 
 ## Daemon
 
-- [x] [P1] `log-rotation-tui`: 為 managed CLI output 加入 timestamp、daily
-  rotation 與可確認刪除檔案的 `pm2 logs` TUI。 @2026-07-30 @Completed @Daemon
-    - 來源：[docs/specs/2026-07-30-log-rotation-tui.md](./docs/specs/2026-07-30-log-rotation-tui.md)
+- [x] [P1] `log-streaming-navigation`: 為 managed CLI output 加入 timestamp、
+  daily rotation、channel streaming API 與可確認刪除檔案的 Interactive
+  Tree Explorer。 @2026-07-30 @Completed @Daemon
+    - 來源：[rotation](./docs/specs/2026-07-30-log-rotation-tui.md)、
+      [streaming/navigation](./docs/specs/2026-07-30-log-streaming-navigation.md)、
+      [logs monitor](./docs/specs/2026-07-30-logs-monitor-subcommand.md)、
+      [split pane](./docs/specs/2026-07-30-log-browser-split-pane.md)
     - 結果：新增獨立 `logfile` package；每個 stdout/stderr logical line 以
       `[YYYY-MM-DD HH:MM:SS]` 開頭，`daemon.log` / `daemon.err` 只保留最新
       日期，連續 leading old-date blocks 依日期移至
-      `daemon.<YYYY-MM-DD>.log` / `.err`。`pm2 logs [name]` 改為
-      application → log file → viewer TUI，支援 arrows / `j` / `k`，
-      `d` 只會開啟 `y/N` confirmation。
+      `daemon.<YYYY-MM-DD>.log` / `.err`。公開
+      `logfile.Follow(ctx, sources)` receive-only `Entry` / error channels；
+      `pm2 logs [name]` 持續輸出 `[datetime] app_name | log` 並保留
+      stdout/stderr routing。Interactive mode 由 `pm2 logs monitor` /
+      `pm2 logs m` 擁有；`pm2 monitor` / `pm2 m` 維持 process dashboard。
+      左側 Tree application row 使用 `[<id>]`，current file 使用 `🔶`；
+      右側持續顯示 loaded log。Enter 會 focus Viewer，Up/Down 控制 focused
+      pane，Left 回到 Tree focus，Viewer 支援 PageUp/PageDown；只有 Tree
+      file row 的 `d` 會開啟 `y/N` confirmation。
     - 驗證：`go test -count=1 ./...`、`go test -race -count=1 ./...`、
-      `go vet ./...`、`go build ./...`、PM2 skill validator 與
-      `git diff --check`。Isolated temporary HOME runtime smoke 已驗證 stdout /
-      stderr timestamp、multi-date archives、viewer line navigation，以及
-      `n` 保留 / `y` 刪除並 refresh file list。
+      `go build ./...`、`go vet ./...`、PM2 skill validator 與
+      `git diff --check` 全部 exit 0。Controller/renderer tests 驗證
+      split-pane 同時顯示、Enter focus、focused Up/Down、Left 保留 preview、
+      `[<id>]` 與 `🔶`；channel/CLI tests 驗證 EOF follow、path recreate、
+      partial-line buffering、cancellation 與 stdout/stderr routing。既有
+      Custom Unix socket PTY smoke 已驗證 file open、PageUp/PageDown、
+      Left back、`n` 保留與 `y` 刪除。
 
 ## Archive
 

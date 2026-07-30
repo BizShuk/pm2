@@ -61,10 +61,11 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | `pm2 task resume <target>`                       | Resume a paused task                             | Re-registers cron and launches the process                                 |
 | `pm2 task delete <target>`                       | Remove a task from the registry                  | Removes configuration and stops process                                    |
 | `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`   | Print a non-interactive process table            | Bordered snapshot; `--no-color` for plain output                           |
-| `pm2 logs [name\|id\|namespace]`                 | Open the interactive log browser                 | Application → file → viewer; `d` requires `y/N` confirmation                |
+| `pm2 logs [name\|id\|namespace]`                 | Stream logs to stdout/stderr                     | Continues until Ctrl+C; output includes datetime and app name                |
 | `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                |
 | `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                              |
 | `pm2 monitor` / `pm2 m` / `pm2 dashboard`        | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                |
+| `pm2 logs monitor` / `pm2 logs m`                | Open the split Tree and log Viewer                | Enter focuses right Viewer; focused-pane navigation; Tree-file delete uses `y/N` |
 | `pm2 startup`                                    | Generate OS boot startup scripts                 | Creates `plist` on macOS, systemd unit on Linux                            |
 | `pm2 config`                                     | Inspect or mutate layered application settings   | `--source`, `--update`, `--delete`, `--file`, `--local`                    |
 | `pm2 daemon kill`                                | Gracefully exit all apps and daemon              | CLI commands can still auto-start the daemon                               |
@@ -388,16 +389,29 @@ pm2 startup           # generate launchd/systemd service
 pm2 resurrect         # reload saved processes
 ```
 
-### Browse and manage logs
+### Stream, browse, and manage logs
 
 ```bash
-pm2 logs             # start at the application list
-pm2 logs "LLM Proxy" # initially select one application
+pm2 logs             # continuously stream every managed application
+pm2 logs "LLM Proxy" # continuously stream one application
 ```
 
-Use `Enter` to move from application → log file → viewer, `↑`/`↓` or `j`/`k`
-to navigate, and `Esc` to go back. Pressing `d` on a file opens a confirmation;
-only `y` deletes it (`n` / `Esc` cancels).
+Streamed stdout stays on command stdout and streamed stderr stays on command
+stderr. Each line renders as `[YYYY-MM-DD HH:MM:SS] app_name | log` until
+`Ctrl+C`.
+
+```bash
+pm2 logs monitor             # interactive Tree Explorer
+pm2 logs m "LLM Proxy"       # same mode through the logs child alias
+```
+
+The application/log-file Tree stays on the left and the selected log stays on
+the right. Application rows begin with `[<id>]`, and `🔶` marks each current
+file. Use Right to expand an application or load a file. Enter on a file loads
+it and focuses the right Viewer; `↑`/`↓` or `j`/`k` controls the focused pane,
+Left returns focus to the Tree, and PageUp/PageDown moves a Viewer page.
+Pressing `d` on a Tree file row opens confirmation; only `y` deletes it
+(`n` / `Esc` cancels). Delete is unavailable while the Viewer has focus.
 
 Managed stdout/stderr lines begin with `[YYYY-MM-DD HH:MM:SS]`. Current
 `daemon.log` / `daemon.err` keep the latest date; prior leading date blocks

@@ -18,6 +18,14 @@ rotation 與 related-file discovery。`daemon/executor` 僅注入 writer；
 
 **Status:** Completed and verified on 2026-07-30.
 
+> **Superseded command contract:** The timestamp/rotation design remains
+> current. The root streaming and navigation contract is superseded by
+> [`2026-07-30-log-streaming-navigation.md`](./2026-07-30-log-streaming-navigation.md);
+> its later command-placement follow-up is
+> [`2026-07-30-logs-monitor-subcommand.md`](./2026-07-30-logs-monitor-subcommand.md):
+> root `pm2 logs` streams, while `pm2 logs monitor` / `pm2 logs m` owns the
+> Tree Explorer.
+
 ## Global Constraints
 
 - 使用繁體中文 + English Terminology。

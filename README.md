@@ -208,8 +208,9 @@ terminals.
 
 ### `pm2 logs`
 
-Open the interactive log browser. The optional target (application name, ID,
-namespace, or `namespace:name`) selects its initial row.
+Continuously stream managed application logs. The optional target may be an
+application name, ID, namespace, or `namespace:name`; without a target, all
+managed applications are followed.
 
 ```bash
 pm2 logs
@@ -217,18 +218,20 @@ pm2 logs api
 pm2 logs production:api
 ```
 
-The navigation flow is:
+Each emitted line uses this format:
 
 ```text
-application list → log file list → log viewer
+[YYYY-MM-DD HH:MM:SS] app_name | log
 ```
 
-- `↑` / `↓` or `j` / `k`: move through applications, files, or log lines.
-- `Enter`: open the selected application or file.
-- `Esc`: return to the previous level.
-- `d`: request deletion of the selected log file; deletion only occurs after
-  an explicit `y` confirmation (`n` / `Esc` cancels).
-- `q`: quit.
+stdout log entries go to command stdout and stderr log entries go to command
+stderr. Streaming starts at each current file's end, follows file replacement
+or truncation, and continues until `Ctrl+C`.
+
+External Go services can consume the same typed stream through
+`logfile.Follow(ctx, sources)`, which returns receive-only `Entry` and error
+channels. Each `Entry` includes `Time`, `AppName`, `Stream`, and `Message`;
+`Entry.String()` produces the terminal format above.
 
 Managed stdout and stderr lines use a `[YYYY-MM-DD HH:MM:SS] ` prefix. The
 current `daemon.log` / `daemon.err` files keep the latest date; older leading
@@ -236,6 +239,37 @@ date blocks move to `daemon.<YYYY-MM-DD>.log` and
 `daemon.<YYYY-MM-DD>.err`. Defaults live under
 `~/.config/<app_name>/logs/`; custom `log_file`, `out_file`, and `error_file`
 paths retain their own basename and directory.
+
+---
+
+### `pm2 logs monitor` / `pm2 logs m`
+
+Open the interactive managed-log split view. The optional target selects the
+initial application row.
+
+```bash
+pm2 logs monitor
+pm2 logs m api
+pm2 logs m production:api
+```
+
+```text
+Tree Explorer (left) │ Log Viewer (right)
+```
+
+- Application rows begin with `[<id>]`; current log files use the `🔶` marker.
+- With Tree focus, `↑` / `↓` or `j` / `k` moves through application/file rows.
+- `→`: expand an application or load and focus its selected log file.
+- `Enter`: load the selected Tree file and focus the right-hand Viewer.
+- With Viewer focus, `↑` / `↓` or `j` / `k` moves through log lines.
+- `←`: return focus to the Tree, or collapse the selected Tree branch.
+- `PageUp` / `PageDown`: move one visible page in the Log Viewer.
+- `d`: on a Tree file row, request deletion; only explicit `y` deletes it
+  (`n` / `Esc` cancels).
+- `q`: quit.
+
+The loaded log remains visible when focus returns to the Tree. Deletion is
+intentionally unavailable while the Log Viewer has focus.
 
 ---
 

@@ -1,9 +1,8 @@
-// Package logbrowser owns the interactive application → log file → viewer
-// state machine used by the pm2 logs command.
+// Package logbrowser owns the interactive managed-log Tree Explorer, Viewer,
+// and delete-confirm state machine used by pm2 logs monitor.
 package logbrowser
 
 import (
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -18,8 +17,7 @@ import (
 type screen uint8
 
 const (
-	screenApplications screen = iota
-	screenFiles
+	screenTree screen = iota
 	screenViewer
 	screenConfirmDelete
 )
@@ -30,8 +28,9 @@ type applicationsMsg struct {
 }
 
 type filesMsg struct {
-	files []logfile.FileInfo
-	err   error
+	applicationIndex int
+	files            []logfile.FileInfo
+	err              error
 }
 
 type fileMsg struct {
@@ -41,40 +40,43 @@ type fileMsg struct {
 }
 
 type deletedMsg struct {
-	path string
-	err  error
+	applicationIndex int
+	path             string
+	err              error
 }
 
 // Model is the Bubble Tea controller for browsing and deleting managed log
 // files.
 type Model struct {
-	socket        string
-	initialTarget string
-	screen        screen
-	confirmReturn screen
-	applications  []process.ProcessInfo
-	appSelected   int
-	files         []logfile.FileInfo
-	fileSelected  int
-	lines         []string
-	lineCursor    int
-	width         int
-	height        int
-	loading       bool
-	err           error
-	notice        string
+	socket             string
+	initialTarget      string
+	screen             screen
+	applications       []process.ProcessInfo
+	expanded           map[int]bool
+	filesByApplication map[int][]logfile.FileInfo
+	treeCursor         int
+	viewerPath         string
+	lines              []string
+	lineCursor         int
+	width              int
+	height             int
+	loading            bool
+	err                error
+	notice             string
 }
 
-// New returns a log browser rooted at the application list. initialTarget may
-// be an application ID, name, namespace:name key, or namespace and only affects
-// the initially selected row.
+// New returns a log browser rooted at the application Tree Explorer.
+// initialTarget may be an application ID, name, namespace:name key, or
+// namespace and only affects the initially selected application row.
 func New(socket, initialTarget string) Model {
 	return Model{
-		socket:        socket,
-		initialTarget: initialTarget,
-		screen:        screenApplications,
-		width:         100,
-		height:        30,
+		socket:             socket,
+		initialTarget:      initialTarget,
+		screen:             screenTree,
+		expanded:           make(map[int]bool),
+		filesByApplication: make(map[int][]logfile.FileInfo),
+		width:              100,
+		height:             30,
 	}
 }
 
@@ -97,18 +99,23 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.applications = msg.applications
 			sortApplications(m.applications)
-			m.appSelected = matchingApplication(m.applications, m.initialTarget)
+			m.treeCursor = matchingApplication(m.applications, m.initialTarget)
 			m.initialTarget = ""
+			m.expanded = make(map[int]bool)
+			m.filesByApplication = make(map[int][]logfile.FileInfo)
 		}
 	case filesMsg:
 		m.loading = false
 		m.err = msg.err
-		if msg.err == nil {
-			m.files = msg.files
-			m.fileSelected = clampIndex(m.fileSelected, len(m.files))
+		if msg.err == nil &&
+			msg.applicationIndex >= 0 &&
+			msg.applicationIndex < len(m.applications) {
+			m.ensureTreeMaps()
+			m.filesByApplication[msg.applicationIndex] = msg.files
+			m.treeCursor = clampIndex(m.treeCursor, len(m.visibleTreeRows()))
 		}
 	case fileMsg:
-		if m.screen != screenViewer || m.selectedFilePath() != msg.path {
+		if m.viewerPath != msg.path {
 			break
 		}
 		m.loading = false
@@ -119,20 +126,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case deletedMsg:
 		m.loading = false
+		m.screen = screenTree
 		if msg.err != nil {
 			m.err = msg.err
 			m.notice = ""
-			m.screen = m.confirmReturn
 			break
 		}
 		m.err = nil
 		m.notice = "deleted " + filepath.Base(msg.path)
-		m.screen = screenFiles
 		m.lines = nil
-		m.files = nil
-		m.fileSelected = 0
+		m.viewerPath = ""
+		m.treeCursor = m.treeIndexForApplication(msg.applicationIndex)
+		m.ensureTreeMaps()
+		delete(m.filesByApplication, msg.applicationIndex)
+		if msg.applicationIndex < 0 || msg.applicationIndex >= len(m.applications) {
+			break
+		}
 		m.loading = true
-		return m, loadFiles(m.selectedApplication())
+		return m, loadFiles(msg.applicationIndex, m.applications[msg.applicationIndex])
 	}
 	return m, nil
 }
@@ -143,31 +154,18 @@ func (m Model) View() string {
 		Width:       m.width,
 		Height:      m.height,
 		Breadcrumb:  m.breadcrumb(),
-		Selected:    m.selectedIndex(),
+		Items:       m.treeItems(),
+		Selected:    m.treeCursor,
+		Lines:       m.lines,
 		LineCursor:  m.lineCursor,
+		ViewerPath:  m.viewerPath,
 		Viewer:      m.screen == screenViewer,
-		CanDelete:   m.screen == screenFiles,
+		CanDelete:   m.canDelete(),
 		Loading:     m.loading,
-		Empty:       m.emptyMessage(),
+		Empty:       "(no applications)",
 		Notice:      m.notice,
 		Err:         m.err,
 		ConfirmPath: m.confirmPath(),
-	}
-	switch m.screen {
-	case screenApplications:
-		context.Items = applicationRows(m.applications)
-	case screenFiles:
-		context.Items = fileRows(m.files)
-	case screenViewer:
-		context.Lines = m.lines
-		context.CanDelete = true
-	case screenConfirmDelete:
-		if m.confirmReturn == screenViewer {
-			context.Viewer = true
-			context.Lines = m.lines
-		} else {
-			context.Items = fileRows(m.files)
-		}
 	}
 	return views.RenderLogBrowser(context)
 }
@@ -200,40 +198,10 @@ func matchingApplication(applications []process.ProcessInfo, target string) int 
 	return 0
 }
 
-func (m Model) selectedApplication() process.ProcessInfo {
-	if len(m.applications) == 0 {
-		return process.ProcessInfo{}
-	}
-	return m.applications[clampIndex(m.appSelected, len(m.applications))]
-}
-
-func (m Model) selectedFilePath() string {
-	if len(m.files) == 0 {
-		return ""
-	}
-	return m.files[clampIndex(m.fileSelected, len(m.files))].Path
-}
-
-func (m Model) selectedIndex() int {
-	switch m.screen {
-	case screenApplications:
-		return m.appSelected
-	case screenFiles, screenConfirmDelete:
-		return m.fileSelected
-	default:
-		return 0
-	}
-}
-
 func (m Model) breadcrumb() []string {
-	parts := []string{"applications"}
-	if m.screen == screenApplications || len(m.applications) == 0 {
-		return parts
-	}
-	app := m.selectedApplication()
-	parts = append(parts, app.Namespace+":"+app.Name, "log files")
-	if (m.screen == screenViewer || m.confirmReturn == screenViewer) && len(m.files) > 0 {
-		parts = append(parts, filepath.Base(m.selectedFilePath()))
+	parts := []string{"log files"}
+	if m.viewerPath != "" {
+		parts = append(parts, filepath.Base(m.viewerPath))
 	}
 	return parts
 }
@@ -245,60 +213,21 @@ func (m Model) confirmPath() string {
 	return m.selectedFilePath()
 }
 
-func (m Model) emptyMessage() string {
-	switch m.screen {
-	case screenApplications:
-		return "(no applications)"
-	case screenFiles:
-		return "(no log files)"
-	default:
-		return "(empty log file)"
+func (m Model) canDelete() bool {
+	if m.screen != screenTree {
+		return false
 	}
+	row, ok := m.selectedTreeRow()
+	return ok && row.kind == treeFile
 }
 
-func applicationRows(applications []process.ProcessInfo) []string {
-	rows := make([]string, len(applications))
-	for index, app := range applications {
-		namespace := app.Namespace
-		if namespace == "" {
-			namespace = process.DefaultNamespace
-		}
-		rows[index] = fmt.Sprintf("%s:%s  id %d  %s", namespace, app.Name, app.ID, app.Status)
+func (m *Model) ensureTreeMaps() {
+	if m.expanded == nil {
+		m.expanded = make(map[int]bool)
 	}
-	return rows
-}
-
-func fileRows(files []logfile.FileInfo) []string {
-	rows := make([]string, len(files))
-	for index, file := range files {
-		kind := "archive"
-		if file.Current {
-			kind = "current"
-		}
-		rows[index] = fmt.Sprintf("%-7s  %-28s  %8s  %s",
-			kind,
-			file.Name,
-			formatFileSize(file.Size),
-			file.ModTime.Format("2006-01-02 15:04:05"),
-		)
+	if m.filesByApplication == nil {
+		m.filesByApplication = make(map[int][]logfile.FileInfo)
 	}
-	return rows
-}
-
-func formatFileSize(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	value := float64(size)
-	units := []string{"KiB", "MiB", "GiB", "TiB"}
-	for _, label := range units {
-		value /= unit
-		if value < unit {
-			return fmt.Sprintf("%.1f %s", value, label)
-		}
-	}
-	return fmt.Sprintf("%.1f PiB", value/unit)
 }
 
 func clampIndex(index, length int) int {

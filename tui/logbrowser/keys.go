@@ -12,15 +12,16 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.screen == screenConfirmDelete {
 		switch key {
 		case "y", "Y":
+			row, ok := m.selectedTreeRow()
 			path := m.selectedFilePath()
-			if path == "" {
-				m.screen = m.confirmReturn
+			if !ok || row.kind != treeFile || path == "" {
+				m.screen = screenTree
 				return m, nil
 			}
 			m.loading = true
-			return m, deleteFile(path)
+			return m, deleteFile(row.applicationIndex, path)
 		case "n", "N", "esc":
-			m.screen = m.confirmReturn
+			m.screen = screenTree
 			return m, nil
 		default:
 			return m, nil
@@ -28,20 +29,6 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key {
-	case "esc", "backspace":
-		switch m.screen {
-		case screenApplications:
-			return m, tea.Quit
-		case screenFiles:
-			m.screen = screenApplications
-			m.files = nil
-			m.err = nil
-		case screenViewer:
-			m.screen = screenFiles
-			m.lines = nil
-			m.err = nil
-		}
-		return m, nil
 	case "up", "k":
 		m.moveSelection(-1)
 		return m, nil
@@ -54,11 +41,24 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.moveToBoundary(true)
 		return m, nil
+	case "right":
+		return m.moveIn()
+	case "left":
+		return m.moveOut()
 	case "enter":
-		return m.openSelection()
+		return m.focusSelectedFile()
+	case "pgup":
+		if m.screen == screenViewer {
+			m.movePage(-1)
+		}
+		return m, nil
+	case "pgdown":
+		if m.screen == screenViewer {
+			m.movePage(1)
+		}
+		return m, nil
 	case "d":
-		if (m.screen == screenFiles || m.screen == screenViewer) && len(m.files) > 0 {
-			m.confirmReturn = m.screen
+		if m.canDelete() {
 			m.screen = screenConfirmDelete
 		}
 		return m, nil
@@ -69,10 +69,8 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) moveSelection(delta int) {
 	switch m.screen {
-	case screenApplications:
-		m.appSelected = clampIndex(m.appSelected+delta, len(m.applications))
-	case screenFiles:
-		m.fileSelected = clampIndex(m.fileSelected+delta, len(m.files))
+	case screenTree:
+		m.treeCursor = clampIndex(m.treeCursor+delta, len(m.visibleTreeRows()))
 	case screenViewer:
 		m.lineCursor = clampIndex(m.lineCursor+delta, len(m.lines))
 	}
@@ -81,16 +79,11 @@ func (m *Model) moveSelection(delta int) {
 func (m *Model) moveToBoundary(end bool) {
 	index := 0
 	switch m.screen {
-	case screenApplications:
+	case screenTree:
 		if end {
-			index = len(m.applications) - 1
+			index = len(m.visibleTreeRows()) - 1
 		}
-		m.appSelected = clampIndex(index, len(m.applications))
-	case screenFiles:
-		if end {
-			index = len(m.files) - 1
-		}
-		m.fileSelected = clampIndex(index, len(m.files))
+		m.treeCursor = clampIndex(index, len(m.visibleTreeRows()))
 	case screenViewer:
 		if end {
 			index = len(m.lines) - 1
@@ -99,31 +92,87 @@ func (m *Model) moveToBoundary(end bool) {
 	}
 }
 
-func (m Model) openSelection() (tea.Model, tea.Cmd) {
-	switch m.screen {
-	case screenApplications:
-		if len(m.applications) == 0 {
-			return m, nil
-		}
-		m.screen = screenFiles
-		m.files = nil
-		m.fileSelected = 0
-		m.loading = true
-		m.err = nil
-		m.notice = ""
-		return m, loadFiles(m.selectedApplication())
-	case screenFiles:
-		if len(m.files) == 0 {
-			return m, nil
-		}
-		m.screen = screenViewer
-		m.lines = nil
-		m.lineCursor = 0
-		m.loading = true
-		m.err = nil
-		m.notice = ""
-		return m, loadFile(m.selectedFilePath())
-	default:
+func (m Model) moveIn() (tea.Model, tea.Cmd) {
+	if m.screen != screenTree {
 		return m, nil
 	}
+	row, ok := m.selectedTreeRow()
+	if !ok {
+		return m, nil
+	}
+	if row.kind == treeApplication {
+		m.ensureTreeMaps()
+		if m.expanded[row.applicationIndex] {
+			if len(m.filesByApplication[row.applicationIndex]) > 0 {
+				m.treeCursor++
+			}
+			return m, nil
+		}
+		m.expanded[row.applicationIndex] = true
+		if _, loaded := m.filesByApplication[row.applicationIndex]; loaded {
+			return m, nil
+		}
+		m.loading = true
+		m.err = nil
+		m.notice = ""
+		return m, loadFiles(row.applicationIndex, m.applications[row.applicationIndex])
+	}
+
+	return m.focusSelectedFile()
+}
+
+func (m Model) focusSelectedFile() (tea.Model, tea.Cmd) {
+	if m.screen != screenTree {
+		return m, nil
+	}
+	row, ok := m.selectedTreeRow()
+	if !ok || row.kind != treeFile {
+		return m, nil
+	}
+	path := m.selectedFilePath()
+	if path == "" {
+		return m, nil
+	}
+	m.screen = screenViewer
+	m.viewerPath = path
+	m.lines = nil
+	m.lineCursor = 0
+	m.loading = true
+	m.err = nil
+	m.notice = ""
+	return m, loadFile(path)
+}
+
+func (m Model) moveOut() (tea.Model, tea.Cmd) {
+	if m.screen == screenViewer {
+		m.screen = screenTree
+		return m, nil
+	}
+	if m.screen != screenTree {
+		return m, nil
+	}
+
+	row, ok := m.selectedTreeRow()
+	if !ok {
+		return m, nil
+	}
+	switch row.kind {
+	case treeApplication:
+		if m.expanded[row.applicationIndex] {
+			m.expanded[row.applicationIndex] = false
+		}
+	case treeFile:
+		parentIndex := m.treeIndexForApplication(row.applicationIndex)
+		m.expanded[row.applicationIndex] = false
+		m.treeCursor = parentIndex
+	}
+	return m, nil
+}
+
+func (m *Model) movePage(direction int) {
+	pageSize := max(1, m.height-4)
+	m.lineCursor = clampIndex(
+		m.lineCursor+direction*pageSize,
+		len(m.lines),
+	)
 }

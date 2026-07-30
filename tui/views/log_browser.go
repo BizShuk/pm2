@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -9,8 +10,8 @@ import (
 	"github.com/bizshuk/pm2/tui/theme"
 )
 
-// LogBrowserContext is the complete immutable rendering input for the
-// application → file → viewer log browser.
+// LogBrowserContext is the complete immutable rendering input for the managed
+// log Tree Explorer and Viewer.
 type LogBrowserContext struct {
 	Width       int
 	Height      int
@@ -19,6 +20,7 @@ type LogBrowserContext struct {
 	Selected    int
 	Lines       []string
 	LineCursor  int
+	ViewerPath  string
 	Viewer      bool
 	CanDelete   bool
 	Loading     bool
@@ -38,30 +40,28 @@ func RenderLogBrowser(ctx LogBrowserContext) string {
 	bodyHeight := max(1, height-3)
 
 	var body string
-	switch {
-	case ctx.ConfirmPath != "":
+	if ctx.ConfirmPath != "" {
 		body = renderDeleteConfirmation(ctx.ConfirmPath, width, bodyHeight)
-	case ctx.Loading:
-		body = renderLogBrowserMessage("loading...", width, bodyHeight)
-	case ctx.Err != nil:
-		body = renderLogBrowserMessage(ctx.Err.Error(), width, bodyHeight)
-	case ctx.Viewer:
-		body = renderLogViewer(ctx.Lines, ctx.LineCursor, width, bodyHeight)
-	default:
-		body = renderLogBrowserItems(ctx.Items, ctx.Selected, ctx.Empty, width, bodyHeight)
+	} else {
+		body = renderLogBrowserSplitPanes(ctx, width, bodyHeight)
 	}
 	footer := renderLogBrowserFooter(ctx, width)
 	return strings.Join([]string{header, breadcrumb, body, footer}, "\n")
 }
 
 func renderLogBrowserHeader(ctx LogBrowserContext, width int) string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render("pm2 logs")
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Text).
+		Render("pm2 logs monitor")
 	status := ""
 	switch {
 	case ctx.Notice != "":
 		status = lipgloss.NewStyle().Foreground(theme.Warn).Render("  " + ctx.Notice)
 	case ctx.Err != nil:
 		status = lipgloss.NewStyle().Foreground(theme.Errored).Render("  error")
+	case ctx.Loading:
+		status = lipgloss.NewStyle().Foreground(theme.Muted).Render("  loading...")
 	}
 	return lipgloss.NewStyle().
 		Background(theme.HdrBg).
@@ -71,7 +71,7 @@ func renderLogBrowserHeader(ctx LogBrowserContext, width int) string {
 }
 
 func renderLogBrowserBreadcrumb(parts []string, width int) string {
-	label := "applications"
+	label := "log files"
 	if len(parts) > 0 {
 		label = strings.Join(parts, " → ")
 	}
@@ -80,6 +80,64 @@ func renderLogBrowserBreadcrumb(parts []string, width int) string {
 		Width(width).
 		Padding(0, 1).
 		Render(CropRight(label, width-2))
+}
+
+func renderLogBrowserSplitPanes(ctx LogBrowserContext, width, height int) string {
+	leftWidth := max(14, width*2/5)
+	leftWidth = min(leftWidth, width-15)
+	rightWidth := width - leftWidth - 1
+	contentHeight := max(1, height-1)
+
+	left := strings.Join([]string{
+		renderLogBrowserPaneTitle("TREE", leftWidth, !ctx.Viewer),
+		renderLogBrowserItems(ctx.Items, ctx.Selected, ctx.Empty, leftWidth, contentHeight),
+	}, "\n")
+
+	rightTitle := "LOG"
+	if ctx.ViewerPath != "" {
+		rightTitle += " " + filepath.Base(ctx.ViewerPath)
+	}
+	var rightBody string
+	switch {
+	case ctx.Loading:
+		rightBody = renderLogBrowserMessage("loading...", rightWidth, contentHeight)
+	case ctx.Err != nil:
+		rightBody = renderLogBrowserMessage(ctx.Err.Error(), rightWidth, contentHeight)
+	case ctx.ViewerPath == "":
+		rightBody = renderLogBrowserMessage(
+			"Select a log file and press Enter",
+			rightWidth,
+			contentHeight,
+		)
+	default:
+		rightBody = renderLogViewer(ctx.Lines, ctx.LineCursor, rightWidth, contentHeight)
+	}
+	right := strings.Join([]string{
+		renderLogBrowserPaneTitle(rightTitle, rightWidth, ctx.Viewer),
+		rightBody,
+	}, "\n")
+
+	dividerRows := make([]string, height)
+	for index := range dividerRows {
+		dividerRows[index] = "│"
+	}
+	divider := lipgloss.NewStyle().
+		Foreground(theme.Border).
+		Render(strings.Join(dividerRows, "\n"))
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
+}
+
+func renderLogBrowserPaneTitle(label string, width int, focused bool) string {
+	style := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.Muted).
+		Width(width)
+	if focused {
+		style = style.
+			Background(theme.SelBg).
+			Foreground(theme.SelText)
+	}
+	return style.Render(CropRight(" "+label, width))
 }
 
 func renderLogBrowserItems(items []string, selected int, empty string, width, height int) string {
@@ -99,8 +157,8 @@ func renderLogBrowserItems(items []string, selected int, empty string, width, he
 			marker = "› "
 			style = style.Background(theme.SelBg).Foreground(theme.SelText)
 		}
-		row := marker + CropRight(items[index], width-3)
-		rows = append(rows, style.Width(width).Padding(0, 1).Render(row))
+		row := marker + CropRight(items[index], max(0, width-2))
+		rows = append(rows, style.Width(width).Render(row))
 	}
 	return padLogBrowserRows(rows, width, height)
 }
@@ -146,8 +204,7 @@ func renderLogBrowserMessage(message string, width, height int) string {
 	row := lipgloss.NewStyle().
 		Foreground(theme.Muted).
 		Width(width).
-		Padding(0, 1).
-		Render(CropRight(message, width-2))
+		Render(" " + CropRight(message, max(0, width-1)))
 	return padLogBrowserRows([]string{row}, width, height)
 }
 
@@ -157,20 +214,30 @@ func renderLogBrowserFooter(ctx LogBrowserContext, width int) string {
 	case ctx.ConfirmPath != "":
 		hints = []string{"y confirm delete", "n/esc cancel"}
 	case ctx.Viewer:
-		hints = []string{"↑↓ / jk navigate", "d delete", "esc back", "q quit"}
+		hints = []string{
+			"↑↓ / jk line",
+			"PgUp/PgDn page",
+			"← focus tree",
+			"q quit",
+		}
 	default:
-		hints = []string{"↑↓ / jk navigate", "enter open"}
+		hints = []string{
+			"↑↓ / jk navigate",
+			"← collapse/back",
+			"→ expand/open",
+			"Enter focus log",
+		}
 		if ctx.CanDelete {
 			hints = append(hints, "d delete")
 		}
-		hints = append(hints, "esc back", "q quit")
+		hints = append(hints, "q quit")
 	}
 	return lipgloss.NewStyle().
 		Background(theme.HdrBg).
 		Foreground(theme.Muted).
 		Width(width).
 		Padding(0, 1).
-		Render(CropRight(strings.Join(hints, "  │  "), width-2))
+		Render(CropRight(strings.Join(hints, " │ "), width-2))
 }
 
 func visibleStart(selected, total, height int) int {

@@ -100,7 +100,9 @@ pm2/
 │   │   └── wizard_test.go    Cobra-level wizard integration tests
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
-│   ├── logs.go               pm2 logs — thin interactive log-browser shell
+│   ├── logs.go               pm2 logs — signal-aware streaming command shell
+│   ├── logs_stream.go        daemon snapshot → logfile sources + stream routing
+│   ├── logs_monitor.go       logs monitor/m — interactive log-browser subcommand
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
@@ -165,6 +167,8 @@ pm2/
 │                             DeleteByName, ListAll, Save, Resurrect, KillAll,
 │                             Ping). Import-cycle guard.
 ├── logfile/                  managed-log domain; no daemon/TUI dependency
+│   ├── entry.go              public Source/Entry/Stream models + output format
+│   ├── follow.go             channel follower for append/recreate/truncate paths
 │   ├── rotation.go           leading daily-block split + archive naming
 │   ├── writer.go             per-line timestamp + midnight/reopen handling
 │   └── files.go              current/archive discovery for configured paths
@@ -190,10 +194,11 @@ pm2/
     ├── theme.go              Re-exports the palette from tui/theme as clXxx vars
     ├── theme/                tui/theme sub-package: single source of truth for
     │   └── palette.go        lipgloss.AdaptiveColor palette (Online/Stopped/...)
-    ├── logbrowser/           pm2 logs controller domain
-    │   ├── model.go          application/file/viewer/delete-confirm states
+    ├── logbrowser/           logs monitor controller domain
+    │   ├── model.go          Tree/Viewer/delete-confirm async state
+    │   ├── tree.go           application → log-file visible-row projection
     │   ├── commands.go       daemon list + filesystem read/delete commands
-    │   └── keys.go           navigation and explicit deletion confirmation
+    │   └── keys.go           Left/Right, paging, and delete confirmation
     ├── views/                Stateless renderers; pure functions of ViewContext
     │   ├── context.go        ViewContext struct (Width/Height/Procs/Logs/...)
     │   ├── header.go         RenderHeader — title bar (count, time, notice)
@@ -370,11 +375,32 @@ list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
 
-`pm2 logs` uses the separate `tui/logbrowser` state machine. It loads one daemon
-process snapshot, discovers only files related to the selected process's stored
-`LogFile` / `ErrorFile` paths, then reads the selected file directly. `d` never
-removes a file immediately: it enters `screenConfirmDelete`, and only `y`
-dispatches `os.Remove`; `n` / `Esc` returns without mutation.
+### Log streaming and interactive browsing
+
+Root `pm2 logs [target]` is non-interactive. It loads one daemon process
+snapshot, maps matched `ProcessInfo.LogFile` / `ErrorFile` paths to
+`logfile.Source`, then consumes `logfile.Follow`. The command routes
+`StreamStdout` entries to command stdout and `StreamStderr` entries to command
+stderr; both render as `[YYYY-MM-DD HH:MM:SS] app_name | log`.
+
+`logfile.Follow(ctx, sources)` is the public integration boundary for external
+Go services. It returns receive-only `Entry` and error channels, begins existing
+paths at EOF, buffers partial lines, and resets to byte zero when a path is new,
+replaced, or truncated. Cancelling `ctx` closes both channels.
+
+Interactive file management belongs to `pm2 logs monitor [target]`; its child
+alias makes `pm2 logs m [target]` equivalent. Root `pm2 monitor`, `pm2 m`, and
+`pm2 dashboard` remain the process dashboard. The separate `tui/logbrowser`
+state machine projects applications and discovered files into a persistent
+40/60 left Tree/right Viewer layout. `screenTree` and `screenViewer` represent
+keyboard focus, not mutually exclusive screens; `viewerPath`, loaded lines,
+and the Viewer cursor persist when Left returns focus to the Tree. Right
+expands/opens, Enter on a file loads and focuses the Viewer, and
+PageUp/PageDown moves by its visible body height. Application rows begin with
+`[<id>]`, while a current file uses `🔶` instead of a `current` label. `d` is
+valid only on a Tree file row: it enters `screenConfirmDelete`, and only `y`
+dispatches `os.Remove`; `n` / `Esc` returns without mutation. Views remain
+pure and never read files.
 
 ### Daemon lifecycle: `stop` vs `daemon kill`
 
@@ -497,6 +523,9 @@ executor fallback when a request has no configured log directory.
   leading previous-date blocks move to `<stem>.<YYYY-MM-DD><ext>`, while the
   current path keeps today/future bytes. If the current path is deleted or
   replaced while a process is running, the next logical line reopens it.
+- `logfile.Follow` is the sole public channel API for continuous managed-log
+  consumption. Keep `logfile.Source` independent of daemon/process types;
+  consumers receive typed `Entry` values and a separate error channel.
 - `tui/logbrowser` may delete only a path returned by `logfile.ListRelated` for
   the selected process. Keep deletion behind the explicit `y/N` confirmation;
   views remain pure and never touch the filesystem.

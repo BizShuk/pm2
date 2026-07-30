@@ -1,27 +1,36 @@
 package cmd
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
-	"github.com/bizshuk/pm2/tui/logbrowser"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
-// LogsCmd opens the interactive application → file → log viewer.
+// LogsCmd streams managed application logs to stdout and stderr.
 var LogsCmd = &cobra.Command{
 	Use:   "logs [name]",
-	Short: "Interactive log file browser and manager",
+	Short: "Stream managed application logs to stdout and stderr",
 	Args:  cobra.MaximumNArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		target := ""
 		if len(args) == 1 {
 			target = args[0]
 		}
-		program := tea.NewProgram(
-			logbrowser.New(cliruntime.SocketPath(), target),
-			tea.WithAltScreen(),
+		ctx, stop := signal.NotifyContext(
+			cmd.Context(),
+			os.Interrupt,
+			syscall.SIGTERM,
 		)
-		_, err := program.Run()
-		return err
+		defer stop()
+		return streamLogs(
+			ctx,
+			cliruntime.SocketPath(),
+			target,
+			cmd.OutOrStdout(),
+			cmd.ErrOrStderr(),
+		)
 	},
 }
