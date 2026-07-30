@@ -23,6 +23,21 @@
 
 ## Daemon
 
+- [x] [P1] `log-rotation-tui`: 為 managed CLI output 加入 timestamp、daily
+  rotation 與可確認刪除檔案的 `pm2 logs` TUI。 @2026-07-30 @Completed @Daemon
+    - 來源：[docs/specs/2026-07-30-log-rotation-tui.md](./docs/specs/2026-07-30-log-rotation-tui.md)
+    - 結果：新增獨立 `logfile` package；每個 stdout/stderr logical line 以
+      `[YYYY-MM-DD HH:MM:SS]` 開頭，`daemon.log` / `daemon.err` 只保留最新
+      日期，連續 leading old-date blocks 依日期移至
+      `daemon.<YYYY-MM-DD>.log` / `.err`。`pm2 logs [name]` 改為
+      application → log file → viewer TUI，支援 arrows / `j` / `k`，
+      `d` 只會開啟 `y/N` confirmation。
+    - 驗證：`go test -count=1 ./...`、`go test -race -count=1 ./...`、
+      `go vet ./...`、`go build ./...`、PM2 skill validator 與
+      `git diff --check`。Isolated temporary HOME runtime smoke 已驗證 stdout /
+      stderr timestamp、multi-date archives、viewer line navigation，以及
+      `n` 保留 / `y` 刪除並 refresh file list。
+
 ## Archive
 
 - [x] [P1] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。 @2026-07-08_23:39:42 @Completed @Architecture

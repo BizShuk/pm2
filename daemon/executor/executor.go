@@ -3,6 +3,7 @@ package executor
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bizshuk/pm2/logfile"
 	"github.com/bizshuk/pm2/model"
 	"github.com/fsnotify/fsnotify"
 	"github.com/mitchellh/go-homedir"
@@ -57,9 +59,9 @@ func (e *Executor) HomeDir() string { return e.homeDir }
 // Fields:
 //   - Cmd:     the started *exec.Cmd (Process.Pid populated after Start)
 //     nil if req.Cron != "" and !req.CronTriggered (cron task)
-//   - OutF:    opened *os.File for stdout (caller passes to Watch)
+//   - OutF:    opened logfile.Writer for stdout (caller passes to Watch)
 //     nil if cron task
-//   - ErrF:    opened *os.File for stderr (caller passes to Watch)
+//   - ErrF:    opened logfile.Writer for stderr (caller passes to Watch)
 //     nil if cron task
 //   - Watcher: fsnotify.Watcher for the script file (caller passes to Watch)
 //     nil if req.Watch == false OR cron task
@@ -69,8 +71,8 @@ func (e *Executor) HomeDir() string { return e.homeDir }
 //     daemon working directory can be resolved)
 type StartResult struct {
 	Cmd     *exec.Cmd
-	OutF    *os.File
-	ErrF    *os.File
+	OutF    io.WriteCloser
+	ErrF    io.WriteCloser
 	Watcher *fsnotify.Watcher
 	LogFile string
 	ErrFile string
@@ -104,18 +106,14 @@ func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func
 		return nil, fmt.Errorf("create error log directory: %w", err)
 	}
 
-	// Ensure log files exist (os.O_CREATE alone would race with append).
-	ensureLogFile(logFile)
-	ensureLogFile(errFile)
-
-	outF, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	outF, err := logfile.Open(logFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open stdout log: %w", err)
 	}
-	errF, err := os.OpenFile(errFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	errF, err := logfile.Open(errFile)
 	if err != nil {
-		outF.Close()
-		return nil, err
+		_ = outF.Close()
+		return nil, fmt.Errorf("open stderr log: %w", err)
 	}
 
 	workDir := resolveWorkDir(req)
@@ -209,7 +207,7 @@ func resolveWorkDir(req *model.AppStartReq) string {
 // them.
 func (e *Executor) Watch(
 	cmd *exec.Cmd,
-	outF, errF *os.File,
+	outF, errF io.Closer,
 	watcher *fsnotify.Watcher,
 	done chan struct{},
 	onExit func(err error),
@@ -309,17 +307,4 @@ func resolveLogPath(logFile, altFile, configDir, logDir, name string) string {
 		}
 	}
 	return resolved
-}
-
-// ensureLogFile creates the file (empty) if it does not exist.
-// We need it before os.OpenFile(APPEND) because the file must exist
-// before appending on platforms that disallow creating+appending in
-// one call.
-func ensureLogFile(path string) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.Close()
-		}
-	}
 }

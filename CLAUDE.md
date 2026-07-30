@@ -40,7 +40,7 @@ Import direction (no cycles):
 
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`
-- `executor` -> `model` only
+- `executor` -> `logfile`, `model` only
 - `main` -> `cmd` as the thin executable boundary
 - `cmd` -> `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose the complete
   Cobra tree
@@ -100,7 +100,7 @@ pm2/
 │   │   └── wizard_test.go    Cobra-level wizard integration tests
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
-│   ├── logs.go               pm2 logs  — reads log files directly
+│   ├── logs.go               pm2 logs — thin interactive log-browser shell
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
@@ -164,6 +164,10 @@ pm2/
 │                             RestartByName, PauseByName, ResumeByName,
 │                             DeleteByName, ListAll, Save, Resurrect, KillAll,
 │                             Ping). Import-cycle guard.
+├── logfile/                  managed-log domain; no daemon/TUI dependency
+│   ├── rotation.go           leading daily-block split + archive naming
+│   ├── writer.go             per-line timestamp + midnight/reopen handling
+│   └── files.go              current/archive discovery for configured paths
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
@@ -186,12 +190,17 @@ pm2/
     ├── theme.go              Re-exports the palette from tui/theme as clXxx vars
     ├── theme/                tui/theme sub-package: single source of truth for
     │   └── palette.go        lipgloss.AdaptiveColor palette (Online/Stopped/...)
+    ├── logbrowser/           pm2 logs controller domain
+    │   ├── model.go          application/file/viewer/delete-confirm states
+    │   ├── commands.go       daemon list + filesystem read/delete commands
+    │   └── keys.go           navigation and explicit deletion confirmation
     ├── views/                Stateless renderers; pure functions of ViewContext
     │   ├── context.go        ViewContext struct (Width/Height/Procs/Logs/...)
     │   ├── header.go         RenderHeader — title bar (count, time, notice)
     │   ├── footer.go         RenderFooter (key hints) + RenderHostMetricsLines
     │   ├── detail.go         RenderDetail — right-panel param table
     │   ├── logs.go           RenderLogs — right-panel log tail
+    │   ├── log_browser.go    RenderLogBrowser — log manager screens
     │   ├── list.go           RenderProcessTable + RenderWideTable + RenderLeftPane
     │   ├── layout.go         RenderLayout — single entry point; orchestrates
     │   │                     header + body + footer, decides single vs two-pane
@@ -361,6 +370,12 @@ list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
 
+`pm2 logs` uses the separate `tui/logbrowser` state machine. It loads one daemon
+process snapshot, discovers only files related to the selected process's stored
+`LogFile` / `ErrorFile` paths, then reads the selected file directly. `d` never
+removes a file immediately: it enters `screenConfirmDelete`, and only `y`
+dispatches `os.Remove`; `n` / `Esc` returns without mutation.
+
 ### Daemon lifecycle: `stop` vs `daemon kill`
 
 Two verbs that look superficially similar but operate on different
@@ -421,6 +436,11 @@ caller always picks an explicit verb.
     └── <name>-err.log
 ```
 
+Normalized applications normally own logs under
+`~/.config/<app_name>/logs/daemon.{log,err}`. Dated archives stay beside the
+current file as `daemon.<YYYY-MM-DD>.{log,err}`; `~/.pm2/logs/` remains the
+executor fallback when a request has no configured log directory.
+
 ## Conventions
 
 - `cmd/root.go` is the only Cobra composition root; `main.go` is only the process
@@ -471,6 +491,15 @@ caller always picks an explicit verb.
   own.
 - Log file paths are resolved once at launch time and stored in `ProcessInfo`.
   Do not re-derive them from name at read time.
+- `logfile.Writer` is the sole owner of managed stdout/stderr formatting and
+  daily rotation. Each logical line starts with `[YYYY-MM-DD HH:MM:SS] `.
+  Before open and at the first line after a local-date change, consecutive
+  leading previous-date blocks move to `<stem>.<YYYY-MM-DD><ext>`, while the
+  current path keeps today/future bytes. If the current path is deleted or
+  replaced while a process is running, the next logical line reopens it.
+- `tui/logbrowser` may delete only a path returned by `logfile.ListRelated` for
+  the selected process. Keep deletion behind the explicit `y/N` confirmation;
+  views remain pure and never touch the filesystem.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
 - **Executor lock direction (Phase 4 invariant)**: `daemon.ProcessManager` may
   call `executor.Executor` while holding the registry lock, because the

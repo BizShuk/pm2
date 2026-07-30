@@ -61,7 +61,7 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | `pm2 task resume <target>`                       | Resume a paused task                             | Re-registers cron and launches the process                                 |
 | `pm2 task delete <target>`                       | Remove a task from the registry                  | Removes configuration and stops process                                    |
 | `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`   | Print a non-interactive process table            | Bordered snapshot; `--no-color` for plain output                           |
-| `pm2 logs [name\|id]`                            | Tail log files directly                          | `--lines N` to specify trailing lines                                      |
+| `pm2 logs [name\|id\|namespace]`                 | Open the interactive log browser                 | Application → file → viewer; `d` requires `y/N` confirmation                |
 | `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                |
 | `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                              |
 | `pm2 monitor` / `pm2 m` / `pm2 dashboard`        | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                |
@@ -388,12 +388,20 @@ pm2 startup           # generate launchd/systemd service
 pm2 resurrect         # reload saved processes
 ```
 
-### Tail logs for a specific process
+### Browse and manage logs
 
 ```bash
-pm2 logs "LLM Proxy"            # follow mode
-pm2 logs "LLM Proxy" --lines 50 # last 50 lines
+pm2 logs             # start at the application list
+pm2 logs "LLM Proxy" # initially select one application
 ```
+
+Use `Enter` to move from application → log file → viewer, `↑`/`↓` or `j`/`k`
+to navigate, and `Esc` to go back. Pressing `d` on a file opens a confirmation;
+only `y` deletes it (`n` / `Esc` cancels).
+
+Managed stdout/stderr lines begin with `[YYYY-MM-DD HH:MM:SS]`. Current
+`daemon.log` / `daemon.err` keep the latest date; prior leading date blocks
+rotate beside them as `daemon.<YYYY-MM-DD>.log` / `.err`.
 
 ### Completely shut down
 

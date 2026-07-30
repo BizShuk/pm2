@@ -208,22 +208,34 @@ terminals.
 
 ### `pm2 logs`
 
-Tail stdout and stderr log files for a process.
+Open the interactive log browser. The optional target (application name, ID,
+namespace, or `namespace:name`) selects its initial row.
 
 ```bash
-pm2 logs [name] [flags]
-
-Flags:
-  -n, --lines int   number of lines to show (default 20)
+pm2 logs
+pm2 logs api
+pm2 logs production:api
 ```
 
-```bash
-pm2 logs             # tail all processes
-pm2 logs api         # tail one process
-pm2 logs api -n 50   # show last 50 lines
+The navigation flow is:
+
+```text
+application list → log file list → log viewer
 ```
 
-Log files are stored in `~/.pm2/logs/<name>-out.log` and `~/.pm2/logs/<name>-err.log` unless overridden in the config.
+- `↑` / `↓` or `j` / `k`: move through applications, files, or log lines.
+- `Enter`: open the selected application or file.
+- `Esc`: return to the previous level.
+- `d`: request deletion of the selected log file; deletion only occurs after
+  an explicit `y` confirmation (`n` / `Esc` cancels).
+- `q`: quit.
+
+Managed stdout and stderr lines use a `[YYYY-MM-DD HH:MM:SS] ` prefix. The
+current `daemon.log` / `daemon.err` files keep the latest date; older leading
+date blocks move to `daemon.<YYYY-MM-DD>.log` and
+`daemon.<YYYY-MM-DD>.err`. Defaults live under
+`~/.config/<app_name>/logs/`; custom `log_file`, `out_file`, and `error_file`
+paths retain their own basename and directory.
 
 ---
 
@@ -253,8 +265,8 @@ pm2 monitor  4 processes · 10:24:51
                       │ stderr    ~/.pm2/logs/api-err.log
                       ├────────────────────────────────────────
                       │ LOGS — api
-                      │ 10:00:01 server listening on :8080
-                      │ 10:24:51 GET /api/health 200 4ms
+                      │ [2026-06-12 10:00:01] server listening on :8080
+                      │ [2026-06-12 10:24:51] GET /api/health 200 4ms
 ──────────────────────┴────────────────────────────────────────
  ↑↓/jk navigate  │  r restart  │  s stop  │  d delete  │  q quit
 ```
@@ -439,8 +451,13 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
 ├── pm2.sock            Unix socket — CLI ↔ daemon RPC
 ├── dump.json           saved process list (pm2 save / resurrect)
 └── logs/
-    ├── <name>-out.log  stdout
-    └── <name>-err.log  stderr
+    └── ...              fallback logs when an app has no config directory
+
+~/.config/<app_name>/logs/
+├── daemon.log                  current stdout
+├── daemon.err                  current stderr
+├── daemon.<YYYY-MM-DD>.log     rotated stdout
+└── daemon.<YYYY-MM-DD>.err     rotated stderr
 ```
 
 ---

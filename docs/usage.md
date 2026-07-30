@@ -231,13 +231,18 @@ in the dashboard until started again. Does not affect `dump.json`.
 ### `pm2 logs`
 
 ```bash
-pm2 logs              # tail all processes
-pm2 logs api-server   # tail one process
-pm2 logs -n 50        # show last 50 lines instead of default 20
+pm2 logs              # open at the application list
+pm2 logs api-server   # initially select one application
 ```
 
-Prints the last N lines from stdout + stderr log files, then follows the
-first matching log in real time. Press `Ctrl+C` to exit.
+This opens the application → log file → viewer TUI. Use `Enter` to open,
+`↑`/`↓` or `j`/`k` to navigate, `Esc` to go back, and `q` to exit. `d`
+requests file deletion and requires an explicit `y` confirmation; `n` or
+`Esc` cancels.
+
+Every managed stdout/stderr line starts with `[YYYY-MM-DD HH:MM:SS]`.
+`daemon.log` / `daemon.err` keep the latest date, while older leading date
+blocks rotate beside them as `daemon.<YYYY-MM-DD>.log` / `.err`.
 
 ### `pm2 save` / `pm2 s`
 
@@ -456,7 +461,7 @@ pm2 task start ~/myapp/ecosystem.config.json
 # 4. Check status
 pm2 list
 
-# 5. Watch logs
+# 5. Browse logs
 pm2 logs api
 
 # 6. Save for resurrection on reboot
