@@ -51,34 +51,34 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 `pm2 restart`; the same rule applies to `stop`, `pause`, `resume`, and
 `delete`.
 
-| Command                                          | Purpose                                          | Usage / Key Flags                                                          |
-| ------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| `pm2 start` / `pm2 daemon start`                 | Spawn the daemon process                         | `--foreground` to run blocking in foreground                               |
-| `pm2 task start [target]` / `pm2 apply [target]` | Apply apps from an ecosystem file or GitHub repo | Defaults to `./ecosystem.config.js`; accepts `--all`, `--with`, `--single` |
-| `pm2 task restart <name\|id\|all>`               | Restart a task                                   | Closes, re-spawns, and re-registers scheduler                              |
-| `pm2 task stop <target>`                         | Stop a task gracefully                           | `SIGTERM` escalated to `SIGKILL` after 5 seconds                           |
-| `pm2 task pause <target>`                        | Suspend a task and its cron schedule             | Removes scheduler entries; status becomes `paused`                         |
-| `pm2 task resume <target>`                       | Resume a paused task                             | Re-registers cron and launches the process                                 |
-| `pm2 task delete <target>`                       | Remove a task from the registry                  | Removes configuration and stops process                                    |
-| `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`   | Print a non-interactive process table            | Bordered snapshot; `--no-color` for plain output                           |
-| `pm2 logs [name\|id\|namespace]`                 | Stream logs to stdout/stderr                     | Continues until Ctrl+C; output includes datetime and app name                |
-| `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                |
-| `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                              |
-| `pm2 monitor` / `pm2 m` / `pm2 dashboard`        | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                |
-| `pm2 logs monitor` / `pm2 logs m`                | Open the split Tree and log Viewer                | Enter focuses right Viewer; focused-pane navigation; Tree-file delete uses `y/N` |
-| `pm2 startup`                                    | Generate OS boot startup scripts                 | Creates `plist` on macOS, systemd unit on Linux                            |
-| `pm2 config`                                     | Inspect or mutate layered application settings   | `--source`, `--update`, `--delete`, `--file`, `--local`                    |
-| `pm2 daemon kill`                                | Gracefully exit all apps and daemon              | CLI commands can still auto-start the daemon                               |
-| `pm2 daemon stop`                                | Shutdown all apps, daemon and block auto-start   | Writes a stop marker to suppress auto-respawn                              |
-| `pm2 daemon status`                              | Read-only daemon status check                    | Works whether or not the daemon is running                                 |
-| `pm2 wizard`                                     | Interactively build ecosystem config             | `--format`, `--output`, `--force`, `--no-merge`, `--yes`                   |
-| `pm2 wizard install <script> [prompt]`           | Register a pre-configured planner agent          | Requires exactly one of `--system-planner`, `--business-planner`           |
+| Command                                          | Purpose                                          | Usage / Key Flags                                                                |
+| ------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `pm2 start` / `pm2 daemon start`                 | Spawn the daemon process                         | `--foreground` to run blocking in foreground                                     |
+| `pm2 task start [target]` / `pm2 apply [target]` | Apply apps from an ecosystem file or GitHub repo | Defaults to `./ecosystem.config.js`; accepts `--all`, `--with`, `--single`       |
+| `pm2 task restart <name\|id\|all>`               | Restart a task                                   | Closes, re-spawns, and re-registers scheduler                                    |
+| `pm2 task stop <target>`                         | Stop a task gracefully                           | `SIGTERM` escalated to `SIGKILL` after 5 seconds                                 |
+| `pm2 task pause <target>`                        | Suspend a task and its cron schedule             | Removes scheduler entries; status becomes `paused`                               |
+| `pm2 task resume <target>`                       | Resume a paused task                             | Re-registers cron and launches the process                                       |
+| `pm2 task delete <target>`                       | Remove a task from the registry                  | Removes configuration and stops process                                          |
+| `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`   | Print a non-interactive process table            | Bordered snapshot; `--no-color` for plain output                                 |
+| `pm2 logs [name\|id\|namespace]`                 | Stream logs to stdout/stderr                     | Continues until Ctrl+C; output includes datetime and app name                    |
+| `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                      |
+| `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                                    |
+| `pm2 monitor` / `pm2 m` / `pm2 dashboard`        | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                      |
+| `pm2 logs monitor` / `pm2 logs m`                | Open the split Tree and log Viewer               | Enter focuses right Viewer; focused-pane navigation; Tree-file delete uses `y/N` |
+| `pm2 startup`                                    | Generate OS boot startup scripts                 | Creates `plist` on macOS, systemd unit on Linux                                  |
+| `pm2 config`                                     | Inspect or mutate layered application settings   | `--source`, `--update`, `--delete`, `--file`, `--local`                          |
+| `pm2 daemon kill`                                | Gracefully exit all apps and daemon              | CLI commands can still auto-start the daemon                                     |
+| `pm2 daemon stop`                                | Shutdown all apps, daemon and block auto-start   | Writes a stop marker to suppress auto-respawn                                    |
+| `pm2 daemon status`                              | Read-only daemon status check                    | Works whether or not the daemon is running                                       |
+| `pm2 wizard`                                     | Interactively build ecosystem config             | `--format`, `--output`, `--force`, `--no-merge`, `--yes`                         |
+| `pm2 wizard install <script> [prompt]`           | Register a pre-configured planner agent          | Requires exactly one of `--system-planner`, `--business-planner`                 |
 
 ### `pm2 wizard` prompt flow
 
 The interactive wizard asks for each app in this order:
 
-1. Namespace — choose `Agent`, `Backup`, `Local`, `Service`, or `AutoP`
+1. Namespace — choose `Agent`, `Backup`, `Cloud`, `Local`, `Service`, or `AutoP`
 2. Name
 3. Script
 4. Args
