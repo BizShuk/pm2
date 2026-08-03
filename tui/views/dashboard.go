@@ -83,7 +83,7 @@ func dashboardListWidth(total int) int {
 }
 
 func renderDashboardHeader(ctx DashboardContext) string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render("pm2 dashboard")
+	title := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render("pm2 taskmanager")
 
 	var info string
 	switch {

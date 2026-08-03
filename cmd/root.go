@@ -6,8 +6,8 @@ import (
 	sdkconfig "github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/gosdk/metric"
 	daemoncmd "github.com/bizshuk/pm2/cmd/daemon"
-	dashboardcmd "github.com/bizshuk/pm2/cmd/dashboard"
 	taskcmd "github.com/bizshuk/pm2/cmd/task"
+	taskmanagercmd "github.com/bizshuk/pm2/cmd/taskmanager"
 	wizardcmd "github.com/bizshuk/pm2/cmd/wizard"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,7 @@ func init() {
 		daemoncmd.Cmd,
 		taskcmd.Cmd,
 		MonitorCmd,
-		dashboardcmd.Cmd,
+		taskmanagercmd.Cmd,
 		wizardcmd.Cmd,
 		sdkcmd.ConfigCmd,
 	)

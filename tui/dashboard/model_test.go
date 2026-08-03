@@ -189,7 +189,7 @@ func TestViewShowsSelectedTaskTreeAndPorts(t *testing.T) {
 
 	frame := model.View()
 
-	for _, want := range []string{"pm2 dashboard", "test-host", "api", "SUB-PROCESSES (1)", "LISTENING PORTS (1)", "8080", "2001"} {
+	for _, want := range []string{"pm2 taskmanager", "test-host", "api", "SUB-PROCESSES (1)", "LISTENING PORTS (1)", "8080", "2001"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("frame is missing %q\n%s", want, frame)
 		}

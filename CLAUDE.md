@@ -49,10 +49,10 @@ Import direction (no cycles):
 - `main` -> `cmd` as the thin executable boundary
 - `cmd` -> `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose the complete
   Cobra tree
-- `cmd`, `cmd/task`, `cmd/daemon`, and `cmd/dashboard` -> `cmd/runtime` for
+- `cmd`, `cmd/task`, `cmd/daemon`, and `cmd/taskmanager` -> `cmd/runtime` for
   shared CLI paths and the daemon auto-start client
 - `cmd/runtime` -> `model` for daemon RPC transport
-- `sysmon` -> `process` only; it is imported by `cmd/dashboard`, `tui`, and
+- `sysmon` -> `process` only; it is imported by `cmd/taskmanager`, `tui`, and
   `tui/dashboard`, and never imports `daemon`, `cmd`, or `tui`
 - `cmd/daemon` -> `daemon` for the foreground server runtime
 - `cmd/wizard` -> `cmd/wizard/prompt` for Cobra-free planner prompt templates
@@ -105,8 +105,8 @@ pm2/
 │   │   │   ├── system.go     system-planner template
 │   │   │   └── business.go   business-planner template
 │   │   └── wizard_test.go    Cobra-level wizard integration tests
-│   ├── dashboard/            system activity monitor command sub-package
-│   │   ├── dashboard.go      Cmd — `pm2 dashboard` interactive TUI shell
+│   ├── taskmanager/          system activity monitor command sub-package
+│   │   ├── taskmanager.go    Cmd — `pm2 taskmanager` interactive TUI shell
 │   │   ├── emit.go           EmitCmd — periodic full-snapshot emitter +
 │   │   │                     interval/count/out/format flags
 │   │   └── emit_text.go      plain key=value snapshot encoder
@@ -367,7 +367,7 @@ Daemon startup and task execution use separate namespaces:
 | `pm2 daemon`           | `pm2 d`     |
 | `pm2 monitor`          | `pm2 m`     |
 | `pm2 list`             | `pm2 l`     |
-| `pm2 dashboard`        | none        |
+| `pm2 taskmanager`      | `pm2 tm`    |
 
 The namespace aliases retain their child command trees, so `pm2 t restart`
 resolves to `pm2 task restart` and `pm2 d status` resolves to
@@ -420,12 +420,12 @@ list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
 
-### System activity monitor (`pm2 dashboard`)
+### System activity monitor (`pm2 taskmanager`)
 
-`dashboard` used to be an alias of `monitor`. It is now its own command
+`taskmanager` (short alias `pm2 tm`) replaced `dashboard` as its own command
 because the two answer different questions and mixing them made both worse:
 
-| | `pm2 monitor` | `pm2 dashboard` |
+| | `pm2 monitor` | `pm2 taskmanager` |
 | --- | --- | --- |
 | Subject | managed applications | the machine |
 | Needs the daemon | yes | no — only the task list does |
@@ -483,10 +483,10 @@ from another. The dashboard re-arms its tick *after* a collection completes
 rather than on a fixed period, because a darwin sample already blocks for a
 second.
 
-`pm2 dashboard emit` is the same detection written instead of drawn:
+`pm2 taskmanager emit` is the same detection written instead of drawn:
 `sysmon.Emitter` loops a `TaskSource` + `SnapshotEncoder` on an interval.
 JSON encoding lives in sysmon (serialisation); the `text` encoder lives in
-`cmd/dashboard` (presentation). Neither the TUI nor the emitter auto-starts
+`cmd/taskmanager` (presentation). Neither the TUI nor the emitter auto-starts
 the daemon — both use `model.ListProcesses`, because an observer asking
 "what is running" must not change the answer.
 

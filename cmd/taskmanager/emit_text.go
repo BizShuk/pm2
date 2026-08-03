@@ -1,4 +1,4 @@
-package dashboard
+package taskmanager
 
 import (
 	"fmt"

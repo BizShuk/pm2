@@ -309,10 +309,10 @@ pm2 monitor  4 processes · 10:24:51
 
 ---
 
-### `pm2 dashboard`
+### `pm2 taskmanager` (alias: `pm2 tm`)
 
 Open the system activity monitor. Where `pm2 monitor` answers "what are my
-managed applications doing", `pm2 dashboard` answers "what is this machine
+managed applications doing", `pm2 taskmanager` answers "what is this machine
 doing, and which part of it is mine".
 
 The top panel is whole-machine: CPU (with user/system split and load
@@ -326,11 +326,11 @@ The daemon is optional: without one the machine panel and the process list
 still work, and only the task list is empty.
 
 ```bash
-pm2 dashboard
+pm2 taskmanager # short alias: pm2 tm
 ```
 
 ```text
- pm2 dashboard  workstation · 10 cores · up 12h 6m · 737 procs (3 running) · 16:16:30
+ pm2 taskmanager  workstation · 10 cores · up 12h 6m · 737 procs (3 running) · 16:16:30
  cpu   ███████░░░░░░░░░░░  38.0%  user 15.0  sys 23.0  ·  load 4.25 6.80 8.22  ·  10 cores
  mem   ██████████████████  98.7%  15.8gb of 16.0gb  ·  3.1gb available  ·  swap 10.7gb / 12.0gb
  net                      ⇣ 1.2mb/s   ⇡ 0.4mb/s  on en0  ·  2.9gb in / 1.0gb out since boot
@@ -358,7 +358,7 @@ available figure beside it is the headroom that actually exists.
 
 ---
 
-### `pm2 dashboard emit`
+### `pm2 taskmanager emit`
 
 Write one complete detection per interval instead of drawing it: host
 resources, filesystem usage, and every managed task with its sub-processes
@@ -366,9 +366,9 @@ and listening ports. Each record is self-contained, so a consumer that
 misses one loses a sample rather than falling out of sync.
 
 ```bash
-pm2 dashboard emit --interval 30s                       # NDJSON on stdout
-pm2 dashboard emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
-pm2 dashboard emit --count 1 | jq '.system.cpu'         # one-shot probe
+pm2 taskmanager emit --interval 30s                       # NDJSON on stdout
+pm2 taskmanager emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
+pm2 taskmanager emit --count 1 | jq '.system.cpu'         # one-shot probe
 ```
 
 | Flag         | Default | Meaning                                            |

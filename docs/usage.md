@@ -299,14 +299,14 @@ for entries != nil || errs != nil {
 `Entry` exposes `Time`, `AppName`, `Stream`, and `Message`. Its `String`
 method returns `[YYYY-MM-DD HH:MM:SS] app_name | escaped_log`.
 
-### `pm2 dashboard`
+### `pm2 taskmanager` (alias: `pm2 tm`)
 
 ```bash
-pm2 dashboard
+pm2 taskmanager # short alias: pm2 tm
 ```
 
 The system activity monitor. `pm2 monitor` scopes itself to managed
-applications and their logs; `pm2 dashboard` scopes itself to the machine.
+applications and their logs; `pm2 taskmanager` scopes itself to the machine.
 
 - Top panel: CPU (user/system split, load average), memory (used,
   available, swap), network throughput, disk I/O and filesystem capacity.
@@ -328,12 +328,12 @@ the tree total. Ports are collected across the whole tree for the same
 reason — the socket usually belongs to a child, not to the process pm2
 spawned.
 
-### `pm2 dashboard emit`
+### `pm2 taskmanager emit`
 
 ```bash
-pm2 dashboard emit --interval 30s
-pm2 dashboard emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
-pm2 dashboard emit --count 1 | jq '.tasks[] | select(.ports | length > 0)'
+pm2 taskmanager emit --interval 30s
+pm2 taskmanager emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
+pm2 taskmanager emit --count 1 | jq '.tasks[] | select(.ports | length > 0)'
 ```
 
 Emits one complete detection per interval rather than drawing it. Each

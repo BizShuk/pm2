@@ -14,9 +14,9 @@ var monitorSortBy string
 
 // MonitorCmd opens the live process dashboard.
 //
-// `dashboard` is deliberately not an alias here: it is now its own
-// command (cmd/dashboard) for the system activity monitor. Monitor stays
-// scoped to managed applications and their logs.
+// `taskmanager` (alias `tm`) is its own command (cmd/taskmanager) for
+// the system activity monitor. Monitor stays scoped to managed applications
+// and their logs.
 var MonitorCmd = &cobra.Command{
 	Use:     "monitor",
 	Aliases: []string{"m"},

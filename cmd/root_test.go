@@ -104,13 +104,14 @@ func TestRootCmdCommandNamespaces(t *testing.T) {
 
 func TestRootCmdShortAliases(t *testing.T) {
 	for commandName, alias := range map[string]string{
-		"wizard":    "w",
-		"save":      "s",
-		"resurrect": "r",
-		"task":      "t",
-		"daemon":    "d",
-		"monitor":   "m",
-		"list":      "l",
+		"wizard":      "w",
+		"save":        "s",
+		"resurrect":   "r",
+		"task":        "t",
+		"daemon":      "d",
+		"monitor":     "m",
+		"list":        "l",
+		"taskmanager": "tm",
 	} {
 		t.Run(commandName, func(t *testing.T) {
 			command, _, err := Cmd.Find([]string{commandName})

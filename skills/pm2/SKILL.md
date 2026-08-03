@@ -65,8 +65,8 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                      |
 | `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                                    |
 | `pm2 monitor` / `pm2 m`                          | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                      |
-| `pm2 dashboard`                                  | System activity monitor: host, tree, ports       | `a` toggles pm2 tasks / all processes; `s` cycles sort; works without a daemon   |
-| `pm2 dashboard emit`                             | Emit a full system snapshot on a fixed period    | `--interval`, `--count`, `--out`, `--format json\|text`; never auto-starts daemon |
+| `pm2 taskmanager` / `pm2 tm`                      | System activity monitor: host, tree, ports       | `a` toggles pm2 tasks / all processes; `s` cycles sort; works without a daemon   |
+| `pm2 taskmanager emit`                         | Emit a full system snapshot on a fixed period    | `--interval`, `--count`, `--out`, `--format json\|text`; never auto-starts daemon |
 | `pm2 logs monitor` / `pm2 logs m`                | Open the split Tree and log Viewer               | Enter focuses right Viewer; focused-pane navigation; Tree-file delete uses `y/N` |
 | `pm2 startup`                                    | Generate OS boot startup scripts                 | Creates `plist` on macOS, systemd unit on Linux                                  |
 | `pm2 config`                                     | Inspect or mutate layered application settings   | `--source`, `--update`, `--delete`, `--file`, `--local`                          |
@@ -367,12 +367,12 @@ pm2 monitor --sort cpu
 ### Check what the machine is doing
 
 ```bash
-pm2 dashboard                              # host resources + process tree + ports
-pm2 dashboard emit --count 1 | jq .system  # one machine-readable snapshot
-pm2 dashboard emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
+pm2 taskmanager                          # host resources + process tree + ports (alias: pm2 tm)
+pm2 taskmanager emit --count 1 | jq .system  # one machine-readable snapshot
+pm2 taskmanager emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
 ```
 
-`pm2 dashboard` is the system activity monitor: CPU / memory / network /
+`pm2 taskmanager` is the system activity monitor: CPU / memory / network /
 disk on top, pm2 tasks (or every OS process, with `a`) below, and the
 selection's sub-processes and listening ports on the right. It runs
 without a daemon; only the task list needs one.

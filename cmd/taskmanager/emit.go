@@ -1,4 +1,4 @@
-package dashboard
+package taskmanager
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// emitOptions are the user-facing flags for `pm2 dashboard emit`.
+// emitOptions are the user-facing flags for `pm2 taskmanager emit`.
 type emitOptions struct {
 	interval time.Duration
 	count    int
