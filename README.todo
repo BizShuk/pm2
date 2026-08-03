@@ -17,6 +17,27 @@
     - 工時：0.5 天。
     - 觸發時機：CI 引入 `go test -race -count=3 ./...` 之前。
 
+- [x] [P1] `system-activity-dashboard`: 把 `dashboard` 從 `monitor` 的 alias 改成獨立的
+  system activity monitor，並新增週期性完整快照輸出。 @2026-08-03 @Completed @Architecture
+    - 目標：`pm2 dashboard` 回答「這台機器在做什麼、哪一部分是我的」——host CPU /
+      memory / network / disk I/O / disk usage，逐 process 展開 sub-process 與
+      port number，TUI 沿用 `pm2 monitor` 的兩欄介面；另提供可設定週期的完整偵測輸出。
+    - 做法：新增 `sysmon` domain package（`runtime.GOOS` 分派 darwin/linux/fallback
+      sampler，cumulative counter 經 `rateTracker` 轉 per-second rate），
+      `tui/dashboard` controller + `tui/views/dashboard*.go` 純渲染器，
+      `cmd/dashboard` 的 `Cmd` 與 `EmitCmd`。`model.ListProcesses` 成為 cmd/ 與
+      tui/ 共用且不會 auto-start daemon 的 list 路徑。
+    - 邊界：`sysmon` 不 render、不講 RPC、不 import daemon/cmd/tui；managed task
+      list 由呼叫端傳入。`tui/hostmetrics` 併入 `sysmon` 後刪除，host 量測單一 owner。
+    - 連帶修正：`tui/views` 新增自有 `screen` runewidth Condition。go-runewidth 依
+      `LC_CTYPE` 把 ambiguous-width glyph（`● ○ │ ↑ → … █`）算 2 欄，lipgloss 一律算
+      1 欄；在 `LC_CTYPE=zh_TW.UTF-8` 下每列 row 溢出 1 欄被 wrap，list pane 少顯示
+      一半項目，log browser 的 key legend 也被截斷。此 bug 在本次 Ubuntu 26.04 實測
+      中暴露，且早於本功能存在。
+    - 後續可考慮：`pm2 dashboard` 的 emit 與 `plans/2026-07-23-pm2-event-stream.md`
+      的 CloudEvents envelope 對齊（目前 snapshot 是狀態不是 occurrence，刻意不包成
+      CloudEvent，與該計畫 §4.6 一致）。
+
 ## Bug
 
 ## Wizard

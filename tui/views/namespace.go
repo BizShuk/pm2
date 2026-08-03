@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/bizshuk/pm2/tui/theme"
 )
@@ -28,13 +27,13 @@ func RenderNamespaceBar(ctx ViewContext, w int) string {
 	}
 
 	const sep = " · "
-	sepW := runewidth.StringWidth(sep)
-	const pad = 2 // 1-char horizontal padding on each side
-	arrowW := runewidth.StringWidth("›") // ‹ is the same width
+	sepW := screen.StringWidth(sep)
+	const pad = 2                     // 1-char horizontal padding on each side
+	arrowW := screen.StringWidth("›") // ‹ is the same width
 
 	chipW := make([]int, len(ns))
 	for i, n := range ns {
-		chipW[i] = runewidth.StringWidth(n)
+		chipW[i] = screen.StringWidth(n)
 	}
 
 	// windowWidth is the sum of chip widths plus the separator overhead

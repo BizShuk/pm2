@@ -226,7 +226,7 @@ pm2 task delete all
 ```
 
 Stops the process and removes it from the in-memory list. It will not appear
-in the dashboard until started again. Does not affect `dump.json`.
+in `pm2 monitor` until started again. Does not affect `dump.json`.
 
 ### `pm2 logs`
 
@@ -298,6 +298,68 @@ for entries != nil || errs != nil {
 
 `Entry` exposes `Time`, `AppName`, `Stream`, and `Message`. Its `String`
 method returns `[YYYY-MM-DD HH:MM:SS] app_name | escaped_log`.
+
+### `pm2 dashboard`
+
+```bash
+pm2 dashboard
+```
+
+The system activity monitor. `pm2 monitor` scopes itself to managed
+applications and their logs; `pm2 dashboard` scopes itself to the machine.
+
+- Top panel: CPU (user/system split, load average), memory (used,
+  available, swap), network throughput, disk I/O and filesystem capacity.
+- Left pane: pm2 tasks, or every OS process with `a`.
+- Right pane: the selection's sub-processes and the ports its whole tree
+  listens on.
+
+Keys: `↑↓` / `jk` navigate, `PgUp` / `PgDn` page, `g` / `G` top / bottom,
+`a` toggle scope, `s` cycle sort (cpu → memory → name), `q` quit.
+
+The task list needs a running daemon; nothing else does. Without one the
+header shows `daemon unreachable — showing system only` and the machine
+panel keeps working.
+
+Task CPU and memory are reported twice: the task's own process, and the
+`tree` total including every descendant. A managed shell script that execs
+the real worker shows near-zero usage on its own row and the true cost in
+the tree total. Ports are collected across the whole tree for the same
+reason — the socket usually belongs to a child, not to the process pm2
+spawned.
+
+### `pm2 dashboard emit`
+
+```bash
+pm2 dashboard emit --interval 30s
+pm2 dashboard emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
+pm2 dashboard emit --count 1 | jq '.tasks[] | select(.ports | length > 0)'
+```
+
+Emits one complete detection per interval rather than drawing it. Each
+record carries the machine's resources plus every managed task with its
+sub-processes and ports, so a consumer that misses a record loses one
+sample instead of falling out of sync.
+
+| Flag         | Default | Meaning                                          |
+| ------------ | ------- | ------------------------------------------------ |
+| `--interval` | `30s`   | Period between snapshots                         |
+| `--count`    | `0`     | Stop after N snapshots; 0 runs until interrupted |
+| `--out`      | stdout  | Append to this file instead of stdout            |
+| `--format`   | `json`  | `json` (newline-delimited) or `text` (key=value) |
+
+The first snapshot is written immediately so an interactive run shows
+output straight away. `--out` appends, so restarts accumulate into one
+stream instead of truncating history.
+
+`json` writes one self-contained object per line. `text` writes
+`[YYYY-MM-DD HH:MM:SS] scope=<host|disk|task|error> key=value` lines using
+the same timestamp prefix as managed application logs, so the two read
+consistently when tailed together. Values that can contain spaces — task
+names, mount points, error messages — are quoted.
+
+The daemon is never auto-started. A task list that cannot be read appears
+in the snapshot's `errors` field and the machine readings still ship.
 
 ### `pm2 save` / `pm2 s`
 

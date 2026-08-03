@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/robfig/cron/v3"
 
 	"github.com/bizshuk/pm2/process"
@@ -38,7 +37,14 @@ func fullUptime(p process.ProcessInfo) string {
 	if p.Status != process.StatusOnline || p.StartedAt.IsZero() {
 		return "—"
 	}
-	d := time.Since(p.StartedAt)
+	return fullUptimeSince(p.StartedAt)
+}
+
+// fullUptimeSince renders the elapsed time since started as
+// "X days  HH:MM:SS" / "HH:MM:SS", without the process-status check
+// fullUptime applies.
+func fullUptimeSince(started time.Time) string {
+	d := time.Since(started)
 	days := int(d.Hours()) / 24
 	h := int(d.Hours()) % 24
 	m := int(d.Minutes()) % 60
@@ -47,6 +53,31 @@ func fullUptime(p process.ProcessInfo) string {
 		return fmt.Sprintf("%d days  %02d:%02d:%02d", days, h, m, s)
 	}
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+}
+
+// formatUptimeSeconds renders a host uptime as "12d 4h" / "4h 12m" /
+// "12m", the granularity a machine-uptime readout is read at.
+func formatUptimeSeconds(seconds int64) string {
+	if seconds <= 0 {
+		return "—"
+	}
+	d := time.Duration(seconds) * time.Second
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd %dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+}
+
+// formatRate renders a bytes-per-second reading in human units.
+func formatRate(bytesPerSecond float64) string {
+	if bytesPerSecond < 0 {
+		bytesPerSecond = 0
+	}
+	return formatBytes(uint64(bytesPerSecond)) + "/s"
 }
 
 // fmtTime formats t as "YYYY-MM-DD  HH:MM:SS"; returns "—" for zero time.
@@ -101,15 +132,17 @@ func cronLastRunStyled(t time.Time, status string, maxStatusLen int) string {
 	return ts + badge
 }
 
-// ─── cropping helpers (runewidth-aware) ─────────────────────────────────────
+// ─── cropping helpers (width-aware) ─────────────────────────────────────────
 
 // Crop returns the tail of s with a leading "…" so the rendered width ≤ maxLen.
-// Width is measured in runes via runewidth (CJK double-width).
+// Width is measured in terminal columns via `screen` (see width.go), which
+// counts CJK as double-width and ambiguous-width glyphs as one column so the
+// result matches what lipgloss will draw.
 func Crop(s string, maxLen int) string {
 	if maxLen <= 4 {
 		return s
 	}
-	sw := runewidth.StringWidth(s)
+	sw := screen.StringWidth(s)
 	if sw <= maxLen {
 		return s
 	}
@@ -118,7 +151,7 @@ func Crop(s string, maxLen int) string {
 	targetWidth := maxLen - 1 // 1 for the ellipsis "…"
 	startIndex := len(runes)
 	for i := len(runes) - 1; i >= 0; i-- {
-		rw := runewidth.RuneWidth(runes[i])
+		rw := screen.RuneWidth(runes[i])
 		if width+rw > targetWidth {
 			break
 		}
@@ -133,7 +166,7 @@ func CropRight(s string, maxLen int) string {
 	if maxLen <= 4 {
 		return s
 	}
-	sw := runewidth.StringWidth(s)
+	sw := screen.StringWidth(s)
 	if sw <= maxLen {
 		return s
 	}
@@ -142,7 +175,7 @@ func CropRight(s string, maxLen int) string {
 	targetWidth := maxLen - 1 // 1 for the ellipsis "…"
 	var result []rune
 	for _, r := range runes {
-		rw := runewidth.RuneWidth(r)
+		rw := screen.RuneWidth(r)
 		if width+rw > targetWidth {
 			break
 		}

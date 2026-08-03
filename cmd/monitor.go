@@ -13,9 +13,13 @@ import (
 var monitorSortBy string
 
 // MonitorCmd opens the live process dashboard.
+//
+// `dashboard` is deliberately not an alias here: it is now its own
+// command (cmd/dashboard) for the system activity monitor. Monitor stays
+// scoped to managed applications and their logs.
 var MonitorCmd = &cobra.Command{
 	Use:     "monitor",
-	Aliases: []string{"m", "dashboard"},
+	Aliases: []string{"m"},
 	Short:   "Live process detail and log dashboard (short alias: pm2 m)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := tui.SortField(strings.ToLower(monitorSortBy))

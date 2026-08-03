@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
 	"github.com/bizshuk/pm2/process"
@@ -223,7 +222,7 @@ func renderProcessTable(renderer *lipgloss.Renderer, procs []process.ProcessInfo
 	headerParts := make([]string, 0, len(cols))
 	for _, col := range cols {
 		label := col.name
-		if runewidth.StringWidth(label) > col.width {
+		if screen.StringWidth(label) > col.width {
 			label = CropRight(label, col.width)
 		}
 		style := headerStyle.Width(col.width)
@@ -250,7 +249,7 @@ func renderProcessTable(renderer *lipgloss.Renderer, procs []process.ProcessInfo
 		rowParts := make([]string, 0, len(cols))
 		for _, col := range cols {
 			value := getColVal(p, col.name)
-			if runewidth.StringWidth(value) > col.width {
+			if screen.StringWidth(value) > col.width {
 				value = CropRight(value, col.width)
 			}
 

@@ -36,6 +36,11 @@ flowchart TD
     C -- "JSON over ~/.pm2/pm2.sock" --> N
 ```
 
+`sysmon` sits beside that flow rather than inside it: it reads the OS
+directly (no daemon involved) and joins the daemon's process list with the
+machine's own view of those PIDs. `pm2 dashboard` therefore still works with
+the daemon down — only the task list goes empty.
+
 Import direction (no cycles):
 
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
@@ -44,9 +49,11 @@ Import direction (no cycles):
 - `main` -> `cmd` as the thin executable boundary
 - `cmd` -> `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose the complete
   Cobra tree
-- `cmd`, `cmd/task`, and `cmd/daemon` -> `cmd/runtime` for shared CLI paths and
-  the daemon auto-start client
+- `cmd`, `cmd/task`, `cmd/daemon`, and `cmd/dashboard` -> `cmd/runtime` for
+  shared CLI paths and the daemon auto-start client
 - `cmd/runtime` -> `model` for daemon RPC transport
+- `sysmon` -> `process` only; it is imported by `cmd/dashboard`, `tui`, and
+  `tui/dashboard`, and never imports `daemon`, `cmd`, or `tui`
 - `cmd/daemon` -> `daemon` for the foreground server runtime
 - `cmd/wizard` -> `cmd/wizard/prompt` for Cobra-free planner prompt templates
 - `cmd/wizard` -> `config/wizard` for prompt, render, merge, and install logic
@@ -98,6 +105,11 @@ pm2/
 │   │   │   ├── system.go     system-planner template
 │   │   │   └── business.go   business-planner template
 │   │   └── wizard_test.go    Cobra-level wizard integration tests
+│   ├── dashboard/            system activity monitor command sub-package
+│   │   ├── dashboard.go      Cmd — `pm2 dashboard` interactive TUI shell
+│   │   ├── emit.go           EmitCmd — periodic full-snapshot emitter +
+│   │   │                     interval/count/out/format flags
+│   │   └── emit_text.go      plain key=value snapshot encoder
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
 │   ├── logs.go               pm2 logs — signal-aware streaming command shell
@@ -175,6 +187,8 @@ pm2/
 │   └── files.go              current/archive discovery for configured paths
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
+│   ├── list.go               ListProcesses — CmdList + decode; the one path
+│   │                         both cmd/ and tui/ use, never auto-starts a daemon
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
 ├── process/
 │   ├── app_config.go         shared static AppConfig and normalization
@@ -184,6 +198,23 @@ pm2/
 │   ├── daemon_info.go        daemon status model
 │   ├── path.go               process-name and executable-path resolution
 │   └── format.go             process display formatters
+├── sysmon/                   host + process observation domain; no daemon,
+│   │                         cmd, or tui dependency and no rendering
+│   ├── doc.go                package boundary and ownership
+│   ├── snapshot.go           System/CPU/Memory/Load/Network/DiskIO/Disk/
+│   │                         Proc/Port/Task/Host/Snapshot wire types
+│   ├── collector.go          Collector + New + runtime.GOOS sampler dispatch
+│   ├── inspect.go            Observe/Snapshot/BuildTasks join + Descendants +
+│   │                         PortsFor
+│   ├── proctable.go          `ps` invocation, parsing, and tree walk
+│   ├── ports.go              lsof (-F) and ss listener discovery
+│   ├── filesystem.go         `df -Pk` parsing + Apple system-volume filter
+│   ├── network.go            interfaceCounters -> Network rate aggregation
+│   ├── rate.go               rateTracker: cumulative counters -> per-second
+│   ├── darwin.go             iostat / vm_stat / sysctl / netstat sampler
+│   ├── linux.go              /proc/{stat,meminfo,loadavg,net/dev,diskstats}
+│   ├── fallback.go           ErrUnsupportedPlatform sampler
+│   └── emit.go               Emitter + TaskSource + SnapshotEncoder
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
 ├── plans/
@@ -192,9 +223,15 @@ pm2/
 └── tui/
     ├── model.go              Bubbletea Model — controller: Update event branches,
     │                         Cmd dispatch, View() delegates to tui/views
+    ├── metrics.go            host-metric message types + re-arm tick; sampling
+    │                         itself belongs to sysmon
     ├── theme.go              Re-exports the palette from tui/theme as clXxx vars
     ├── theme/                tui/theme sub-package: single source of truth for
     │   └── palette.go        lipgloss.AdaptiveColor palette (Online/Stopped/...)
+    ├── dashboard/            `pm2 dashboard` controller domain
+    │   ├── model.go          Scope/SortField state, sort, selection, View ctx
+    │   ├── commands.go       one-pass collect: daemon list + sysmon.Observe
+    │   └── keys.go           navigation, scope toggle, sort cycle
     ├── logbrowser/           logs monitor controller domain
     │   ├── model.go          Tree/Viewer/delete-confirm async state
     │   ├── tree.go           application → log-file visible-row projection
@@ -207,6 +244,12 @@ pm2/
     │   ├── detail.go         RenderDetail — right-panel param table
     │   ├── logs.go           RenderLogs — right-panel log tail
     │   ├── log_browser.go    RenderLogBrowser — log manager screens
+    │   ├── dashboard.go      DashboardContext + RenderDashboard layout, header,
+    │   │                     footer, list rows, scroll window
+    │   ├── dashboard_host.go RenderHostPanel + gauge (cpu/mem/net/disk block)
+    │   ├── dashboard_detail.go
+    │   │                     RenderDashboardDetail — fields, sub-processes,
+    │   │                     listening ports, and the height split between them
     │   ├── list.go           RenderProcessTable + RenderWideTable + RenderLeftPane
     │   ├── layout.go         RenderLayout — single entry point; orchestrates
     │   │                     header + body + footer, decides single vs two-pane
@@ -324,6 +367,7 @@ Daemon startup and task execution use separate namespaces:
 | `pm2 daemon`           | `pm2 d`     |
 | `pm2 monitor`          | `pm2 m`     |
 | `pm2 list`             | `pm2 l`     |
+| `pm2 dashboard`        | none        |
 
 The namespace aliases retain their child command trees, so `pm2 t restart`
 resolves to `pm2 task restart` and `pm2 d status` resolves to
@@ -375,6 +419,76 @@ its script. The former wide-table presentation is exposed as the one-shot
 list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
+
+### System activity monitor (`pm2 dashboard`)
+
+`dashboard` used to be an alias of `monitor`. It is now its own command
+because the two answer different questions and mixing them made both worse:
+
+| | `pm2 monitor` | `pm2 dashboard` |
+| --- | --- | --- |
+| Subject | managed applications | the machine |
+| Needs the daemon | yes | no — only the task list does |
+| Data source | `CmdList` RPC + log files | `sysmon` (OS) + `CmdList` RPC |
+| Right pane | detail + log tail | sub-processes + listening ports |
+
+`sysmon` is the single owner of host measurement. `tui/hostmetrics` was
+deleted and `tui.Model` now reads `sysmon.Collector.Sample()`, so `monitor`'s
+footer and `dashboard`'s panel can never disagree about the same machine.
+
+Boundaries:
+
+- `sysmon` never renders and never speaks RPC. It returns numbers; callers
+  format them, and the managed-task list is passed *in* (`BuildTasks`,
+  `Observe`) rather than fetched.
+- Platform selection is `runtime.GOOS` at construction, not build tags — the
+  same choice `hostmetrics` made — so every parser compiles and is unit
+  tested on every platform against captured fixture output.
+- Cumulative OS counters (network bytes, disk sectors) become rates through
+  `rateTracker`. The first observation of a key returns 0; a counter that
+  moves backwards resets its baseline instead of reporting a spike.
+
+Per-platform sources:
+
+| Reading | darwin | linux |
+| --- | --- | --- |
+| CPU, load, disk I/O | `iostat -c 2 -w 1` (second sample) | `/proc/stat` delta, `/proc/loadavg`, `/proc/diskstats` delta |
+| Memory | `vm_stat` + `sysctl hw.memsize vm.swapusage` | `/proc/meminfo` |
+| Network | `netstat -ib` delta | `/proc/net/dev` delta |
+| Filesystems | `df -Pk` | `df -Pk` |
+| Process table | `ps -axo` | `ps -eo` |
+| Listening ports | `lsof -F` | `ss -lntpH`, falling back to `lsof` |
+
+`iostat` rather than `top` for CPU on darwin: `top -l 1` costs ~0.7 s of
+*system* time walking the process table, which is an absurd price for
+measuring CPU, and its first sample is skewed by everything since boot.
+`iostat -c 2 -w 1` sleeps for its second, costs ~5 ms of CPU, reports a true
+one-second delta, and returns load average and disk throughput in the same
+output.
+
+macOS "used" memory means everything that is not free or speculative, which
+is why a healthy Mac reads ~99%. That matches Activity Monitor and `top`;
+disagreeing with the platform's own tools would be worse. `Memory.
+AvailableBytes` carries the honest headroom and renderers show both.
+
+Whole-tree accounting is the point of the join. A managed shell script that
+execs the real worker shows near-zero usage on its own row, so `Task.Tree*`
+sums the task with every descendant, and `Ports` is collected across the
+whole tree — the listening socket almost always belongs to a child.
+
+One collection pass feeds every pane (`Collector.Observe`): the host panel,
+the task list and the detail pane must describe the same instant, and
+separate tickers would put a task's CPU from one second beside the machine's
+from another. The dashboard re-arms its tick *after* a collection completes
+rather than on a fixed period, because a darwin sample already blocks for a
+second.
+
+`pm2 dashboard emit` is the same detection written instead of drawn:
+`sysmon.Emitter` loops a `TaskSource` + `SnapshotEncoder` on an interval.
+JSON encoding lives in sysmon (serialisation); the `text` encoder lives in
+`cmd/dashboard` (presentation). Neither the TUI nor the emitter auto-starts
+the daemon — both use `model.ListProcesses`, because an observer asking
+"what is running" must not change the answer.
 
 ### Log streaming and interactive browsing
 
@@ -556,6 +670,25 @@ executor fallback when a request has no configured log directory.
   view by writing a new function in the relevant `views/*.go` file and
   wiring it into `RenderLayout`; do not reintroduce member methods on
   `Model`.
+- Never hand a styled string to `views.Crop` / `views.CropRight`. They
+  measure printable columns and count ANSI escape bytes as visible
+  characters, so a coloured line loses its tail long before it reaches the
+  edge. Crop the raw value first and style the result, or let lipgloss trim
+  it with `MaxWidth`. Pair `MaxWidth` with `MaxHeight(1)` on fixed-height
+  rows: a row one column too wide wraps instead of truncating, and a list
+  pane that wraps silently shows half its entries.
+- All width measurement in `tui/views` goes through the package's own
+  `screen` Condition (`views/width.go`), never `runewidth.StringWidth` /
+  `RuneWidth` directly. go-runewidth reads `LC_CTYPE` at startup and calls
+  ambiguous-width glyphs (`● ○ │ ↑ → … █`) two columns wide under a CJK
+  locale, while lipgloss — which does the actual padding — always calls
+  them one. Mixing the two broke every list row by one column under
+  `LC_CTYPE=zh_TW.UTF-8`. `views/width_test.go` pins the glyph set both
+  engines must agree on; add new non-ASCII chrome to that list.
+- Host measurement has exactly one owner: `sysmon`. Do not add a second
+  CPU/memory reader inside `tui/` — that is what `tui/hostmetrics` was, and
+  its macOS memory parser had drifted into reporting the wrong number by the
+  time it was deleted.
 - Colour values come from `tui/theme/palette.go` only. The `clXxx`
   re-exports in `tui/theme.go` exist for backwards compatibility inside
   the tui package; new code outside the tui/views subtree should

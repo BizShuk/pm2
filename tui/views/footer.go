@@ -37,10 +37,11 @@ func RenderFooter(w int, sortBy string) string {
 // intentionally randomised for cosmetic variety; CPU/Mem come from
 // the latest ViewContext sample.
 //
-// TODO(cli-list-and-metrics follow-up): replace the net/disk random
-// placeholders below with real collectors in tui/hostmetrics/net.go
-// and tui/hostmetrics/disk.go. The CPU/Mem path is already split out
-// into tui/hostmetrics; net/disk are the last un-modelled pair.
+// TODO(cli-list-and-metrics follow-up): the real net/disk collectors now
+// exist as sysmon.Network and sysmon.DiskIO — replace the placeholders
+// below by carrying a sysmon.System through ViewContext, the way
+// DashboardContext already does. (Low priority: this renderer only backs
+// the wide-table view, and `pm2 monitor` always opens in detail mode.)
 func RenderHostMetricsLines(ctx ViewContext) (string, string) {
 	w := ctx.Width
 	lblSt := lipgloss.NewStyle().Bold(true).Foreground(theme.Text)

@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bizshuk/pm2/process"
-	"github.com/bizshuk/pm2/tui/hostmetrics"
+	"github.com/bizshuk/pm2/sysmon"
 	"github.com/bizshuk/pm2/tui/views"
 )
 
@@ -68,9 +68,11 @@ type Model struct {
 	logFocus   bool
 	hostCPU    float64
 	hostMem    float64
-	// hostMetrics samples CPU/Mem via the platform-appropriate
-	// collector. Held as an interface so tests can inject a stub.
-	hostMetrics hostmetrics.HostMetricsCollector
+	// hostMetrics is the shared system collector. Monitor uses only its
+	// CPU and memory percentages; `pm2 dashboard` reads the rest of the
+	// same sample. Host measurement has one owner (sysmon) so the two
+	// commands can never disagree about what the machine is doing.
+	hostMetrics *sysmon.Collector
 	SortBy      SortField
 	notice      string // transient message from the last action (e.g. a failure)
 }
@@ -83,7 +85,7 @@ func New(socket string, detail bool) Model {
 		Detail:      detail,
 		hostCPU:     hostMetricsFallbackCPU,
 		hostMem:     hostMetricsFallbackMem,
-		hostMetrics: hostmetrics.NewCollector(),
+		hostMetrics: sysmon.New(),
 		SortBy:      SortByName,
 	}
 }
@@ -135,15 +137,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case triggerHostMetricsMsg:
 		return m, func() tea.Msg {
-			cpu, mem, err := m.hostMetrics.Collect()
+			system, err := m.hostMetrics.Sample()
 			if err != nil {
-				// Collector failed (sandboxed /proc, missing macOS
-				// top, etc) — fall back to a stable cosmetic value
-				// so the TUI never blanks out. The fallback constants
-				// are defined in metrics.go next to the message types.
-				cpu, mem = hostMetricsFallbackCPU, hostMetricsFallbackMem
+				// Collector failed (sandboxed /proc, missing iostat,
+				// etc) — fall back to a stable cosmetic value so the
+				// TUI never blanks out. The fallback constants are
+				// defined in metrics.go next to the message types.
+				return hostMetricsMsg{cpu: hostMetricsFallbackCPU, mem: hostMetricsFallbackMem}
 			}
-			return hostMetricsMsg{cpu: cpu, mem: mem}
+			return hostMetricsMsg{cpu: system.CPU.UsedPercent, mem: system.Memory.UsedPercent}
 		}
 
 	case tea.KeyMsg:

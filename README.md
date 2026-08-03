@@ -1,6 +1,6 @@
 # pm2
 
-A PM2-inspired process manager written in Go. Manages long-running processes with automatic restart, cron-based scheduling, a live TUI dashboard, and OS startup integration.
+A PM2-inspired process manager written in Go. Manages long-running processes with automatic restart, cron-based scheduling, a live TUI dashboard, a system activity monitor, and OS startup integration.
 
 ## Install
 
@@ -275,7 +275,7 @@ intentionally unavailable while the Log Viewer has focus.
 
 ---
 
-### `pm2 monitor` / `pm2 m` / `pm2 dashboard`
+### `pm2 monitor` / `pm2 m`
 
 Open the interactive two-pane process detail and log dashboard. Refreshes every
 2 seconds. `pm2 m` opens this view directly; there is no `-d` / `--detail`
@@ -306,6 +306,86 @@ pm2 monitor  4 processes · 10:24:51
 ──────────────────────┴────────────────────────────────────────
  ↑↓/jk navigate  │  r restart  │  s stop  │  d delete  │  q quit
 ```
+
+---
+
+### `pm2 dashboard`
+
+Open the system activity monitor. Where `pm2 monitor` answers "what are my
+managed applications doing", `pm2 dashboard` answers "what is this machine
+doing, and which part of it is mine".
+
+The top panel is whole-machine: CPU (with user/system split and load
+average), memory (used, available and swap), network throughput, and disk
+I/O with filesystem capacity. Below it, a selectable list of pm2 tasks —
+or, with `a`, every process on the machine. The right pane breaks the
+selection down into the sub-processes it spawned and the ports its whole
+tree listens on.
+
+The daemon is optional: without one the machine panel and the process list
+still work, and only the task list is empty.
+
+```bash
+pm2 dashboard
+```
+
+```text
+ pm2 dashboard  workstation · 10 cores · up 12h 6m · 737 procs (3 running) · 16:16:30
+ cpu   ███████░░░░░░░░░░░  38.0%  user 15.0  sys 23.0  ·  load 4.25 6.80 8.22  ·  10 cores
+ mem   ██████████████████  98.7%  15.8gb of 16.0gb  ·  3.1gb available  ·  swap 10.7gb / 12.0gb
+ net                      ⇣ 1.2mb/s   ⇡ 0.4mb/s  on en0  ·  2.9gb in / 1.0gb out since boot
+ disk                     ⇅ 43.3mb/s  4411 io/s  ·  / 11.7gb/228.3gb 5%
+ PM2 TASKS (18)                       │ DETAIL — SERVICE:API
+ ● api                  20.0%   4.0mb │ status           online
+ ● worker               12.1%  88.2mb │ pid              1978
+ ⏸ nightly               0.0%      0b │ uptime           3 days  14:22:11
+                                      │ cpu              2.0%   tree 20.0%
+                                      │ memory           1.0mb   tree 4.0mb
+                                      │ SUB-PROCESSES (1)
+                                      │   2001   18.0%     3.0mb  /bin/worker
+                                      │ LISTENING PORTS (1)
+                                      │ tcp   0.0.0.0:8080            pid 2001
+ ↑↓ / jk navigate  │  a all processes  │  s sort: cpu  │  q quit
+```
+
+Keys: `↑↓` / `jk` navigate, `PgUp` / `PgDn` page, `g` / `G` jump to
+top / bottom, `a` toggle between pm2 tasks and every OS process, `s` cycle
+the sort order (cpu → memory → name), `q` quit.
+
+On macOS, memory "used" follows the platform's own definition — everything
+that is not free or speculative — so a healthy Mac reads near 99%. The
+available figure beside it is the headroom that actually exists.
+
+---
+
+### `pm2 dashboard emit`
+
+Write one complete detection per interval instead of drawing it: host
+resources, filesystem usage, and every managed task with its sub-processes
+and listening ports. Each record is self-contained, so a consumer that
+misses one loses a sample rather than falling out of sync.
+
+```bash
+pm2 dashboard emit --interval 30s                       # NDJSON on stdout
+pm2 dashboard emit --interval 1m --format text --out ~/.config/pm2/logs/dashboard.log
+pm2 dashboard emit --count 1 | jq '.system.cpu'         # one-shot probe
+```
+
+| Flag         | Default | Meaning                                            |
+| ------------ | ------- | -------------------------------------------------- |
+| `--interval` | `30s`   | Period between snapshots                           |
+| `--count`    | `0`     | Stop after N snapshots; 0 runs until interrupted   |
+| `--out`      | stdout  | Append to this file instead of stdout              |
+| `--format`   | `json`  | `json` (newline-delimited) or `text` (key=value)   |
+
+The first snapshot is written immediately, then one per interval. `json`
+emits one object per line for `jq` or a log shipper; `text` emits
+`[YYYY-MM-DD HH:MM:SS] scope=… key=value` lines matching the managed-log
+prefix, so it reads naturally when tailed alongside application logs.
+
+The daemon is never auto-started: a task list that cannot be read is
+reported in the snapshot's `errors` field and the machine readings still
+ship.
 
 ---
 
