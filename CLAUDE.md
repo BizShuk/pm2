@@ -168,6 +168,7 @@ pm2/
 │                             Ping). Import-cycle guard.
 ├── logfile/                  managed-log domain; no daemon/TUI dependency
 │   ├── entry.go              public Source/Entry/Stream models + output format
+│   ├── escape.go             managed-output byte escaping + trusted line framing
 │   ├── follow.go             channel follower for append/recreate/truncate paths
 │   ├── rotation.go           leading daily-block split + archive naming
 │   ├── writer.go             per-line timestamp + midnight/reopen handling
@@ -381,7 +382,7 @@ Root `pm2 logs [target]` is non-interactive. It loads one daemon process
 snapshot, maps matched `ProcessInfo.LogFile` / `ErrorFile` paths to
 `logfile.Source`, then consumes `logfile.Follow`. The command routes
 `StreamStdout` entries to command stdout and `StreamStderr` entries to command
-stderr; both render as `[YYYY-MM-DD HH:MM:SS] app_name | log`.
+stderr; both render as `[YYYY-MM-DD HH:MM:SS] app_name | escaped_log`.
 
 `logfile.Follow(ctx, sources)` is the public integration boundary for external
 Go services. It returns receive-only `Entry` and error channels, begins existing
@@ -519,6 +520,9 @@ executor fallback when a request has no configured log directory.
   Do not re-derive them from name at read time.
 - `logfile.Writer` is the sole owner of managed stdout/stderr formatting and
   daily rotation. Each logical line starts with `[YYYY-MM-DD HH:MM:SS] `.
+  Raw newline and other ASCII control bytes, backslash, and double quote are
+  stored as visible Go-style escapes; only the Writer emits the physical
+  newline that delimits a record. Printable UTF-8 bytes remain unchanged.
   Before open and at the first line after a local-date change, consecutive
   leading previous-date blocks move to `<stem>.<YYYY-MM-DD><ext>`, while the
   current path keeps today/future bytes. If the current path is deleted or

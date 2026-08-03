@@ -51,8 +51,8 @@ func TestStartTimestampsAndRotatesManagedOutput(t *testing.T) {
 	assertExecutorFile(t, filepath.Join(dir, "logs", "daemon.2000-01-02.err"),
 		"[2000-01-02 02:00:00] old stderr\n")
 
-	assertTimestampedExecutorLines(t, logPath, []string{"out one", "out two"})
-	assertTimestampedExecutorLines(t, errPath, []string{"err one"})
+	assertTimestampedExecutorLines(t, logPath, []string{"out one\\n", "out two\\n"})
+	assertTimestampedExecutorLines(t, errPath, []string{"err one\\n"})
 }
 
 func writeExecutorTestFile(t *testing.T, path, content string) {

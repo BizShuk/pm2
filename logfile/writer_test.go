@@ -24,8 +24,47 @@ func TestWriterPrefixesEveryLogicalLineAcrossChunkBoundaries(t *testing.T) {
 	}
 
 	assertTestFile(t, path,
-		"[2026-07-30 08:09:10] one\n"+
-			"[2026-07-30 08:09:10] two\n")
+		"[2026-07-30 08:09:10] one\\n\n"+
+			"[2026-07-30 08:09:10] two\\n\n")
+}
+
+func TestWriterEscapesSpecialCharacters(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "daemon.log")
+	now := time.Date(2026, 7, 30, 8, 9, 10, 0, time.Local)
+	writer, err := openWithClock(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("openWithClock() error = %v", err)
+	}
+
+	assertWriteCount(t, writer,
+		"quote \" slash \\ tab\t carriage\r bell\a back\b form\f vertical\v escape\x1b null\x00 delete\x7f\n")
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	assertTestFile(t, path,
+		"[2026-07-30 08:09:10] quote \\\" slash \\\\ tab\\t carriage\\r bell\\a back\\b form\\f vertical\\v escape\\x1b null\\x00 delete\\x7f\\n\n")
+}
+
+func TestWriterPreservesPrintableUTF8(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "daemon.log")
+	now := time.Date(2026, 7, 30, 8, 9, 10, 0, time.Local)
+	writer, err := openWithClock(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("openWithClock() error = %v", err)
+	}
+
+	assertWriteCount(t, writer, "繁體中文 🙂\n")
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	assertTestFile(t, path,
+		"[2026-07-30 08:09:10] 繁體中文 🙂\\n\n")
 }
 
 func TestWriterTimestampsFinalPartialLine(t *testing.T) {
@@ -69,7 +108,7 @@ func TestWriterOpenRotatesPreviousDates(t *testing.T) {
 		"[2026-07-28 10:00:00] old\n")
 	assertTestFile(t, filepath.Join(dir, "daemon.2026-07-29.log"),
 		"[2026-07-29 10:00:00] yesterday\n")
-	assertTestFile(t, path, "[2026-07-30 00:01:02] current\n")
+	assertTestFile(t, path, "[2026-07-30 00:01:02] current\\n\n")
 }
 
 func TestWriterRotatesWhenNextLineCrossesMidnight(t *testing.T) {
@@ -94,8 +133,8 @@ func TestWriterRotatesWhenNextLineCrossesMidnight(t *testing.T) {
 	}
 
 	assertTestFile(t, filepath.Join(dir, "daemon.2026-07-29.log"),
-		"[2026-07-29 23:59:59] before\n")
-	assertTestFile(t, path, "[2026-07-30 00:00:01] after\n")
+		"[2026-07-29 23:59:59] before\\n\n")
+	assertTestFile(t, path, "[2026-07-30 00:00:01] after\\n\n")
 }
 
 func TestWriterReopensCurrentPathAfterDeletion(t *testing.T) {
@@ -115,7 +154,7 @@ func TestWriterReopensCurrentPathAfterDeletion(t *testing.T) {
 	}
 	assertWriteCount(t, writer, "after delete\n")
 
-	assertTestFile(t, path, "[2026-07-30 08:00:00] after delete\n")
+	assertTestFile(t, path, "[2026-07-30 08:00:00] after delete\\n\n")
 }
 
 func TestWriterSeparatesAnExistingPartialLine(t *testing.T) {
@@ -136,7 +175,7 @@ func TestWriterSeparatesAnExistingPartialLine(t *testing.T) {
 
 	assertTestFile(t, path,
 		"[2026-07-30 07:00:00] previous partial\n"+
-			"[2026-07-30 08:00:00] next process\n")
+			"[2026-07-30 08:00:00] next process\\n\n")
 }
 
 func assertWriteCount(t *testing.T, writer *Writer, value string) {

@@ -3,7 +3,6 @@ package logfile
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,8 +11,9 @@ import (
 
 const timestampLayout = "2006-01-02 15:04:05"
 
-// Writer adds a timestamp to every logical line and keeps path on the current
-// local date. It is safe for concurrent calls to Write and Close.
+// Writer adds a timestamp to every logical line, escapes special characters,
+// and keeps path on the current local date. It is safe for concurrent calls to
+// Write and Close.
 type Writer struct {
 	mu          sync.Mutex
 	path        string
@@ -88,24 +88,12 @@ func (w *Writer) Write(p []byte) (int, error) {
 			w.atLineStart = false
 		}
 
-		lineEnd := consumed
-		for lineEnd < len(p) && p[lineEnd] != '\n' {
-			lineEnd++
-		}
-		if lineEnd < len(p) {
-			lineEnd++
-		}
-
-		segment := p[consumed:lineEnd]
-		written, err := w.file.Write(segment)
+		written, lineComplete, err := writeEscapedLine(w.file, p[consumed:])
 		consumed += written
 		if err != nil {
 			return consumed, fmt.Errorf("write log %q: %w", w.path, err)
 		}
-		if written != len(segment) {
-			return consumed, io.ErrShortWrite
-		}
-		if p[lineEnd-1] == '\n' {
+		if lineComplete {
 			w.atLineStart = true
 		}
 	}

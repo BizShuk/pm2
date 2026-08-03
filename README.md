@@ -221,12 +221,14 @@ pm2 logs production:api
 Each emitted line uses this format:
 
 ```text
-[YYYY-MM-DD HH:MM:SS] app_name | log
+[YYYY-MM-DD HH:MM:SS] app_name | escaped_log
 ```
 
 stdout log entries go to command stdout and stderr log entries go to command
 stderr. Streaming starts at each current file's end, follows file replacement
-or truncation, and continues until `Ctrl+C`.
+or truncation, and continues until `Ctrl+C`. Managed output uses visible
+Go-style escapes: for example newline is `\n`, tab is `\t`, and ANSI escape is
+`\x1b`. PM2 owns the physical newline that separates stored log records.
 
 External Go services can consume the same typed stream through
 `logfile.Follow(ctx, sources)`, which returns receive-only `Entry` and error

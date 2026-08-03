@@ -239,11 +239,12 @@ This continuously follows new current-file lines until `Ctrl+C`. stdout sources
 stay on command stdout and stderr sources stay on command stderr. Output uses:
 
 ```text
-[YYYY-MM-DD HH:MM:SS] app_name | log
+[YYYY-MM-DD HH:MM:SS] app_name | escaped_log
 ```
 
 Following starts at the current EOF and survives path replacement or
-truncation.
+truncation. The managed-output escaping contract is documented under
+[`pm2 logs`](../README.md#pm2-logs).
 
 Every managed stdout/stderr line starts with `[YYYY-MM-DD HH:MM:SS]`.
 `daemon.log` / `daemon.err` keep the latest date, while older leading date
@@ -296,7 +297,7 @@ for entries != nil || errs != nil {
 ```
 
 `Entry` exposes `Time`, `AppName`, `Stream`, and `Message`. Its `String`
-method returns `[YYYY-MM-DD HH:MM:SS] app_name | log`.
+method returns `[YYYY-MM-DD HH:MM:SS] app_name | escaped_log`.
 
 ### `pm2 save` / `pm2 s`
 
