@@ -5,6 +5,8 @@
   "description": "Go 版 PM2-inspired process manager：自動重啟、cron 排程、TUI dashboard 與開機整合",
   "scripts": {
     "dev": "go run .",
+    "dev:monitor": "go run . monitor",
+    "dev:taskmanager": "go run . taskmanager",
     "test": "go test ./...",
     "build": "go build -o bin/pm2 .",
     "deploy": "go install .",
