@@ -1,0 +1,14 @@
+{
+  "name": "pm2",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Go 版 PM2-inspired process manager：自動重啟、cron 排程、TUI dashboard 與開機整合",
+  "scripts": {
+    "dev": "go run .",
+    "test": "go test ./...",
+    "build": "go build -o bin/pm2 .",
+    "deploy": "go install .",
+    "lint": "gofmt -l . && go vet ./...",
+    "clean": "rm -rf bin"
+  }
+}
