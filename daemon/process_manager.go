@@ -157,13 +157,28 @@ func (pm *ProcessManager) StopByName(name string) error {
 	for _, mp := range targets {
 		_ = pm.stopProcess(mp)
 	}
+	pm.autoSave("stop")
 	return nil
 }
 
 // RestartByName stops then re-launches every matching process.
 //
+// This is the RPC entry point, so it persists the registry afterwards.
+// The internal restart paths (cron_restart firing, a file-watch trigger)
+// call restartTargets directly: they are not user operations and they
+// change no persisted field, so saving on every fire would rewrite
+// dump.json with identical bytes once a minute.
+//
 // Satisfies network.Manager (CmdRestart).
 func (pm *ProcessManager) RestartByName(name string) error {
+	if err := pm.restartTargets(name); err != nil {
+		return err
+	}
+	pm.autoSave("restart")
+	return nil
+}
+
+func (pm *ProcessManager) restartTargets(name string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
 		return processNotFoundError(name)
@@ -209,6 +224,7 @@ func (pm *ProcessManager) PauseByName(name string) error {
 			mp.Info.Status = process.StatusPaused
 		})
 	}
+	pm.autoSave("pause")
 	return nil
 }
 
@@ -242,6 +258,7 @@ func (pm *ProcessManager) ResumeByName(name string) error {
 			return fmt.Errorf("resume %s: %w", appCfg.Name, err)
 		}
 	}
+	pm.autoSave("resume")
 	return nil
 }
 

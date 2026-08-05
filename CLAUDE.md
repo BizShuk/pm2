@@ -145,8 +145,10 @@ pm2/
 │       ├── writer.go         preview, confirmation, and file persistence
 │       └── wizard_test.go    Unit tests for prompts, rendering, merge, and public API
 ├── daemon/
-│   ├── autosave.go           autoSave hook — persists dump.json on every
-│   │                         registry membership change (start / delete)
+│   ├── autosave.go           autoSave hook — persists dump.json after every
+│   │                         task operation (start/restart/stop/pause/
+│   │                         resume/delete); internal cron + watch restarts
+│   │                         deliberately excluded
 │   ├── server.go             Server — thin daemon wrapper: owns Unix socket
 │   │                         lifecycle + auto-save/auto-resurrect goroutines.
 │   │                         Embeds *ProcessManager for all process logic.
@@ -415,25 +417,39 @@ Like `pm2 task delete`, the sweep uses `model.SendRequest` directly rather than
 the auto-starting client — spawning a daemon in order to delete tasks it cannot
 have is pointless.
 
-### Auto-save on registry membership change
+### Auto-save on every task operation
 
 `dump.json` used to catch up only on the 10-minute `startAutoSave` tick, so
 the window between a change and the next tick was a window where a daemon
 restart replayed a stale world: a task deleted by `pm2 apply --delete` came
-back, a task just registered vanished. `ProcessManager.autoSave` (in
-`daemon/autosave.go`) closes it by saving immediately after every change in
-*registry membership* — `StartApp` (an app registered) and `DeleteByName`
-(an app removed).
+back, a task the user had just paused resumed itself.
+`ProcessManager.autoSave` (in `daemon/autosave.go`) closes it by saving
+immediately after every task operation the CLI can issue:
+
+| Manager method | autoSave operation |
+| -------------- | ------------------ |
+| `StartApp`     | `start`            |
+| `RestartByName`| `restart`          |
+| `StopByName`   | `stop`             |
+| `PauseByName`  | `pause`            |
+| `ResumeByName` | `resume`           |
+| `DeleteByName` | `delete`           |
+
+Only `pause` / `resume` / `start` / `delete` change what the dump stores
+(membership and `AppConfig.Paused`); `stop` and `restart` are included so
+the rule is "every task subcommand persists" rather than a list of
+exceptions a future reader has to re-derive.
 
 Four boundaries:
 
-- Membership only. `RestartByName`, `PauseByName`, and `ResumeByName` change
-  a process's state, not the set of registered processes; they still ride
-  the periodic tick. Extending the hook to them is a defensible follow-up,
-  not an accident to fix silently.
+- RPC entry points only. A cron fire and a file-watch trigger restart
+  through `restartTargets`, the unexported body `RestartByName` wraps; they
+  are not user operations and change no persisted field, so a per-minute
+  cron task does not rewrite dump.json with identical bytes on every tick
+  (regression test: `TestInternalRestartDoesNotAutoSave`).
 - Best-effort. A persistence failure is logged with the operation, home dir,
-  and process count — never returned. The process is already started or
-  already gone; failing the RPC would misreport what actually happened.
+  and process count — never returned. The operation has already happened to
+  the real process; failing the RPC would misreport what happened.
 - `StartApp` saves from a `defer` guarded by `len(infos) > 0`, so the
   partial-failure path (instance 2 of 3 failed to launch) still persists the
   instances that did register.

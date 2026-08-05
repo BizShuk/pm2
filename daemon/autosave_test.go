@@ -108,6 +108,102 @@ func TestFailedDeleteLeavesDumpUntouched(t *testing.T) {
 	}
 }
 
+// Pause and resume change AppConfig.Paused, which dump.json carries, so
+// both must persist immediately: a daemon restart must not silently undo
+// a pause (or re-apply one the user just lifted).
+func TestPauseAndResumeAutoSave(t *testing.T) {
+	home := testDir(t)
+	pm := NewProcessManager(home)
+	t.Cleanup(func() { _ = pm.StopByName("all") })
+
+	startSleeper(t, pm, "autosave-a")
+
+	if err := pm.PauseByName("default:autosave-a"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if !dumpPaused(t, home, "autosave-a") {
+		t.Error("dump.json does not record the pause")
+	}
+
+	if err := pm.ResumeByName("default:autosave-a"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if dumpPaused(t, home, "autosave-a") {
+		t.Error("dump.json still records a pause after resume")
+	}
+}
+
+// Stop and restart are user operations too, so they refresh the dump even
+// though neither changes what it stores.
+func TestStopAndRestartAutoSave(t *testing.T) {
+	home := testDir(t)
+	pm := NewProcessManager(home)
+	t.Cleanup(func() { _ = pm.StopByName("all") })
+
+	startSleeper(t, pm, "autosave-a")
+	dumpPath := filepath.Join(home, "dump.json")
+
+	for _, tc := range []struct {
+		op string
+		fn func() error
+	}{
+		{"stop", func() error { return pm.StopByName("default:autosave-a") }},
+		{"restart", func() error { return pm.RestartByName("default:autosave-a") }},
+	} {
+		if err := os.Remove(dumpPath); err != nil {
+			t.Fatalf("remove dump.json before %s: %v", tc.op, err)
+		}
+		if err := tc.fn(); err != nil {
+			t.Fatalf("%s: %v", tc.op, err)
+		}
+		if _, err := os.Stat(dumpPath); err != nil {
+			t.Fatalf("%s did not write dump.json: %v", tc.op, err)
+		}
+	}
+}
+
+// A cron fire and a file-watch trigger both restart through
+// restartTargets. They are not user operations and change nothing the
+// dump stores, so they must not rewrite it once a minute.
+func TestInternalRestartDoesNotAutoSave(t *testing.T) {
+	home := testDir(t)
+	pm := NewProcessManager(home)
+	t.Cleanup(func() { _ = pm.StopByName("all") })
+
+	startSleeper(t, pm, "autosave-a")
+	dumpPath := filepath.Join(home, "dump.json")
+	if err := os.Remove(dumpPath); err != nil {
+		t.Fatalf("remove dump.json: %v", err)
+	}
+
+	if err := pm.restartTargets("default:autosave-a"); err != nil {
+		t.Fatalf("restartTargets: %v", err)
+	}
+
+	if _, err := os.Stat(dumpPath); !os.IsNotExist(err) {
+		t.Fatalf("internal restart rewrote dump.json (stat err = %v)", err)
+	}
+}
+
+func dumpPaused(t *testing.T, homeDir, name string) bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(homeDir, "dump.json"))
+	if err != nil {
+		t.Fatalf("read dump.json: %v", err)
+	}
+	var entries []process.AppConfig
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("decode dump.json: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			return e.Paused
+		}
+	}
+	t.Fatalf("dump.json has no entry named %q", name)
+	return false
+}
+
 // Resurrect replays the dump; a per-entry launch failure must not write
 // the surviving subset back over the file, which would erase the failed
 // app's saved config for good.

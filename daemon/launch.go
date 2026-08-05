@@ -16,7 +16,9 @@ import (
 // OS operations to the Executor.
 func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (process.ProcessInfo, error) {
 	onFileChanged := func() {
-		_ = pm.RestartByName(name)
+		// restartTargets, not RestartByName: a watch-triggered restart is
+		// not a user operation and changes nothing that dump.json stores.
+		_ = pm.restartTargets(name)
 	}
 
 	result, err := pm.executor.Start(req, name, onFileChanged)
@@ -130,7 +132,9 @@ func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (pr
 	if req.CronRestart != "" && !isPaused {
 		if err := pm.scheduler.Register(ck, req.CronRestart, func() {
 			firedAt := time.Now()
-			restartErr := pm.RestartByName(ck)
+			// restartTargets: a cron fire persists nothing new, so it must
+			// not rewrite dump.json on every tick.
+			restartErr := pm.restartTargets(ck)
 			cronStatus := "ok"
 			if restartErr != nil {
 				cronStatus = "failed"
