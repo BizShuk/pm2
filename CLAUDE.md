@@ -145,6 +145,8 @@ pm2/
 │       ├── writer.go         preview, confirmation, and file persistence
 │       └── wizard_test.go    Unit tests for prompts, rendering, merge, and public API
 ├── daemon/
+│   ├── autosave.go           autoSave hook — persists dump.json on every
+│   │                         registry membership change (start / delete)
 │   ├── server.go             Server — thin daemon wrapper: owns Unix socket
 │   │                         lifecycle + auto-save/auto-resurrect goroutines.
 │   │                         Embeds *ProcessManager for all process logic.
@@ -412,6 +414,40 @@ boundaries hold it in place:
 Like `pm2 task delete`, the sweep uses `model.SendRequest` directly rather than
 the auto-starting client — spawning a daemon in order to delete tasks it cannot
 have is pointless.
+
+### Auto-save on registry membership change
+
+`dump.json` used to catch up only on the 10-minute `startAutoSave` tick, so
+the window between a change and the next tick was a window where a daemon
+restart replayed a stale world: a task deleted by `pm2 apply --delete` came
+back, a task just registered vanished. `ProcessManager.autoSave` (in
+`daemon/autosave.go`) closes it by saving immediately after every change in
+*registry membership* — `StartApp` (an app registered) and `DeleteByName`
+(an app removed).
+
+Four boundaries:
+
+- Membership only. `RestartByName`, `PauseByName`, and `ResumeByName` change
+  a process's state, not the set of registered processes; they still ride
+  the periodic tick. Extending the hook to them is a defensible follow-up,
+  not an accident to fix silently.
+- Best-effort. A persistence failure is logged with the operation, home dir,
+  and process count — never returned. The process is already started or
+  already gone; failing the RPC would misreport what actually happened.
+- `StartApp` saves from a `defer` guarded by `len(infos) > 0`, so the
+  partial-failure path (instance 2 of 3 failed to launch) still persists the
+  instances that did register.
+- `Resurrect` suppresses the hook via the `suppressAutoSave` atomic flag for
+  the duration of the replay. It is reading the dump; letting each replayed
+  `StartApp` write it back would let one failed launch erase that app's
+  saved config permanently. The dump is left exactly as found (regression
+  test: `TestResurrectDoesNotRewriteDump`).
+
+`daemon/server_test.go`'s `TestStartAppOutFileHomeExpansion` disables the
+go-homedir package-level cache for its duration. Any test that resurrects a
+normalized app expands a `~` log path first, which pins the developer's real
+`HOME` in that cache and makes the test's own `t.Setenv("HOME", ...)` a
+no-op — a test-ordering trap, not a product bug.
 
 ### Relative path resolution
 

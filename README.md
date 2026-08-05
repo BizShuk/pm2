@@ -412,6 +412,14 @@ pm2 save
 pm2 s
 ```
 
+Registering or deleting a task saves automatically, so `pm2 apply`,
+`pm2 apply --delete`, and `pm2 task delete` already leave `dump.json` matching
+what is running — a daemon restart right afterwards will not resurrect a
+deleted task or forget a newly added one. An explicit `pm2 save` is still
+needed to capture state changes that are not additions or removals
+(`pause` / `resume` / `stop`), which continue to rely on the periodic
+auto-save (default every 10 minutes, `PM2_AUTO_SAVE_INTERVAL`).
+
 ---
 
 ### `pm2 resurrect` / `pm2 r`

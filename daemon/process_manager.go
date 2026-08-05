@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/bizshuk/pm2/cron"
@@ -51,6 +52,12 @@ type ProcessManager struct {
 	scheduler    *cron.Scheduler
 	startedAt    time.Time
 	RestartDelay time.Duration
+
+	// suppressAutoSave disables the per-change autoSave hook while
+	// Resurrect is replaying dump.json. Writing the dump back while
+	// reading from it would let a single failed launch erase that
+	// app's saved config.
+	suppressAutoSave atomic.Bool
 }
 
 // NewProcessManager returns an initialized ProcessManager ready to
@@ -94,6 +101,14 @@ func (pm *ProcessManager) RUnlock() { pm.reg.RUnlock() }
 // Satisfies network.Manager (CmdStart).
 func (pm *ProcessManager) StartApp(req *model.AppStartReq) ([]process.ProcessInfo, error) {
 	var infos []process.ProcessInfo
+	// Persist whatever was registered, including on the partial-failure
+	// path: an app that launched before a later instance failed is in the
+	// registry and must survive a daemon restart.
+	defer func() {
+		if len(infos) > 0 {
+			pm.autoSave("start")
+		}
+	}()
 	instances := req.Instances
 	if instances <= 0 {
 		instances = process.DefaultInstances
@@ -243,6 +258,7 @@ func (pm *ProcessManager) DeleteByName(name string) error {
 		_ = pm.stopProcess(mp)
 		pm.reg.Remove(cronKey(mp.Info.Namespace, mp.Info.Name))
 	}
+	pm.autoSave("delete")
 	return nil
 }
 
@@ -281,6 +297,10 @@ func (pm *ProcessManager) Resurrect() error {
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return fmt.Errorf("dump.json format incompatible (unified-config refactor — please run `pm2 delete all` then re-add your apps, or restore from a pre-refactor backup): %w", err)
 	}
+	// Replaying the dump is not a membership change the user made, and a
+	// launch failure mid-replay must not rewrite the file being replayed.
+	pm.suppressAutoSave.Store(true)
+	defer pm.suppressAutoSave.Store(false)
 	for i := range entries {
 		entries[i].Normalize("")
 		req := &model.AppStartReq{AppConfig: entries[i]}

@@ -16,6 +16,7 @@ import (
 	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/mitchellh/go-homedir"
 )
 
 // testDir creates a sandbox-friendly scratch directory under
@@ -578,6 +579,18 @@ func TestStartAppOutFileHomeExpansion(t *testing.T) {
 	// Without this, every run of `go test ./daemon/...` would
 	// create `~/test-home-expand-out.log` on the host.
 	t.Setenv("HOME", testDir)
+
+	// go-homedir caches the first resolved home at package level, so any
+	// earlier test in this package that expanded a `~` path (e.g. one
+	// resurrecting a normalized app) would pin the developer's real HOME
+	// and make the Setenv above a no-op. Disable the cache for the
+	// duration of this test so it does not depend on test ordering.
+	homedir.DisableCache = true
+	homedir.Reset()
+	t.Cleanup(func() {
+		homedir.DisableCache = false
+		homedir.Reset()
+	})
 
 	pm := NewProcessManager(testDir)
 
