@@ -69,6 +69,7 @@ pm2 apply [ecosystem.config.js|ecosystem.config.json|owner/repo] [flags]
 
 Flags:
       --all            run optional apps instead of registering them paused
+      --delete         delete every task declared by the ecosystem file
       --single         choose and apply exactly one app
       --with strings   run named optional apps instead of registering them paused
 ```
@@ -85,6 +86,19 @@ pm2 task start owner/repo
 and applies only the selected app. The selected app starts active even when it
 has `optional: true`; all other apps are left untouched. `--single` cannot be
 combined with `--all` or `--with`.
+
+`--delete` is the teardown counterpart of the same command: it loads the same
+ecosystem file (default `./ecosystem.config.js`) and deletes every task the file
+declares, addressing each one by its exact `namespace:name` key so a same-named
+task from another ecosystem file is never touched. Apps the daemon does not know
+are reported as `skipped` and the sweep continues; the command fails only when
+no declared task was registered at all. `--delete` cannot be combined with
+`--all`, `--with`, or `--single`.
+
+```bash
+pm2 apply --delete                              # tear down ./ecosystem.config.js
+pm2 task start ./ecosystem.config.json --delete # canonical form, explicit file
+```
 
 Process identity is `name + script path`. Re-starting with the same name and script replaces the existing process. Re-starting with the same name but a different script returns an error — use `pm2 task delete` first.
 

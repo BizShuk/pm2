@@ -32,9 +32,12 @@ func bindStartFlags(command *cobra.Command) {
 	command.Flags().Bool("all", false, "Run optional apps instead of registering them paused")
 	command.Flags().StringSlice("with", nil, "Run these optional apps instead of registering them paused (repeatable or comma-separated)")
 	command.Flags().Bool("single", false, "Choose and apply exactly one app from the ecosystem file")
+	command.Flags().Bool("delete", false, "Delete every task declared by the ecosystem file instead of starting it")
 }
 
-func runTasks(cmd *cobra.Command, args []string) error {
+// loadEcosystem resolves the CLI target (default ./ecosystem.config.js,
+// optionally a remote GitHub reference) and parses it.
+func loadEcosystem(args []string) (*config.EcosystemConfig, error) {
 	target := "ecosystem.config.js"
 	if len(args) > 0 {
 		target = args[0]
@@ -47,7 +50,7 @@ func runTasks(cmd *cobra.Command, args []string) error {
 		cacheDir := filepath.Join(cliruntime.PM2Home(), "repos")
 		resolved, err := config.ResolveRemote(target, cacheDir)
 		if err != nil {
-			return fmt.Errorf("resolve remote %q: %w", target, err)
+			return nil, fmt.Errorf("resolve remote %q: %w", target, err)
 		}
 		fmt.Fprintf(os.Stderr, "pm2: resolved remote %q -> %s\n", target, resolved)
 		target = resolved
@@ -55,7 +58,20 @@ func runTasks(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load(target)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	return cfg, nil
+}
+
+func runTasks(cmd *cobra.Command, args []string) error {
+	runDeleteAll, err := cmd.Flags().GetBool("delete")
+	if err != nil {
+		return fmt.Errorf("read --delete: %w", err)
+	}
+
+	cfg, err := loadEcosystem(args)
+	if err != nil {
+		return err
 	}
 
 	runAll, err := cmd.Flags().GetBool("all")
@@ -69,6 +85,12 @@ func runTasks(cmd *cobra.Command, args []string) error {
 	runSingle, err := cmd.Flags().GetBool("single")
 	if err != nil {
 		return fmt.Errorf("read --single: %w", err)
+	}
+	if err := validateDeleteFlags(runDeleteAll, runSingle, runAll, runWith); err != nil {
+		return err
+	}
+	if runDeleteAll {
+		return deleteEcosystemApps(cfg.Apps, cmd.OutOrStdout())
 	}
 	if err := validateSelectionFlags(runSingle, runAll, runWith); err != nil {
 		return err
@@ -142,6 +164,16 @@ func runTasks(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// validateDeleteFlags keeps --delete a pure teardown verb: the selection
+// flags only describe which apps to *start*, so combining them would ask
+// the command to do two opposite things at once.
+func validateDeleteFlags(deleteAll, single, all bool, with []string) error {
+	if deleteAll && (single || all || len(with) > 0) {
+		return fmt.Errorf("--delete cannot be used with --all, --with, or --single")
 	}
 	return nil
 }

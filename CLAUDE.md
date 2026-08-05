@@ -88,6 +88,7 @@ pm2/
 │   │   ├── task.go           Cmd parent for task lifecycle commands
 │   │   ├── start.go          task start command + AppStartReq RPC flow
 │   │   ├── apply.go          explicit root short alias for task start
+│   │   ├── apply_delete.go   --delete sweep: one CmdDelete per declared app
 │   │   ├── select.go         maps AppConfig.Optional to Paused;
 │   │   │                     selects one app by index/name for --single
 │   │   ├── single.go         renders and reads the interactive single-app choice
@@ -392,6 +393,25 @@ With no target, both task-start entry points load `./ecosystem.config.js`.
 `--single` lists the loaded apps and sends only the chosen app to the daemon;
 the explicit choice clears its derived paused state, including for an
 `optional: true` app. It is mutually exclusive with `--all` and `--with`.
+
+`--delete` reuses the same target resolution and config load (`loadEcosystem`),
+then issues one `CmdDelete` per declared app instead of `CmdStart`. Three
+boundaries hold it in place:
+
+- It addresses each app by `appSelectionKey` (`namespace:name`), which is the
+  registry's own key format, so tier-0 exact matching applies. Deleting by bare
+  name would match a same-named app registered from a different ecosystem file.
+- An app the daemon does not know is `skipped`, not fatal — an ecosystem file
+  routinely describes more apps than are currently registered. The command
+  fails only when no declared app matched, so a wrong or stale file is still
+  an error rather than a silent success.
+- It is mutually exclusive with `--all`, `--with`, and `--single`
+  (`validateDeleteFlags`): those flags select what to *start*, so pairing them
+  with a teardown verb has no coherent meaning.
+
+Like `pm2 task delete`, the sweep uses `model.SendRequest` directly rather than
+the auto-starting client — spawning a daemon in order to delete tasks it cannot
+have is pointless.
 
 ### Relative path resolution
 
