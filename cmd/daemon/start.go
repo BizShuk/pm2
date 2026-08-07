@@ -27,18 +27,21 @@ var StartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the PM2 daemon (alias: pm2 start)",
 	Args:  cobra.NoArgs,
-	RunE:  runStart,
+	RunE:  RunStart,
 }
 
 func init() {
-	bindStartFlags(StartCmd)
+	BindStartFlags(StartCmd)
 }
 
-func bindStartFlags(command *cobra.Command) {
+// BindStartFlags attaches the daemon-start flags shared by `pm2 daemon start`
+// and the root `pm2 start` alias.
+func BindStartFlags(command *cobra.Command) {
 	command.Flags().BoolP("foreground", "f", false, "Run the daemon in the foreground (blocking)")
 }
 
-func runStart(cmd *cobra.Command, _ []string) error {
+// RunStart is the shared handler for `pm2 daemon start` and `pm2 start`.
+func RunStart(cmd *cobra.Command, _ []string) error {
 	foreground, err := cmd.Flags().GetBool("foreground")
 	if err != nil {
 		return fmt.Errorf("read --foreground: %w", err)

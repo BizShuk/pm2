@@ -25,25 +25,29 @@ func TestLogsCommandIsStreamingMode(t *testing.T) {
 }
 
 func TestLogsMonitorIsInteractiveSubcommand(t *testing.T) {
-	if got := LogsMonitorCmd.Parent(); got != LogsCmd {
-		t.Fatalf("LogsMonitorCmd.Parent() = %v, want LogsCmd", got)
+	monitorCmd, _, err := LogsCmd.Find([]string{"monitor"})
+	if err != nil {
+		t.Fatalf("find logs monitor: %v", err)
 	}
-	if LogsMonitorCmd.Use != "monitor [name]" {
-		t.Fatalf("LogsMonitorCmd.Use = %q, want %q", LogsMonitorCmd.Use, "monitor [name]")
+	if got := monitorCmd.Parent(); got != LogsCmd {
+		t.Fatalf("logs monitor Parent() = %v, want LogsCmd", got)
 	}
-	if !strings.Contains(strings.ToLower(LogsMonitorCmd.Short), "interactive") {
-		t.Fatalf("LogsMonitorCmd.Short = %q, want interactive description", LogsMonitorCmd.Short)
+	if monitorCmd.Use != "monitor [name]" {
+		t.Fatalf("logs monitor Use = %q, want %q", monitorCmd.Use, "monitor [name]")
+	}
+	if !strings.Contains(strings.ToLower(monitorCmd.Short), "interactive") {
+		t.Fatalf("logs monitor Short = %q, want interactive description", monitorCmd.Short)
 	}
 
 	hasShortAlias := false
-	for _, alias := range LogsMonitorCmd.Aliases {
+	for _, alias := range monitorCmd.Aliases {
 		if alias == "m" {
 			hasShortAlias = true
 			break
 		}
 	}
 	if !hasShortAlias {
-		t.Fatalf("LogsMonitorCmd.Aliases = %v, want m", LogsMonitorCmd.Aliases)
+		t.Fatalf("logs monitor Aliases = %v, want m", monitorCmd.Aliases)
 	}
 
 	for _, path := range [][]string{{"logs", "monitor"}, {"logs", "m"}} {
@@ -51,8 +55,8 @@ func TestLogsMonitorIsInteractiveSubcommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("find pm2 %s: %v", strings.Join(path, " "), err)
 		}
-		if command != LogsMonitorCmd {
-			t.Fatalf("pm2 %s resolves to %q, want LogsMonitorCmd", strings.Join(path, " "), command.Name())
+		if command != monitorCmd {
+			t.Fatalf("pm2 %s resolves to %q, want logs monitor", strings.Join(path, " "), command.Name())
 		}
 	}
 }

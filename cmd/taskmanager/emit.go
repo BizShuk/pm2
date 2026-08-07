@@ -1,3 +1,5 @@
+// Package taskmanager owns `pm2 taskmanager` subcommands and presentation
+// helpers. The parent command lives in package cmd (cmd/taskmanager.go).
 package taskmanager
 
 import (
@@ -60,8 +62,6 @@ func init() {
 		"Append snapshots to this file instead of stdout")
 	EmitCmd.Flags().StringVar(&emitOpts.format, "format", "json",
 		"Output format: json (newline-delimited) or text")
-
-	Cmd.AddCommand(EmitCmd)
 }
 
 func runEmit(cmd *cobra.Command, opts *emitOptions) error {

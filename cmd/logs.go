@@ -5,11 +5,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	logscmd "github.com/bizshuk/pm2/cmd/logs"
 	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	"github.com/spf13/cobra"
 )
 
 // LogsCmd streams managed application logs to stdout and stderr.
+//
+// Subcommands live in cmd/logs/:
+//
+//   - monitor.go — MonitorCmd (interactive log browser)
 var LogsCmd = &cobra.Command{
 	Use:   "logs [name]",
 	Short: "Stream managed application logs to stdout and stderr",
@@ -33,4 +38,8 @@ var LogsCmd = &cobra.Command{
 			cmd.ErrOrStderr(),
 		)
 	},
+}
+
+func init() {
+	LogsCmd.AddCommand(logscmd.MonitorCmd)
 }

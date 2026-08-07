@@ -1,10 +1,11 @@
-package wizard
+package cmd
 
 import (
 	"fmt"
 	"os"
 	"strings"
 
+	wizardcmd "github.com/bizshuk/pm2/cmd/wizard"
 	corewizard "github.com/bizshuk/pm2/config/wizard"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -28,10 +29,16 @@ type interactiveFlags struct {
 
 var wizardFlags = defaultInteractiveFlags()
 
-// Cmd is the `pm2 wizard` command. It only wires Cobra
+// WizardCmd is the `pm2 wizard` command. It only wires Cobra
 // flags + I/O streams and delegates every behavioural step to
 // config/wizard (see plans/architecture-wizard-decoupling.md).
-var Cmd = &cobra.Command{
+//
+// Subcommands live in cmd/wizard/:
+//
+//   - install.go       — InstallCmd
+//   - install_flags.go — shared planner flag binding
+//   - prompt/          — planner prompt-template domain
+var WizardCmd = &cobra.Command{
 	Use:     "wizard",
 	Aliases: []string{"w"},
 	Short:   "Interactively build an ecosystem.config.js (or .json) (short alias: pm2 w)",
@@ -50,8 +57,8 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	bindInteractiveFlags(Cmd, &wizardFlags)
-	Cmd.AddCommand(InstallCmd)
+	bindInteractiveFlags(WizardCmd, &wizardFlags)
+	WizardCmd.AddCommand(wizardcmd.InstallCmd)
 }
 
 func defaultInteractiveFlags() interactiveFlags {

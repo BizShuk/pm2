@@ -1,14 +1,15 @@
 // Package cmd composes the complete PM2 Cobra command tree.
+//
+// Layout convention:
+//
+//   - First-layer commands are files in this package (cmd/<command>.go).
+//   - A first-layer command's subcommands live in cmd/<command>/<subcommand>.go.
 package cmd
 
 import (
 	sdkcmd "github.com/bizshuk/gosdk/cmd"
 	sdkconfig "github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/gosdk/metric"
-	daemoncmd "github.com/bizshuk/pm2/cmd/daemon"
-	taskcmd "github.com/bizshuk/pm2/cmd/task"
-	taskmanagercmd "github.com/bizshuk/pm2/cmd/taskmanager"
-	wizardcmd "github.com/bizshuk/pm2/cmd/wizard"
 	"github.com/spf13/cobra"
 )
 
@@ -22,18 +23,18 @@ func init() {
 	sdkconfig.Default(sdkconfig.WithAppName("pm2"))
 
 	Cmd.AddCommand(
-		daemoncmd.RootStartCmd,
-		taskcmd.ApplyCmd,
+		StartCmd,
+		ApplyCmd,
 		ListCmd,
 		LogsCmd,
 		SaveCmd,
 		ResurrectCmd,
 		StartupCmd,
-		daemoncmd.Cmd,
-		taskcmd.Cmd,
+		DaemonCmd,
+		TaskCmd,
 		MonitorCmd,
-		taskmanagercmd.Cmd,
-		wizardcmd.Cmd,
+		TaskmanagerCmd,
+		WizardCmd,
 		sdkcmd.ConfigCmd,
 	)
 

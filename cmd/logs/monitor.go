@@ -1,4 +1,6 @@
-package cmd
+// Package logs owns subcommands of `pm2 logs`. The parent command lives
+// in package cmd (cmd/logs.go).
+package logs
 
 import (
 	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
@@ -7,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// LogsMonitorCmd opens the interactive managed-log Tree Explorer and Viewer.
-var LogsMonitorCmd = &cobra.Command{
+// MonitorCmd opens the interactive managed-log Tree Explorer and Viewer.
+var MonitorCmd = &cobra.Command{
 	Use:     "monitor [name]",
 	Aliases: []string{"m"},
 	Short:   "Interactive log Tree Explorer and Viewer",
@@ -25,8 +27,4 @@ var LogsMonitorCmd = &cobra.Command{
 		_, err := program.Run()
 		return err
 	},
-}
-
-func init() {
-	LogsCmd.AddCommand(LogsMonitorCmd)
 }

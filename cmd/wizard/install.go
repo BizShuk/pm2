@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	// ecoPlannerNS is the namespace assigned to processes installed via
+	// EcoPlannerNS is the namespace assigned to processes installed via
 	// `wizard install --system-planner` / `--business-planner`. The
 	// prompt text is owned by cmd/wizard/prompt.
-	ecoPlannerNS = "planner"
+	EcoPlannerNS = "planner"
 )
 
 var (
@@ -73,7 +73,7 @@ var InstallCmd = &cobra.Command{
 		app := buildInstallApp(
 			script,
 			template.Render(userPrompt),
-			ecoPlannerNS,
+			EcoPlannerNS,
 			filepath.Base(cwd),
 			cwd,
 		)

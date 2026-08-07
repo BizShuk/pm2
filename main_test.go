@@ -7,7 +7,19 @@ import (
 	"testing"
 )
 
-func TestTaskCommandsLiveInSubpackage(t *testing.T) {
+// Layout convention:
+//   - First-layer commands are files in cmd/ (package cmd).
+//   - Their subcommands live in cmd/<command>/<subcommand>.go.
+
+func TestTaskCommandsLayout(t *testing.T) {
+	// Parent first-layer command
+	if _, err := os.Stat(filepath.Join("cmd", "task.go")); err != nil {
+		t.Errorf("first-layer task command missing cmd/task.go: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("cmd", "apply.go")); err != nil {
+		t.Errorf("first-layer apply alias missing cmd/apply.go: %v", err)
+	}
+
 	taskDir := filepath.Join("cmd", "task")
 	pkg, err := build.Default.ImportDir(taskDir, build.ImportComment)
 	if err != nil {
@@ -18,9 +30,7 @@ func TestTaskCommandsLiveInSubpackage(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"task.go",
 		"start.go",
-		"apply.go",
 		"select.go",
 		"single.go",
 		"restart.go",
@@ -28,18 +38,22 @@ func TestTaskCommandsLiveInSubpackage(t *testing.T) {
 		"pause.go",
 		"resume.go",
 		"delete.go",
+		"apply_delete.go",
 	} {
 		if _, err := os.Stat(filepath.Join(taskDir, name)); err != nil {
-			t.Errorf("task command package missing %s: %v", name, err)
+			t.Errorf("task subcommand package missing %s: %v", name, err)
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(taskDir, "run.go")); !os.IsNotExist(err) {
-		t.Errorf("legacy task alias file cmd/task/run.go still exists")
+	// Parent command must not live inside the subpackage.
+	if _, err := os.Stat(filepath.Join(taskDir, "task.go")); !os.IsNotExist(err) {
+		t.Errorf("parent command must live at cmd/task.go, not cmd/task/task.go")
+	}
+	if _, err := os.Stat(filepath.Join(taskDir, "apply.go")); !os.IsNotExist(err) {
+		t.Errorf("root apply alias must live at cmd/apply.go, not cmd/task/apply.go")
 	}
 
 	for _, name := range []string{
-		"task.go",
 		"task_start.go",
 		"task_stop.go",
 		"task_pause.go",
@@ -59,7 +73,14 @@ func TestTaskCommandsLiveInSubpackage(t *testing.T) {
 	}
 }
 
-func TestDaemonCommandsLiveInSubpackage(t *testing.T) {
+func TestDaemonCommandsLayout(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("cmd", "daemon.go")); err != nil {
+		t.Errorf("first-layer daemon command missing cmd/daemon.go: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("cmd", "start.go")); err != nil {
+		t.Errorf("first-layer start alias missing cmd/start.go: %v", err)
+	}
+
 	daemonDir := filepath.Join("cmd", "daemon")
 	pkg, err := build.Default.ImportDir(daemonDir, build.ImportComment)
 	if err != nil {
@@ -70,25 +91,28 @@ func TestDaemonCommandsLiveInSubpackage(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"daemon.go",
 		"start.go",
-		"start_alias.go",
 		"kill.go",
 		"stop.go",
 		"status.go",
 	} {
 		if _, err := os.Stat(filepath.Join(daemonDir, name)); err != nil {
-			t.Errorf("daemon command package missing %s: %v", name, err)
+			t.Errorf("daemon subcommand package missing %s: %v", name, err)
 		}
 	}
 
+	if _, err := os.Stat(filepath.Join(daemonDir, "daemon.go")); !os.IsNotExist(err) {
+		t.Errorf("parent command must live at cmd/daemon.go, not cmd/daemon/daemon.go")
+	}
+	if _, err := os.Stat(filepath.Join(daemonDir, "start_alias.go")); !os.IsNotExist(err) {
+		t.Errorf("root start alias must live at cmd/start.go, not cmd/daemon/start_alias.go")
+	}
+
 	for _, name := range []string{
-		"daemon.go",
 		"daemon_start.go",
 		"daemon_kill.go",
 		"daemon_stop.go",
 		"daemon_status.go",
-		"start.go",
 	} {
 		if _, err := os.Stat(filepath.Join("cmd", name)); !os.IsNotExist(err) {
 			t.Errorf("legacy daemon command file cmd/%s still exists", name)
@@ -96,7 +120,14 @@ func TestDaemonCommandsLiveInSubpackage(t *testing.T) {
 	}
 }
 
-func TestWizardCommandsLiveInSubpackage(t *testing.T) {
+func TestWizardCommandsLayout(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("cmd", "wizard.go")); err != nil {
+		t.Errorf("first-layer wizard command missing cmd/wizard.go: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("cmd", "wizard_test.go")); err != nil {
+		t.Errorf("wizard CLI tests missing cmd/wizard_test.go: %v", err)
+	}
+
 	wizardDir := filepath.Join("cmd", "wizard")
 	pkg, err := build.Default.ImportDir(wizardDir, build.ImportComment)
 	if err != nil {
@@ -107,14 +138,17 @@ func TestWizardCommandsLiveInSubpackage(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"wizard.go",
 		"install.go",
 		"install_flags.go",
 		"wizard_test.go",
 	} {
 		if _, err := os.Stat(filepath.Join(wizardDir, name)); err != nil {
-			t.Errorf("wizard command package missing %s: %v", name, err)
+			t.Errorf("wizard subcommand package missing %s: %v", name, err)
 		}
+	}
+
+	if _, err := os.Stat(filepath.Join(wizardDir, "wizard.go")); !os.IsNotExist(err) {
+		t.Errorf("parent command must live at cmd/wizard.go, not cmd/wizard/wizard.go")
 	}
 
 	promptDir := filepath.Join(wizardDir, "prompt")
@@ -153,6 +187,50 @@ func TestWizardCommandsLiveInSubpackage(t *testing.T) {
 		if _, err := os.Stat(filepath.Join("cmd", name)); !os.IsNotExist(err) {
 			t.Errorf("legacy wizard command file cmd/%s still exists", name)
 		}
+	}
+}
+
+func TestTaskmanagerCommandsLayout(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("cmd", "taskmanager.go")); err != nil {
+		t.Errorf("first-layer taskmanager command missing cmd/taskmanager.go: %v", err)
+	}
+
+	dir := filepath.Join("cmd", "taskmanager")
+	pkg, err := build.Default.ImportDir(dir, build.ImportComment)
+	if err != nil {
+		t.Fatalf("load taskmanager package: %v", err)
+	}
+	if pkg.Name != "taskmanager" {
+		t.Fatalf("taskmanager package name = %q, want taskmanager", pkg.Name)
+	}
+	for _, name := range []string{"emit.go", "emit_text.go"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("taskmanager subcommand package missing %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "taskmanager.go")); !os.IsNotExist(err) {
+		t.Errorf("parent command must live at cmd/taskmanager.go, not cmd/taskmanager/taskmanager.go")
+	}
+}
+
+func TestLogsCommandsLayout(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("cmd", "logs.go")); err != nil {
+		t.Errorf("first-layer logs command missing cmd/logs.go: %v", err)
+	}
+
+	dir := filepath.Join("cmd", "logs")
+	pkg, err := build.Default.ImportDir(dir, build.ImportComment)
+	if err != nil {
+		t.Fatalf("load logs package: %v", err)
+	}
+	if pkg.Name != "logs" {
+		t.Fatalf("logs package name = %q, want logs", pkg.Name)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "monitor.go")); err != nil {
+		t.Errorf("logs subcommand package missing monitor.go: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("cmd", "logs_monitor.go")); !os.IsNotExist(err) {
+		t.Errorf("legacy logs monitor file cmd/logs_monitor.go still exists")
 	}
 }
 

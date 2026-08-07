@@ -1,22 +1,26 @@
-// Package taskmanager owns the `pm2 taskmanager` command tree: the
-// interactive activity monitor and its non-interactive snapshot emitter.
-package taskmanager
+package cmd
 
 import (
 	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
+	taskmanagercmd "github.com/bizshuk/pm2/cmd/taskmanager"
 	"github.com/bizshuk/pm2/tui/dashboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
-// Cmd opens the system activity monitor.
+// TaskmanagerCmd opens the system activity monitor.
 //
 // It is a peer of `pm2 monitor`, not a variant of it: monitor answers
 // "what are my managed applications doing", taskmanager answers "what is
 // this machine doing, and which part of it is mine". Running it needs no
 // daemon — without one the machine panel and the process list still work
 // and only the task list is empty.
-var Cmd = &cobra.Command{
+//
+// Subcommands live in cmd/taskmanager/:
+//
+//   - emit.go      — EmitCmd
+//   - emit_text.go — text snapshot encoder
+var TaskmanagerCmd = &cobra.Command{
 	Use:     "taskmanager",
 	Aliases: []string{"tm"},
 	Short:   "System activity monitor: host resources, process tree, and ports (short alias: pm2 tm)",
@@ -36,4 +40,8 @@ var Cmd = &cobra.Command{
 		_, err := program.Run()
 		return err
 	},
+}
+
+func init() {
+	TaskmanagerCmd.AddCommand(taskmanagercmd.EmitCmd)
 }

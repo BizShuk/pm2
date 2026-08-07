@@ -47,10 +47,12 @@ Import direction (no cycles):
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`
 - `executor` -> `logfile`, `model` only
 - `main` -> `cmd` as the thin executable boundary
-- `cmd` -> `cmd/daemon`, `cmd/task`, and `cmd/wizard` to compose the complete
-  Cobra tree
-- `cmd`, `cmd/task`, `cmd/daemon`, and `cmd/taskmanager` -> `cmd/runtime` for
-  shared CLI paths and the daemon auto-start client
+- `cmd` owns every first-layer Cobra command (`cmd/<command>.go`) and imports
+  subcommand packages (`cmd/<command>/`) to attach children
+- `cmd` -> `cmd/daemon`, `cmd/task`, `cmd/wizard`, `cmd/taskmanager`, and
+  `cmd/logs` for subcommand nodes
+- `cmd`, `cmd/task`, `cmd/daemon`, `cmd/taskmanager`, and `cmd/logs` ->
+  `cmd/runtime` for shared CLI paths and the daemon auto-start client
 - `cmd/runtime` -> `model` for daemon RPC transport
 - `sysmon` -> `process` only; it is imported by `cmd/taskmanager`, `tui`, and
   `tui/dashboard`, and never imports `daemon`, `cmd`, or `tui`
@@ -67,6 +69,8 @@ pm2/
 ├── main.go                   thin executable boundary — forwards os.Args[1:]
 │                             to cmd.Execute and maps errors to exit 1
 ├── cmd/                      cobra commands (CLI layer)
+│   │                         Convention: first-layer command = cmd/<name>.go;
+│   │                         its subcommands = cmd/<name>/<subcommand>.go
 │   ├── root.go               Cmd, config initialization, command registration,
 │   │                         traverse hooks, and metrics hook
 │   ├── execute.go            Execute(args) + version argument dispatch
@@ -77,45 +81,47 @@ pm2/
 │   │   ├── client.go         CLIClient socket RPC wrapper
 │   │   └── client_autostart.go
 │   │                         silent daemon auto-spawn + readiness wait
-│   ├── daemon/               daemon command sub-package
-│   │   ├── daemon.go         Cmd parent for daemon lifecycle commands
-│   │   ├── start.go          daemon start command + foreground/background runtime
-│   │   ├── start_alias.go    explicit root `pm2 start` short alias
-│   │   ├── kill.go           daemon kill command node
-│   │   ├── stop.go           daemon stop command + durable stop marker management
-│   │   └── status.go         daemon status command node
-│   ├── task/                 task command sub-package
-│   │   ├── task.go           Cmd parent for task lifecycle commands
-│   │   ├── start.go          task start command + AppStartReq RPC flow
-│   │   ├── apply.go          explicit root short alias for task start
+│   ├── daemon.go             DaemonCmd parent (`pm2 daemon` / `pm2 d`)
+│   ├── start.go              root alias for `pm2 daemon start`
+│   ├── daemon/               daemon subcommands
+│   │   ├── start.go          StartCmd + foreground/background runtime
+│   │   ├── kill.go           KillCmd
+│   │   ├── stop.go           StopCmd + durable stop marker management
+│   │   └── status.go         StatusCmd
+│   ├── task.go               TaskCmd parent (`pm2 task` / `pm2 t`)
+│   ├── apply.go              root alias for `pm2 task start`
+│   ├── task/                 task subcommands + start helpers
+│   │   ├── start.go          StartCmd + AppStartReq RPC flow
 │   │   ├── apply_delete.go   --delete sweep: one CmdDelete per declared app
 │   │   ├── select.go         maps AppConfig.Optional to Paused;
 │   │   │                     selects one app by index/name for --single
 │   │   ├── single.go         renders and reads the interactive single-app choice
-│   │   ├── restart.go        task restart command node
-│   │   ├── stop.go           task stop command node
-│   │   ├── pause.go          task pause command node
-│   │   ├── resume.go         task resume command node
-│   │   └── delete.go         task delete command node
-│   ├── wizard/               wizard command sub-package
-│   │   ├── wizard.go         Cmd parent + interactive wizard Cobra shell
-│   │   ├── install.go        install subcommand + AppConfig assembly
+│   │   ├── restart.go        RestartCmd
+│   │   ├── stop.go           StopCmd
+│   │   ├── pause.go          PauseCmd
+│   │   ├── resume.go         ResumeCmd
+│   │   └── delete.go         DeleteCmd
+│   ├── wizard.go             WizardCmd parent + interactive Cobra shell
+│   ├── wizard_test.go        wizard CLI integration tests
+│   ├── wizard/               wizard subcommands
+│   │   ├── install.go        InstallCmd + AppConfig assembly
 │   │   ├── install_flags.go  shared planner flag binding
 │   │   ├── prompt/           planner prompt-template domain; no Cobra dependency
 │   │   │   ├── template.go   Template model + user-prompt rendering
 │   │   │   ├── system.go     system-planner template
 │   │   │   └── business.go   business-planner template
-│   │   └── wizard_test.go    Cobra-level wizard integration tests
-│   ├── taskmanager/          system activity monitor command sub-package
-│   │   ├── taskmanager.go    Cmd — `pm2 taskmanager` interactive TUI shell
+│   │   └── wizard_test.go    install-helper unit tests
+│   ├── taskmanager.go        TaskmanagerCmd parent (`pm2 taskmanager` / `pm2 tm`)
+│   ├── taskmanager/          taskmanager subcommands
 │   │   ├── emit.go           EmitCmd — periodic full-snapshot emitter +
 │   │   │                     interval/count/out/format flags
 │   │   └── emit_text.go      plain key=value snapshot encoder
 │   ├── list.go               ListCmd — styled non-interactive process table;
 │   │                         shares tui/views process-table renderer
-│   ├── logs.go               pm2 logs — signal-aware streaming command shell
+│   ├── logs.go               LogsCmd — signal-aware streaming command shell
 │   ├── logs_stream.go        daemon snapshot → logfile sources + stream routing
-│   ├── logs_monitor.go       logs monitor/m — interactive log-browser subcommand
+│   ├── logs/                 logs subcommands
+│   │   └── monitor.go        MonitorCmd — interactive log-browser
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
@@ -389,9 +395,10 @@ resolves to `pm2 task restart` and `pm2 d status` resolves to
 | `pm2 task delete <target>`  | none                 |
 
 Root commands are registered only when the product requirements explicitly
-name an alias. The `cmd/task` sub-package owns the namespaced Cobra nodes,
-handlers, and the explicit `ApplyCmd` alias; other task lifecycle commands are
-not duplicated at the root.
+name an alias. The `cmd/task` sub-package owns the namespaced task handlers;
+the parent `TaskCmd` and the explicit root `ApplyCmd` alias live in package
+`cmd` (`cmd/task.go`, `cmd/apply.go`). Other task lifecycle commands are not
+duplicated at the root.
 
 With no target, both task-start entry points load `./ecosystem.config.js`.
 `--single` lists the loaded apps and sends only the chosen app to the daemon;
@@ -657,10 +664,14 @@ executor fallback when a request has no configured log directory.
 ## Conventions
 
 - `cmd/root.go` is the only Cobra composition root; `main.go` is only the process
-  entry/exit boundary. Commands under `cmd/`, `cmd/daemon/`, `cmd/task/`, and
-  `cmd/wizard/` are package-level exported `*cobra.Command` vars; flags and
-  child commands bind in `init()`. Do not reintroduce `NewXxxCmd()` /
-  `newXxxCmd()` constructors.
+  entry/exit boundary. Commands under `cmd/`, `cmd/daemon/`, `cmd/task/`,
+  `cmd/wizard/`, `cmd/taskmanager/`, and `cmd/logs/` are package-level exported
+  `*cobra.Command` vars; flags and child commands bind in `init()`. Do not
+  reintroduce `NewXxxCmd()` / `newXxxCmd()` constructors.
+- **CLI layout**: first-layer commands live as files in `cmd/`
+  (`cmd/<command>.go` in package `cmd`). Subcommands of that command live in
+  `cmd/<command>/<subcommand>.go` (own package). Parent files wire children via
+  `AddCommand`; subpackages never import package `cmd`.
 - Shared CLI paths and daemon auto-start RPC infrastructure live in
   `cmd/runtime`; command sub-packages must depend on that package instead of
   importing their parent `cmd` package.

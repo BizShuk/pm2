@@ -18,21 +18,23 @@ var StartCmd = &cobra.Command{
 	Use:   "start [ecosystem.config.js|ecosystem.config.json|owner/repo|https://github.com/...]",
 	Short: "Start tasks from an ecosystem file or remote GitHub repo (short alias: pm2 apply)",
 	Args:  cobra.MaximumNArgs(1),
-	RunE:  runTasks,
+	RunE:  RunTasks,
 	Example: `  pm2 task start ecosystem.config.js
   pm2 apply                     # short alias
   pm2 apply --single            # choose one app`,
 }
 
 func init() {
-	bindStartFlags(StartCmd)
+	BindStartFlags(StartCmd)
 }
 
-func bindStartFlags(command *cobra.Command) {
+// BindStartFlags attaches the task-start flags shared by `pm2 task start`
+// and the root `pm2 apply` alias.
+func BindStartFlags(command *cobra.Command) {
 	command.Flags().Bool("all", false, "Run optional apps instead of registering them paused")
 	command.Flags().StringSlice("with", nil, "Run these optional apps instead of registering them paused (repeatable or comma-separated)")
 	command.Flags().Bool("single", false, "Choose and apply exactly one app from the ecosystem file")
-	command.Flags().Bool("delete", false, "Delete every task declared by the ecosystem file instead of starting it")
+	command.Flags().BoolP("delete", "d", false, "Delete every task declared by the ecosystem file instead of starting it")
 }
 
 // loadEcosystem resolves the CLI target (default ./ecosystem.config.js,
@@ -63,7 +65,8 @@ func loadEcosystem(args []string) (*config.EcosystemConfig, error) {
 	return cfg, nil
 }
 
-func runTasks(cmd *cobra.Command, args []string) error {
+// RunTasks is the shared handler for `pm2 task start` and `pm2 apply`.
+func RunTasks(cmd *cobra.Command, args []string) error {
 	runDeleteAll, err := cmd.Flags().GetBool("delete")
 	if err != nil {
 		return fmt.Errorf("read --delete: %w", err)

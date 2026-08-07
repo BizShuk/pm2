@@ -1,23 +1,24 @@
-package daemon
+package cmd
 
 import (
 	"fmt"
 
+	daemoncmd "github.com/bizshuk/pm2/cmd/daemon"
 	"github.com/spf13/cobra"
 )
 
-// Cmd is the `pm2 daemon` parent command with `start`,
+// DaemonCmd is the `pm2 daemon` parent command with `start`,
 // `kill`, `stop`, and `status` subcommands. Bare `pm2 daemon` errors
 // out so the caller always picks an explicit verb; the internal
 // auto-spawn paths use `daemon start --foreground` directly.
 //
-// The four subcommands live in their own files:
+// Subcommands live in cmd/daemon/:
 //
 //   - start.go  — StartCmd + startAsBackground
 //   - kill.go   — KillCmd + runKill
 //   - stop.go   — StopCmd + runStop + marker management
 //   - status.go — StatusCmd + runStatus
-var Cmd = &cobra.Command{
+var DaemonCmd = &cobra.Command{
 	Use:     "daemon",
 	Aliases: []string{"d"},
 	Short:   "Manage the PM2 daemon (short alias: pm2 d)",
@@ -33,11 +34,16 @@ var Cmd = &cobra.Command{
 		"runtime counters (read-only; works whether or not the daemon\n" +
 		"is currently running).",
 	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("pm2 daemon requires a subcommand (start | kill | stop | status)")
 	},
 }
 
 func init() {
-	Cmd.AddCommand(StartCmd, KillCmd, StopCmd, StatusCmd)
+	DaemonCmd.AddCommand(
+		daemoncmd.StartCmd,
+		daemoncmd.KillCmd,
+		daemoncmd.StopCmd,
+		daemoncmd.StatusCmd,
+	)
 }

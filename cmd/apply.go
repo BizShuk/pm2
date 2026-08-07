@@ -1,6 +1,9 @@
-package task
+package cmd
 
-import "github.com/spf13/cobra"
+import (
+	taskcmd "github.com/bizshuk/pm2/cmd/task"
+	"github.com/spf13/cobra"
+)
 
 // ApplyCmd is the explicit root-level short alias for `pm2 task start`.
 var ApplyCmd = &cobra.Command{
@@ -9,12 +12,12 @@ var ApplyCmd = &cobra.Command{
 	Long: "Apply tasks from an ecosystem config file or remote GitHub repository. " +
 		"With no target, loads ecosystem.config.js from the current directory.",
 	Args: cobra.MaximumNArgs(1),
-	RunE: runTasks,
+	RunE: taskcmd.RunTasks,
 	Example: `  pm2 apply
   pm2 apply --single
   pm2 task start ecosystem.config.js  # canonical command`,
 }
 
 func init() {
-	bindStartFlags(ApplyCmd)
+	taskcmd.BindStartFlags(ApplyCmd)
 }
