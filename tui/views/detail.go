@@ -29,7 +29,7 @@ func RenderDetail(p process.ProcessInfo, w int) string {
 
 	type row struct{ k, v, sty string }
 	rows := []row{
-		{"script", Crop(scriptVal, w-21), "path"},
+		{"script", scriptVal, "path-wrap"},
 		{"cwd", Crop(cwdVal, w-21), "path"},
 		{"namespace", CropRight(p.Namespace, w-21), ""},
 		{"user", CropRight(p.User, w-21), ""},
@@ -50,6 +50,11 @@ func RenderDetail(p process.ProcessInfo, w int) string {
 	}
 	var lines []string
 	for _, r := range rows {
+		if r.sty == "path-wrap" {
+			lines = append(lines, renderWrappedDetailField(r.k, r.v, w, 18, theme.Path))
+			continue
+		}
+
 		var val string
 		switch r.sty {
 		case "path":

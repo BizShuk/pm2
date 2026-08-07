@@ -14,7 +14,6 @@ import (
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
-	detailRows = 18 // rows in detail section (excluding header)
 )
 
 type SortField string

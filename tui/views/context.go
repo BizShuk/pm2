@@ -39,9 +39,3 @@ type ViewContext struct {
 	Detail     bool                  // two-pane (true) vs wide-table (false)
 	LogFocus   bool                  // hide detail block; show only log tail at full height
 }
-
-// Detail rows — kept here so layout / detail / logs can agree without
-// reaching back into the tui package. Detail renders 18 rows plus 1
-// header plus 1 blank divider plus 1 log header = 21 rows total before
-// the log panel.
-const detailRows = 18

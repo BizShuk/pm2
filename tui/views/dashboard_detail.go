@@ -40,11 +40,14 @@ func RenderDashboardDetail(ctx DashboardContext, width, height int) string {
 // numbers — usually the more useful answer — off the pane entirely.
 func dashboardDetailBody(heading string, fields []detailField, ctx DashboardContext, width, height int) string {
 	lines := []string{secHeader("detail — "+heading, width)}
+	fieldRows := 1
 	for _, field := range fields {
-		lines = append(lines, renderDetailField(field, width))
+		rendered := renderDetailField(field, width)
+		lines = append(lines, rendered)
+		fieldRows += lipgloss.Height(rendered)
 	}
 
-	available := max(height-len(lines)-2, 4) // two blank separators
+	available := max(height-fieldRows-2, 4) // two blank separators
 	portRows := min(max(len(ctx.Ports)+1, 2), available/2)
 	childRows := available - portRows
 
@@ -53,10 +56,12 @@ func dashboardDetailBody(heading string, fields []detailField, ctx DashboardCont
 	lines = append(lines, "")
 	lines = append(lines, renderListeningPorts(ctx.Ports, width, portRows)...)
 
-	if len(lines) > height {
-		lines = lines[:height]
+	rendered := strings.Join(lines, "\n")
+	physicalLines := strings.Split(rendered, "\n")
+	if len(physicalLines) > height {
+		physicalLines = physicalLines[:height]
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(physicalLines, "\n")
 }
 
 // detailField is one label/value row. style names the palette role rather
@@ -86,7 +91,7 @@ func taskFields(task sysmon.Task) []detailField {
 		{"memory", fmt.Sprintf("%s   tree %s", formatBytes(task.MemoryBytes), formatBytes(task.TreeMemoryBytes)), "metric"},
 		{"sub-processes", fmt.Sprintf("%d", len(task.Children)), ""},
 		{"listening", fmt.Sprintf("%d", len(task.Ports)), ""},
-		{"command", task.Command, "path"},
+		{"command", task.Command, "path-wrap"},
 	}
 }
 
@@ -97,11 +102,15 @@ func procFields(proc sysmon.Proc) []detailField {
 		{"state", proc.State, ""},
 		{"cpu", fmt.Sprintf("%.1f%%", proc.CPUPercent), "metric"},
 		{"memory", formatBytes(proc.MemoryBytes), "metric"},
-		{"command", proc.Command, "path"},
+		{"command", proc.Command, "path-wrap"},
 	}
 }
 
 func renderDetailField(field detailField, width int) string {
+	if field.style == "path-wrap" {
+		return renderWrappedDetailField(field.label, field.value, width, detailKeyWidth, theme.Path)
+	}
+
 	keyStyle := lipgloss.NewStyle().Foreground(theme.Muted).Width(detailKeyWidth)
 	valueWidth := width - detailKeyWidth - 3
 

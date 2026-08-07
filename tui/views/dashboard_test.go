@@ -146,6 +146,39 @@ func TestRenderDashboardDetailShowsTreeAndPorts(t *testing.T) {
 	}
 }
 
+func TestRenderDashboardDetailWrapsCommandToPaneWidth(t *testing.T) {
+	ctx := dashboardFixture()
+	ctx.Task.Command = "/usr/local/bin/automation-runner --workspace /srv/customer-data/singapore --format long-form"
+
+	narrow := plain(RenderDashboardDetail(ctx, 44, 30))
+	wide := plain(RenderDashboardDetail(ctx, 70, 30))
+	narrowCommand := detailFieldLines(narrow, "command", "SUB-PROCESSES")
+	wideCommand := detailFieldLines(wide, "command", "SUB-PROCESSES")
+
+	if len(narrowCommand) <= 1 {
+		t.Fatalf("narrow command used %d line, want wrapped output:\n%s", len(narrowCommand), narrow)
+	}
+	if len(narrowCommand) <= len(wideCommand) {
+		t.Fatalf("narrow command used %d lines, wide used %d; want terminal width to control wrapping", len(narrowCommand), len(wideCommand))
+	}
+	compactCommand := compactWhitespace(strings.Join(narrowCommand, "\n"))
+	for _, want := range []string{"automation-runner", "--workspace", "/srv/customer-data/singapore", "--format", "long-form"} {
+		if !strings.Contains(compactCommand, compactWhitespace(want)) {
+			t.Errorf("wrapped command is missing %q:\n%s", want, strings.Join(narrowCommand, "\n"))
+		}
+	}
+	for _, want := range []string{"SUB-PROCESSES (1)", "LISTENING PORTS (1)"} {
+		if !strings.Contains(narrow, want) {
+			t.Errorf("wrapped detail is missing following section %q:\n%s", want, narrow)
+		}
+	}
+	for index, line := range strings.Split(narrow, "\n") {
+		if width := screen.StringWidth(line); width > 44 {
+			t.Errorf("line %d is %d columns, want at most 44: %q", index, width, line)
+		}
+	}
+}
+
 func TestRenderDashboardDetailWithNoSelection(t *testing.T) {
 	ctx := dashboardFixture()
 	ctx.Task, ctx.Children, ctx.Ports = nil, nil, nil
