@@ -2,7 +2,6 @@ package logbrowser
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,35 +11,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bizshuk/pm2/logfile"
-	"github.com/bizshuk/pm2/model"
-	"github.com/bizshuk/pm2/process"
 )
 
-func loadApplications(socket string) tea.Cmd {
+func loadApps(root string) tea.Cmd {
 	return func() tea.Msg {
-		response, err := model.SendRequest(socket, model.Request{Command: model.CmdList})
-		if err != nil {
-			return applicationsMsg{err: err}
-		}
-		if !response.OK {
-			return applicationsMsg{err: errors.New(response.Error)}
-		}
-		var applications []process.ProcessInfo
-		if err := json.Unmarshal(response.Payload, &applications); err != nil {
-			return applicationsMsg{err: fmt.Errorf("decode process list: %w", err)}
-		}
-		return applicationsMsg{applications: applications}
-	}
-}
-
-func loadFiles(applicationIndex int, application process.ProcessInfo) tea.Cmd {
-	return func() tea.Msg {
-		files, err := logfile.ListRelated(application.LogFile, application.ErrorFile)
-		return filesMsg{
-			applicationIndex: applicationIndex,
-			files:            files,
-			err:              err,
-		}
+		apps, err := logfile.ListApps(root)
+		return appsMsg{apps: apps, err: err}
 	}
 }
 
@@ -51,17 +27,13 @@ func loadFile(path string) tea.Cmd {
 	}
 }
 
-func deleteFile(applicationIndex int, path string) tea.Cmd {
+func deleteFile(path string) tea.Cmd {
 	return func() tea.Msg {
 		err := os.Remove(path)
 		if err != nil {
 			err = fmt.Errorf("delete log file %q: %w", path, err)
 		}
-		return deletedMsg{
-			applicationIndex: applicationIndex,
-			path:             path,
-			err:              err,
-		}
+		return deletedMsg{path: path, err: err}
 	}
 }
 

@@ -20,9 +20,6 @@ const (
 	ScopeSystem = "system"
 )
 
-// dashboardHostRows is the height of the fixed host-resource panel.
-const dashboardHostRows = 4
-
 // DashboardContext is everything the activity dashboard needs to draw one
 // frame. Like ViewContext it is built fresh by the controller each frame
 // and never mutated by a renderer.
@@ -46,6 +43,8 @@ type DashboardContext struct {
 	Updated  time.Time
 	Err      error
 	Notice   string
+	Confirm  string // pending destructive-key prompt; replaces the key legend
+	Action   string // result of the last destructive key
 }
 
 // RenderDashboard is the single entry point the dashboard controller
@@ -56,7 +55,7 @@ func RenderDashboard(ctx DashboardContext) string {
 		return "terminal too narrow (min 60 cols)"
 	}
 
-	bodyHeight := max(ctx.Height-dashboardHostRows-2, 3) // host panel + header + footer
+	bodyHeight := max(ctx.Height-HostPanelRows(ctx.Snapshot.System)-2, 3) // host panel + header + footer
 	leftWidth := dashboardListWidth(ctx.Width)
 	rightWidth := ctx.Width - leftWidth - 1
 
@@ -112,25 +111,41 @@ func renderDashboardHeader(ctx DashboardContext) string {
 }
 
 func renderDashboardFooter(ctx DashboardContext) string {
+	footerStyle := lipgloss.NewStyle().Background(theme.HdrBg).Width(ctx.Width).
+		MaxWidth(ctx.Width).MaxHeight(1).Padding(0, 1)
+
+	// A pending confirmation takes the whole bar. Tucking it beside the
+	// key hints would let the most consequential line on screen read as
+	// one more hint.
+	if ctx.Confirm != "" {
+		return footerStyle.Render(
+			lipgloss.NewStyle().Bold(true).Foreground(theme.Errored).Render(ctx.Confirm))
+	}
+
 	scope := "all processes"
+	killLabel := "stop task"
 	if ctx.Scope == ScopeSystem {
 		scope = "pm2 tasks"
+		killLabel = "kill pid"
 	}
 	keys := [][2]string{
 		{"↑↓ / jk", "navigate"},
 		{"a", scope},
 		{"s", "sort: " + ctx.SortBy},
+		{"d", killLabel},
 		{"q", "quit"},
 	}
 
 	keyStyle := lipgloss.NewStyle().Foreground(theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(theme.Muted)
-	parts := make([]string, 0, len(keys))
+	parts := make([]string, 0, len(keys)+1)
 	for _, key := range keys {
 		parts = append(parts, keyStyle.Render(key[0])+" "+descStyle.Render(key[1]))
 	}
-	return lipgloss.NewStyle().Background(theme.HdrBg).Width(ctx.Width).Padding(0, 1).
-		Render(strings.Join(parts, "  │  "))
+	if ctx.Action != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Warn).Render(ctx.Action))
+	}
+	return footerStyle.Render(strings.Join(parts, "  │  "))
 }
 
 // RenderDashboardList draws the left pane: managed applications in task

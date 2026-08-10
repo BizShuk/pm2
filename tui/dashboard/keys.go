@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -10,10 +12,26 @@ import (
 const pageStep = 10
 
 func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch message.String() {
-	case "q", "ctrl+c":
+	if message.String() == "q" || message.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
 
+	// A pending confirmation swallows every other key: navigating or
+	// re-sorting underneath a prompt that names one specific process would
+	// leave the prompt describing a row the cursor has already left.
+	if m.confirm != nil {
+		switch message.String() {
+		case "y", "Y":
+			target := *m.confirm
+			m.confirm = nil
+			return m, target.run(m.socket)
+		case "n", "N", "esc":
+			m.confirm = nil
+		}
+		return m, nil
+	}
+
+	switch message.String() {
 	case "up", "k":
 		m.move(-1)
 
@@ -43,6 +61,17 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cycleSort()
 		m.applySort()
 		m.clampSelection()
+
+	case "d":
+		// Arm the confirmation rather than acting: the same keystroke
+		// means "stop a managed task" in one scope and "signal an
+		// arbitrary OS process" in the other, and neither is undoable.
+		target, refusal := m.killTargetForSelection()
+		if refusal != "" {
+			m.action, m.actionAt = refusal, time.Now()
+			return m, nil
+		}
+		m.confirm = &target
 	}
 	return m, nil
 }

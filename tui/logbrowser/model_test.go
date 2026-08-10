@@ -8,33 +8,25 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/bizshuk/pm2/logfile"
-	"github.com/bizshuk/pm2/process"
 )
 
 func TestTreeRightOpensAndLeftReturns(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "daemon.log")
-	if err := os.WriteFile(logPath, []byte("line one\nline two\nline three\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	m := modelWithApplications([]process.ProcessInfo{testProcess(logPath)})
+	root := t.TempDir()
+	logPath := writeAppLog(t, root, "worker", "daemon.log", "line one\nline two\nline three\n")
+	m := loadedModel(t, root)
 
-	m, cmd := updateKey(t, m, "right")
+	m, _ = updateKey(t, m, "right")
 	if m.screen != screenTree {
-		t.Fatalf("screen after application Right = %v, want tree", m.screen)
+		t.Fatalf("screen after app Right = %v, want tree", m.screen)
 	}
-	if cmd == nil {
-		t.Fatal("application Right command = nil, want file discovery")
-	}
-	m = updateMessage(t, m, cmd())
 	if rows := m.visibleTreeRows(); len(rows) != 2 {
-		t.Fatalf("visible rows = %#v, want application plus file", rows)
+		t.Fatalf("visible rows = %#v, want app plus file", rows)
 	}
 
 	m, _ = updateKey(t, m, "down")
-	m, cmd = updateKey(t, m, "right")
+	m, cmd := updateKey(t, m, "right")
 	if m.screen != screenViewer {
 		t.Fatalf("screen after file Right = %v, want viewer", m.screen)
 	}
@@ -42,6 +34,9 @@ func TestTreeRightOpensAndLeftReturns(t *testing.T) {
 		t.Fatal("file Right command = nil, want file read")
 	}
 	m = updateMessage(t, m, cmd())
+	if m.viewerPath != logPath {
+		t.Fatalf("viewerPath = %q, want %q", m.viewerPath, logPath)
+	}
 	if len(m.lines) != 3 {
 		t.Fatalf("lines = %#v, want 3", m.lines)
 	}
@@ -55,21 +50,44 @@ func TestTreeRightOpensAndLeftReturns(t *testing.T) {
 	}
 	m, _ = updateKey(t, m, "left")
 	if rows := m.visibleTreeRows(); len(rows) != 1 {
-		t.Fatalf("visible rows after file Left = %#v, want collapsed application", rows)
+		t.Fatalf("visible rows after file Left = %#v, want collapsed app", rows)
 	}
 	if m.treeCursor != 0 {
-		t.Fatalf("treeCursor after collapse = %d, want parent application 0", m.treeCursor)
+		t.Fatalf("treeCursor after collapse = %d, want parent app 0", m.treeCursor)
+	}
+}
+
+// The listing is the filesystem's, not the daemon's: an application whose task
+// is long gone still owns its log directory and must appear.
+func TestScanListsEveryApplicationUnderTheConfigRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeAppLog(t, root, "vidnote", "daemon.log", "a\n")
+	writeAppLog(t, root, "agentmemory", "daemon.log", "b\n")
+	writeAppLog(t, root, "agentmemory", "daemon.2026-07-29.log", "c\n")
+	if err := os.MkdirAll(filepath.Join(root, "no-logs", "data"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	m := loadedModel(t, root)
+	if len(m.apps) != 2 {
+		t.Fatalf("apps = %#v, want agentmemory and vidnote", m.apps)
+	}
+	if m.apps[0].App != "agentmemory" || m.apps[1].App != "vidnote" {
+		t.Fatalf("apps = %q, %q, want them sorted by name", m.apps[0].App, m.apps[1].App)
+	}
+	if got := len(m.apps[0].Files); got != 2 {
+		t.Fatalf("agentmemory files = %d, want current plus archive", got)
 	}
 }
 
 func TestTreeEnterFocusesViewerAndLoadsSelectedFile(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "daemon.log")
-	if err := os.WriteFile(path, []byte("first\nsecond\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	m := modelWithFiles(testProcess(path), []logfile.FileInfo{{Path: path}})
+	root := t.TempDir()
+	path := writeAppLog(t, root, "worker", "daemon.log", "first\nsecond\n")
+	m := expandedModel(t, root)
 
 	m, loadCmd := updateKey(t, m, "enter")
 	if m.screen != screenViewer {
@@ -91,22 +109,17 @@ func TestTreeEnterFocusesViewerAndLoadsSelectedFile(t *testing.T) {
 func TestTreeDeleteIsAvailableOnlyOnFileRow(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "daemon.2026-07-29.log")
-	if err := os.WriteFile(path, []byte("archive\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	m := modelWithFiles(testProcess(path), []logfile.FileInfo{{
-		Path: path,
-		Name: filepath.Base(path),
-	}})
+	root := t.TempDir()
+	path := writeAppLog(t, root, "worker", "daemon.2026-07-29.log", "archive\n")
+	m := expandedModel(t, root)
 
 	m.treeCursor = 0
 	m, cmd := updateKey(t, m, "d")
 	if cmd != nil {
-		t.Fatalf("d on application command = %v, want nil", cmd)
+		t.Fatalf("d on app command = %v, want nil", cmd)
 	}
 	if m.screen != screenTree {
-		t.Fatalf("screen after d on application = %v, want tree", m.screen)
+		t.Fatalf("screen after d on app = %v, want tree", m.screen)
 	}
 
 	m.treeCursor = 1
@@ -138,19 +151,47 @@ func TestTreeDeleteIsAvailableOnlyOnFileRow(t *testing.T) {
 		t.Fatalf("screen after delete = %v, want tree", m.screen)
 	}
 	if refreshCmd == nil {
-		t.Fatal("delete result command = nil, want refreshed file list")
+		t.Fatal("delete result command = nil, want rescan")
 	}
 	m = updateMessage(t, m, refreshCmd())
-	if files := m.filesByApplication[0]; len(files) != 0 {
-		t.Fatalf("files after delete = %#v, want empty", files)
+	if len(m.apps) != 0 {
+		t.Fatalf("apps after deleting the only log = %#v, want empty", m.apps)
+	}
+}
+
+// A rescan keeps the user where they were: expansion is keyed by application
+// name, not by a row index that shifts when a file disappears.
+func TestRescanKeepsExpansionAcrossDelete(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeAppLog(t, root, "worker", "daemon.log", "current\n")
+	writeAppLog(t, root, "worker", "daemon.2026-07-29.log", "archive\n")
+	m := expandedModel(t, root)
+
+	m.treeCursor = 2
+	m, _ = updateKey(t, m, "d")
+	m, cmd := updateKey(t, m, "y")
+	m, refreshCmd := updateMessageWithCmd(t, m, cmd())
+	m = updateMessage(t, m, refreshCmd())
+
+	if !m.expanded["worker"] {
+		t.Fatal("worker collapsed after rescan, want it still expanded")
+	}
+	if rows := m.visibleTreeRows(); len(rows) != 2 {
+		t.Fatalf("visible rows after delete = %#v, want app plus one file", rows)
+	}
+	if m.notice == "" {
+		t.Error("notice = empty, want the deleted file named")
 	}
 }
 
 func TestViewerDoesNotDeleteFile(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "daemon.log")
-	m := modelWithFiles(testProcess(path), []logfile.FileInfo{{Path: path}})
+	root := t.TempDir()
+	writeAppLog(t, root, "worker", "daemon.log", "line\n")
+	m := expandedModel(t, root)
 	m.screen = screenViewer
 
 	m, cmd := updateKey(t, m, "d")
@@ -165,11 +206,9 @@ func TestViewerDoesNotDeleteFile(t *testing.T) {
 func TestViewerLeftReturnsTreeFocusAndKeepsPendingPreview(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "daemon.log")
-	if err := os.WriteFile(path, []byte("line\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	m := modelWithFiles(testProcess(path), []logfile.FileInfo{{Path: path}})
+	root := t.TempDir()
+	path := writeAppLog(t, root, "worker", "daemon.log", "line\n")
+	m := expandedModel(t, root)
 
 	m, loadCmd := updateKey(t, m, "right")
 	if m.screen != screenViewer || !m.loading || loadCmd == nil {
@@ -189,18 +228,24 @@ func TestViewerLeftReturnsTreeFocusAndKeepsPendingPreview(t *testing.T) {
 	}
 }
 
-func TestInitialTargetSelectsMatchingApplication(t *testing.T) {
+func TestInitialTargetSelectsAndExpandsMatchingApp(t *testing.T) {
 	t.Parallel()
 
-	m := New("unused.sock", "worker")
-	msg := applicationsMsg{applications: []process.ProcessInfo{
-		{AppConfig: process.AppConfig{Name: "api"}, ID: 1},
-		{AppConfig: process.AppConfig{Name: "worker"}, ID: 2},
-	}}
-	m = updateMessage(t, m, msg)
+	root := t.TempDir()
+	writeAppLog(t, root, "api", "daemon.log", "a\n")
+	writeAppLog(t, root, "worker", "daemon.log", "b\n")
+
+	m := New(root, "worker")
+	m = updateMessage(t, m, appsMsg{apps: mustListApps(t, root)})
 
 	if m.treeCursor != 1 {
 		t.Fatalf("treeCursor = %d, want matching worker at index 1", m.treeCursor)
+	}
+	if !m.expanded["worker"] {
+		t.Fatal("worker not expanded, want the named app opened")
+	}
+	if m.initialTarget != "" {
+		t.Error("initialTarget retained, want it consumed so a rescan does not re-seek")
 	}
 }
 
@@ -246,44 +291,48 @@ func TestViewerPageNavigationUsesBodyHeight(t *testing.T) {
 	}
 }
 
-func testProcess(logPath string) process.ProcessInfo {
-	return process.ProcessInfo{
-		AppConfig: process.AppConfig{
-			Namespace: "default",
-			Name:      "worker",
-			LogFile:   logPath,
-			ErrorFile: filepath.Join(filepath.Dir(logPath), "daemon.err"),
-		},
-		ID:     7,
-		Status: process.StatusOnline,
+func writeAppLog(t *testing.T, root, app, name, content string) string {
+	t.Helper()
+	dir := filepath.Join(root, app, logfile.LogsDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", dir, err)
 	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	return path
 }
 
-func modelWithApplications(applications []process.ProcessInfo) Model {
-	return Model{
-		screen:             screenTree,
-		applications:       applications,
-		expanded:           make(map[int]bool),
-		filesByApplication: make(map[int][]logfile.FileInfo),
-		width:              100,
-		height:             30,
+func mustListApps(t *testing.T, root string) []logfile.AppLogs {
+	t.Helper()
+	apps, err := logfile.ListApps(root)
+	if err != nil {
+		t.Fatalf("ListApps() error = %v", err)
 	}
+	return apps
 }
 
-func modelWithFiles(application process.ProcessInfo, files []logfile.FileInfo) Model {
-	return Model{
-		screen:       screenTree,
-		applications: []process.ProcessInfo{application},
-		expanded: map[int]bool{
-			0: true,
-		},
-		filesByApplication: map[int][]logfile.FileInfo{
-			0: files,
-		},
-		treeCursor: 1,
-		width:      100,
-		height:     30,
+// loadedModel runs the real Init scan so tests exercise the same path the
+// command does.
+func loadedModel(t *testing.T, root string) Model {
+	t.Helper()
+	m := New(root, "")
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("Init() = nil, want the config-root scan")
 	}
+	return updateMessage(t, m, cmd())
+}
+
+// expandedModel loads root and opens its single application, leaving the
+// cursor on the first file row.
+func expandedModel(t *testing.T, root string) Model {
+	t.Helper()
+	m := loadedModel(t, root)
+	m, _ = updateKey(t, m, "right")
+	m.treeCursor = 1
+	return m
 }
 
 func updateKey(t *testing.T, m Model, key string) (Model, tea.Cmd) {

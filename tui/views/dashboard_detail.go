@@ -82,7 +82,7 @@ func taskFields(task sysmon.Task) []detailField {
 		uptime = fullUptimeSince(task.StartedAt)
 	}
 
-	return []detailField{
+	fields := []detailField{
 		{"status", task.Status, "status"},
 		{"pid", pidLabel(task.PID), ""},
 		{"uptime", uptime, ""},
@@ -93,10 +93,31 @@ func taskFields(task sysmon.Task) []detailField {
 		{"listening", fmt.Sprintf("%d", len(task.Ports)), ""},
 		{"command", task.Command, "path-wrap"},
 	}
+
+	// The gpu row is omitted rather than shown as 0.0% when the tree used
+	// no GPU: on a machine with no agent installed every task would
+	// otherwise carry a permanent, authoritative-looking zero.
+	if task.TreeGPUPercent > 0 {
+		fields = insertAfter(fields, "memory", detailField{
+			"gpu", fmt.Sprintf("%.1f%%   tree %.1f%%", task.GPUPercent, task.TreeGPUPercent), "metric",
+		})
+	}
+	return fields
+}
+
+// insertAfter places a field directly below the named one so the metric
+// rows stay together instead of the optional one landing at the bottom.
+func insertAfter(fields []detailField, after string, field detailField) []detailField {
+	for index := range fields {
+		if fields[index].label == after {
+			return append(fields[:index+1], append([]detailField{field}, fields[index+1:]...)...)
+		}
+	}
+	return append(fields, field)
 }
 
 func procFields(proc sysmon.Proc) []detailField {
-	return []detailField{
+	fields := []detailField{
 		{"pid", pidLabel(proc.PID), ""},
 		{"parent pid", pidLabel(proc.PPID), ""},
 		{"state", proc.State, ""},
@@ -104,6 +125,12 @@ func procFields(proc sysmon.Proc) []detailField {
 		{"memory", formatBytes(proc.MemoryBytes), "metric"},
 		{"command", proc.Command, "path-wrap"},
 	}
+	if proc.GPUPercent > 0 {
+		fields = insertAfter(fields, "memory", detailField{
+			"gpu", fmt.Sprintf("%.1f%%", proc.GPUPercent), "metric",
+		})
+	}
+	return fields
 }
 
 func renderDetailField(field detailField, width int) string {

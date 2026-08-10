@@ -3,38 +3,38 @@ package logbrowser
 import (
 	"fmt"
 
-	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/tui/views"
 )
 
 type treeRowKind uint8
 
 const (
-	treeApplication treeRowKind = iota
+	treeApp treeRowKind = iota
 	treeFile
 )
 
 type treeRow struct {
-	kind             treeRowKind
-	applicationIndex int
-	fileIndex        int
+	kind      treeRowKind
+	appIndex  int
+	fileIndex int
 }
 
 func (m Model) visibleTreeRows() []treeRow {
-	rows := make([]treeRow, 0, len(m.applications))
-	for applicationIndex := range m.applications {
+	rows := make([]treeRow, 0, len(m.apps))
+	for appIndex, app := range m.apps {
 		rows = append(rows, treeRow{
-			kind:             treeApplication,
-			applicationIndex: applicationIndex,
-			fileIndex:        -1,
+			kind:      treeApp,
+			appIndex:  appIndex,
+			fileIndex: -1,
 		})
-		if !m.expanded[applicationIndex] {
+		if !m.expanded[app.App] {
 			continue
 		}
-		for fileIndex := range m.filesByApplication[applicationIndex] {
+		for fileIndex := range app.Files {
 			rows = append(rows, treeRow{
-				kind:             treeFile,
-				applicationIndex: applicationIndex,
-				fileIndex:        fileIndex,
+				kind:      treeFile,
+				appIndex:  appIndex,
+				fileIndex: fileIndex,
 			})
 		}
 	}
@@ -54,17 +54,16 @@ func (m Model) selectedFilePath() string {
 	if !ok || row.kind != treeFile {
 		return ""
 	}
-	files := m.filesByApplication[row.applicationIndex]
+	files := m.apps[row.appIndex].Files
 	if row.fileIndex < 0 || row.fileIndex >= len(files) {
 		return ""
 	}
 	return files[row.fileIndex].Path
 }
 
-func (m Model) treeIndexForApplication(applicationIndex int) int {
+func (m Model) treeIndexForApp(appIndex int) int {
 	for index, row := range m.visibleTreeRows() {
-		if row.kind == treeApplication &&
-			row.applicationIndex == applicationIndex {
+		if row.kind == treeApp && row.appIndex == appIndex {
 			return index
 		}
 	}
@@ -75,43 +74,49 @@ func (m Model) treeItems() []string {
 	rows := m.visibleTreeRows()
 	items := make([]string, len(rows))
 	for index, row := range rows {
-		if row.kind == treeApplication {
-			items[index] = m.applicationTreeItem(row.applicationIndex)
+		if row.kind == treeApp {
+			items[index] = m.appTreeItem(row.appIndex)
 			continue
 		}
-		items[index] = m.fileTreeItem(row.applicationIndex, row.fileIndex)
+		items[index] = m.fileTreeItem(row.appIndex, row.fileIndex)
 	}
 	return items
 }
 
-func (m Model) applicationTreeItem(applicationIndex int) string {
-	application := m.applications[applicationIndex]
-	namespace := application.Namespace
-	if namespace == "" {
-		namespace = process.DefaultNamespace
-	}
+// nameColumn is the width the application and file name columns share so the
+// size column stays visible inside the 40% tree pane. Longer names are cut
+// rather than allowed to push the columns behind the pane edge.
+const nameColumn = 22
+
+func (m Model) appTreeItem(appIndex int) string {
+	app := m.apps[appIndex]
 	marker := "▸"
-	if m.expanded[applicationIndex] {
+	if m.expanded[app.App] {
 		marker = "▾"
 	}
-	return fmt.Sprintf("[%d] %s %s:%s  %s",
-		application.ID,
+	return fmt.Sprintf("%s %-*s  %3d files  %8s",
 		marker,
-		namespace,
-		application.Name,
-		application.Status,
+		nameColumn,
+		// An application is identified by the head of its name; a log file
+		// by the tail, where the stream and rotation date live.
+		views.CropRight(app.App, nameColumn),
+		len(app.Files),
+		formatFileSize(app.TotalSize()),
 	)
 }
 
-func (m Model) fileTreeItem(applicationIndex, fileIndex int) string {
-	file := m.filesByApplication[applicationIndex][fileIndex]
-	kind := "archive"
+func (m Model) fileTreeItem(appIndex, fileIndex int) string {
+	file := m.apps[appIndex].Files[fileIndex]
+	// The diamond is the whole current/archive distinction; an "archive"
+	// word in its place would cost seven columns to say "not that one".
+	marker := "  "
 	if file.Current {
-		kind = "🔶"
+		marker = "🔶"
 	}
-	return fmt.Sprintf("    %-7s  %-28s  %8s  %s",
-		kind,
-		file.Name,
+	return fmt.Sprintf("   %s %-*s  %8s  %s",
+		marker,
+		nameColumn,
+		views.Crop(file.Name, nameColumn),
 		formatFileSize(file.Size),
 		file.ModTime.Format("2006-01-02 15:04:05"),
 	)

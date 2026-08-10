@@ -6,30 +6,27 @@ import (
 	"time"
 
 	"github.com/bizshuk/pm2/logfile"
-	"github.com/bizshuk/pm2/process"
 )
 
-func TestApplicationTreeItemUsesBracketedIDPrefix(t *testing.T) {
+func TestAppTreeItemShowsDirectoryNameCountAndSize(t *testing.T) {
 	t.Parallel()
 
 	m := Model{
-		applications: []process.ProcessInfo{{
-			AppConfig: process.AppConfig{
-				Namespace: "default",
-				Name:      "worker",
+		apps: []logfile.AppLogs{{
+			App: "vidnote",
+			Files: []logfile.FileInfo{
+				{Name: "daemon.log", Size: 2048},
+				{Name: "daemon.err", Size: 1024},
 			},
-			ID:     7,
-			Status: process.StatusOnline,
 		}},
-		expanded: map[int]bool{0: true},
+		expanded: map[string]bool{"vidnote": true},
 	}
 
-	item := m.applicationTreeItem(0)
-	if !strings.HasPrefix(item, "[7] ") {
-		t.Fatalf("application item = %q, want [7] prefix", item)
-	}
-	if strings.Contains(item, "id 7") {
-		t.Fatalf("application item retains id label: %q", item)
+	item := m.appTreeItem(0)
+	for _, want := range []string{"▾", "vidnote", "2 files", "3.0 KiB"} {
+		if !strings.Contains(item, want) {
+			t.Errorf("app item = %q, want it to contain %q", item, want)
+		}
 	}
 }
 
@@ -37,14 +34,15 @@ func TestCurrentFileTreeItemUsesDiamondMarker(t *testing.T) {
 	t.Parallel()
 
 	m := Model{
-		filesByApplication: map[int][]logfile.FileInfo{
-			0: {{
+		apps: []logfile.AppLogs{{
+			App: "vidnote",
+			Files: []logfile.FileInfo{{
 				Current: true,
 				Name:    "daemon.log",
 				Size:    128,
 				ModTime: time.Date(2026, 7, 30, 12, 0, 0, 0, time.Local),
 			}},
-		},
+		}},
 	}
 
 	item := m.fileTreeItem(0, 0)

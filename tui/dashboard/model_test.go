@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,112 @@ func TestUnreachableDaemonStillRendersTheMachine(t *testing.T) {
 	}
 	if !strings.Contains(frame, "cpu") {
 		t.Error("frame dropped the host panel when the daemon was unreachable")
+	}
+}
+
+func TestKillAsksBeforeActing(t *testing.T) {
+	// `d` is one keystroke away on a 600-row process table, and neither
+	// stopping a task nor signalling a process can be undone.
+	model := press(t, loaded(t), "d")
+
+	if model.confirm == nil {
+		t.Fatal("d should arm a confirmation, not act immediately")
+	}
+	if model.confirm.system {
+		t.Error("task scope should target the daemon, not a raw signal")
+	}
+	if model.confirm.label != "api" || model.confirm.id != "1" {
+		t.Errorf("target = %+v, want the selected task api (id 1)", *model.confirm)
+	}
+
+	model.width, model.height = 140, 40
+	if frame := model.View(); !strings.Contains(frame, "stop task api") {
+		t.Errorf("frame is missing the confirmation prompt\n%s", frame)
+	}
+
+	if model = press(t, model, "n"); model.confirm != nil {
+		t.Error("n should cancel the confirmation")
+	}
+}
+
+func TestConfirmationSwallowsNavigation(t *testing.T) {
+	// Moving the cursor under a prompt that names one process would leave
+	// the prompt describing a row the user has already left.
+	model := press(t, loaded(t), "d")
+	model = press(t, model, "j")
+
+	if model.selected != 0 {
+		t.Errorf("selected = %d, want the cursor pinned while confirming", model.selected)
+	}
+	if model.confirm == nil {
+		t.Error("an unrelated key should leave the confirmation armed")
+	}
+}
+
+func TestKillInSystemScopeTargetsThePID(t *testing.T) {
+	model := press(t, loaded(t), "a") // system scope, cursor on pid 3000
+	model = press(t, model, "d")
+
+	if model.confirm == nil {
+		t.Fatal("d should arm a confirmation in system scope")
+	}
+	if !model.confirm.system || model.confirm.pid != 3000 {
+		t.Errorf("target = %+v, want a signal to pid 3000", *model.confirm)
+	}
+}
+
+func TestKillRefusesUnrunnableSelections(t *testing.T) {
+	// A stopped task and an idle cron task both sit at PID 0; "stop" on
+	// them means nothing, and a `d` that does nothing at all reads as a
+	// broken key.
+	model := loaded(t)
+	model.selected = 1 // backup, stopped
+	model = press(t, model, "d")
+
+	if model.confirm != nil {
+		t.Error("a task with no PID should not arm a confirmation")
+	}
+	if !strings.Contains(model.action, "not running") {
+		t.Errorf("action = %q, want an explanation of the refusal", model.action)
+	}
+}
+
+func TestKillRefusesToSignalItself(t *testing.T) {
+	model := press(t, loaded(t), "a")
+	model.ranked[0].PID = os.Getpid()
+	model = press(t, model, "d")
+
+	if model.confirm != nil {
+		t.Fatal("the dashboard must not offer to kill itself")
+	}
+	if !strings.Contains(model.action, "itself") {
+		t.Errorf("action = %q, want the self-kill refusal", model.action)
+	}
+}
+
+func TestKillResultShowsThenExpires(t *testing.T) {
+	model := loaded(t)
+	next, _ := model.Update(killResultMsg{notice: "stopped api"})
+	model = next.(Model)
+	model.width, model.height = 140, 40
+
+	if frame := model.View(); !strings.Contains(frame, "stopped api") {
+		t.Errorf("frame is missing the kill result\n%s", frame)
+	}
+
+	// The result must not outlive the list catching up with it.
+	model.actionAt = time.Now().Add(-2 * actionTTL)
+	next, _ = model.Update(observationMsg{observation: observationFixture()})
+	if got := next.(Model).action; got != "" {
+		t.Errorf("action = %q, want it cleared after %s", got, actionTTL)
+	}
+}
+
+func TestKillResultDoesNotStartASecondCollectionLoop(t *testing.T) {
+	// Update re-arms exactly one collection chain from observationMsg;
+	// refreshing from a kill result would leave two running forever.
+	if _, cmd := loaded(t).Update(killResultMsg{notice: "stopped api"}); cmd != nil {
+		t.Error("killResultMsg should not issue a command")
 	}
 }
 

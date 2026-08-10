@@ -32,11 +32,17 @@ func TestLogsMonitorIsInteractiveSubcommand(t *testing.T) {
 	if got := monitorCmd.Parent(); got != LogsCmd {
 		t.Fatalf("logs monitor Parent() = %v, want LogsCmd", got)
 	}
-	if monitorCmd.Use != "monitor [name]" {
-		t.Fatalf("logs monitor Use = %q, want %q", monitorCmd.Use, "monitor [name]")
+	if monitorCmd.Use != "monitor [app]" {
+		t.Fatalf("logs monitor Use = %q, want %q", monitorCmd.Use, "monitor [app]")
 	}
-	if !strings.Contains(strings.ToLower(monitorCmd.Short), "interactive") {
-		t.Fatalf("logs monitor Short = %q, want interactive description", monitorCmd.Short)
+	// The browser reads the config root, not the daemon's process list, and
+	// its help must say so: the two answer different questions about which
+	// logs exist.
+	if !strings.Contains(monitorCmd.Short, "~/.config") {
+		t.Fatalf("logs monitor Short = %q, want the config root named", monitorCmd.Short)
+	}
+	if !strings.Contains(strings.ToLower(monitorCmd.Long), "not from the daemon") {
+		t.Fatalf("logs monitor Long = %q, want the filesystem source stated", monitorCmd.Long)
 	}
 
 	hasShortAlias := false

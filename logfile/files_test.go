@@ -6,94 +6,134 @@ import (
 	"testing"
 )
 
-func TestListRelatedIncludesCurrentAndDatedArchivesOnly(t *testing.T) {
+func TestListAppsGroupsLogsByApplicationDirectory(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "daemon.log")
-	errPath := filepath.Join(dir, "daemon.err")
-	for path, content := range map[string]string{
-		logPath: "current stdout",
-		errPath: "current stderr",
-		filepath.Join(dir, "daemon.2026-07-29.log"): "old stdout",
-		filepath.Join(dir, "daemon.2026-07-29.err"): "old stderr",
-		filepath.Join(dir, "daemon.not-a-date.log"): "invalid archive",
-		filepath.Join(dir, "unrelated.txt"):         "unrelated",
-	} {
-		writeTestFile(t, path, content)
-	}
+	root := t.TempDir()
+	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.log"), "current stdout")
+	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.err"), "current stderr")
+	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.2026-07-29.log"), "old")
+	writeNestedTestFile(t, filepath.Join(root, "agentmemory", LogsDirName, "daemon.log"), "other app")
 
-	files, err := ListRelated(logPath, errPath, logPath)
+	apps, err := ListApps(root)
 	if err != nil {
-		t.Fatalf("ListRelated() error = %v", err)
+		t.Fatalf("ListApps() error = %v", err)
 	}
-	if len(files) != 4 {
-		t.Fatalf("ListRelated() returned %d files: %#v", len(files), files)
+	if len(apps) != 2 {
+		t.Fatalf("ListApps() returned %d apps: %#v", len(apps), apps)
+	}
+	if apps[0].App != "agentmemory" || apps[1].App != "vidnote" {
+		t.Fatalf("apps not sorted by name: %q, %q", apps[0].App, apps[1].App)
 	}
 
-	gotNames := make([]string, 0, len(files))
-	for _, file := range files {
+	vidnote := apps[1]
+	if vidnote.Dir != filepath.Join(root, "vidnote", LogsDirName) {
+		t.Errorf("AppLogs.Dir = %q, want the app's logs directory", vidnote.Dir)
+	}
+	gotNames := make([]string, 0, len(vidnote.Files))
+	for _, file := range vidnote.Files {
 		gotNames = append(gotNames, file.Name)
-		if !filepath.IsAbs(file.Path) {
-			t.Errorf("FileInfo.Path = %q, want absolute path", file.Path)
-		}
 		if file.Size <= 0 {
 			t.Errorf("FileInfo.Size for %q = %d, want positive", file.Path, file.Size)
 		}
 	}
-	wantNames := []string{
-		"daemon.err",
-		"daemon.log",
-		"daemon.2026-07-29.err",
-		"daemon.2026-07-29.log",
-	}
+	wantNames := []string{"daemon.err", "daemon.log", "daemon.2026-07-29.log"}
 	for i, want := range wantNames {
 		if gotNames[i] != want {
 			t.Errorf("files[%d].Name = %q, want %q (all: %v)", i, gotNames[i], want, gotNames)
 		}
 	}
-	if !files[0].Current || !files[1].Current {
-		t.Errorf("current files not marked current: %#v", files[:2])
+	if !vidnote.Files[0].Current || !vidnote.Files[1].Current {
+		t.Errorf("current files not marked current: %#v", vidnote.Files[:2])
 	}
-	if files[2].Current || files[3].Current {
-		t.Errorf("archives marked current: %#v", files[2:])
+	if vidnote.Files[2].Current {
+		t.Errorf("archive marked current: %#v", vidnote.Files[2])
 	}
-}
-
-func TestListRelatedIgnoresMissingCurrentDirectories(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "missing", "daemon.log")
-	files, err := ListRelated(path)
-	if err != nil {
-		t.Fatalf("ListRelated() error = %v", err)
-	}
-	if len(files) != 0 {
-		t.Fatalf("ListRelated() = %#v, want no files", files)
+	if got, want := vidnote.TotalSize(), int64(len("current stdout")+len("current stderr")+len("old")); got != want {
+		t.Errorf("TotalSize() = %d, want %d", got, want)
 	}
 }
 
-func TestListRelatedSupportsExtensionlessLogs(t *testing.T) {
+// An application directory without a logs directory, and one whose logs
+// directory is empty, are both ordinary states — neither may produce a row the
+// user can only expand into nothing.
+func TestListAppsSkipsApplicationsWithoutLogFiles(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	current := filepath.Join(dir, "worker")
-	archive := filepath.Join(dir, "worker.2026-07-29")
-	writeTestFile(t, current, "current")
-	writeTestFile(t, archive, "archive")
-	writeTestFile(t, filepath.Join(dir, "worker.invalid"), "not an archive")
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "empty", LogsDirName), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "data-only", "data"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	writeNestedTestFile(t, filepath.Join(root, "data-only", "config.json"), "{}")
 
-	files, err := ListRelated(current)
+	apps, err := ListApps(root)
 	if err != nil {
-		t.Fatalf("ListRelated() error = %v", err)
+		t.Fatalf("ListApps() error = %v", err)
 	}
-	if len(files) != 2 {
-		t.Fatalf("ListRelated() = %#v, want current and archive", files)
+	if len(apps) != 0 {
+		t.Fatalf("ListApps() = %#v, want no apps", apps)
 	}
-	if files[0].Path != current {
-		t.Errorf("first path = %q, want %q", files[0].Path, current)
+}
+
+// Only <app>/logs is scanned. A .log file elsewhere in a config directory
+// belongs to whatever wrote it (a browser cache, a database journal) and must
+// not be offered for deletion.
+func TestListAppsIgnoresFilesOutsideTheLogsDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeNestedTestFile(t, filepath.Join(root, "editor", "data", "Session Storage", "000003.log"), "leveldb")
+	writeNestedTestFile(t, filepath.Join(root, "editor", "stray.log"), "stray")
+
+	apps, err := ListApps(root)
+	if err != nil {
+		t.Fatalf("ListApps() error = %v", err)
 	}
-	if _, err := os.Stat(archive); err != nil {
-		t.Fatalf("archive fixture missing: %v", err)
+	if len(apps) != 0 {
+		t.Fatalf("ListApps() = %#v, want no apps", apps)
+	}
+}
+
+func TestListAppsReturnsNoAppsForMissingRoot(t *testing.T) {
+	t.Parallel()
+
+	apps, err := ListApps(filepath.Join(t.TempDir(), "missing"))
+	if err != nil {
+		t.Fatalf("ListApps() error = %v", err)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("ListApps() = %#v, want no apps", apps)
+	}
+}
+
+func writeNestedTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	writeTestFile(t, path, content)
+}
+
+func TestArchiveDateClassifiesCurrentAndRotatedNames(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"daemon.log":                "",
+		"daemon.err":                "",
+		"worker.out.log":            "",
+		"daemon.not-a-date.log":     "",
+		"worker":                    "",
+		"daemon.2026-07-29.log":     "2026-07-29",
+		"daemon.2026-07-29.err":     "2026-07-29",
+		"worker.out.2026-07-29.log": "2026-07-29",
+		"worker.2026-07-29":         "2026-07-29",
+	}
+	for name, want := range cases {
+		if got := archiveDate(name); got != want {
+			t.Errorf("archiveDate(%q) = %q, want %q", name, got, want)
+		}
 	}
 }

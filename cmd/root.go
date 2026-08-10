@@ -39,6 +39,7 @@ func init() {
 		ResurrectCmd,
 		StartupCmd,
 		DaemonCmd,
+		GpuCmd,
 		TaskCmd,
 		MonitorCmd,
 		TaskmanagerCmd,

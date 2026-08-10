@@ -53,6 +53,11 @@ func (c *Collector) Observe(managed []process.ProcessInfo) Observation {
 	}
 	snapshot.Processes = countProcesses(procs)
 
+	// One read of the GPU export serves both the whole-machine figure
+	// (already on system) and the per-process one, so a task's GPU share
+	// and the machine's always describe the same instant.
+	mergeProcessGPU(procs, system.GPU)
+
 	ports, err := c.ListeningPorts()
 	if err != nil {
 		snapshot.Errors = append(snapshot.Errors, err.Error())
@@ -88,6 +93,10 @@ func BuildTasks(managed []process.ProcessInfo, procs []Proc, ports map[int][]Por
 		// task's root process; the process table only fills it in when the
 		// daemon has not sampled yet (a just-launched application).
 		if self, found := findProc(procs, info.PID); found {
+			// GPU has no daemon-side reading to prefer: the daemon
+			// samples CPU and memory per managed process, but GPU time
+			// only ever arrives through the process table.
+			task.GPUPercent = self.GPUPercent
 			if task.CPUPercent == 0 {
 				task.CPUPercent = self.CPUPercent
 			}
@@ -105,9 +114,11 @@ func BuildTasks(managed []process.ProcessInfo, procs []Proc, ports map[int][]Por
 		task.Children = append([]Proc{}, descendants(byParent, info.PID)...)
 		task.TreeCPUPercent = task.CPUPercent
 		task.TreeMemoryBytes = task.MemoryBytes
+		task.TreeGPUPercent = task.GPUPercent
 		for _, child := range task.Children {
 			task.TreeCPUPercent += child.CPUPercent
 			task.TreeMemoryBytes += child.MemoryBytes
+			task.TreeGPUPercent += child.GPUPercent
 		}
 		task.Ports = append([]Port{}, collectPorts(ports, info.PID, task.Children)...)
 		tasks = append(tasks, task)

@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -17,18 +18,39 @@ const (
 	gaugeWarnPercent     = 70.0
 	gaugeCriticalPercent = 88.0
 	gaugeWidth           = 18
-	hostLabelWidth       = 6
+	// baseHostRows is the panel height before the optional GPU row.
+	baseHostRows   = 4
+	hostLabelWidth = 6
 )
 
-// RenderHostPanel draws the fixed whole-machine block: CPU, memory,
-// network and disk, one line each. Pure function of a sysmon.System.
+// HostPanelRows is the height RenderHostPanel occupies for a given
+// sample. The GPU row exists only while an agent is publishing, so the
+// layout has to ask rather than assume: a body sized against a stale
+// constant would push the footer off the bottom of the terminal the
+// moment the agent came up.
+func HostPanelRows(system sysmon.System) int {
+	if system.GPU != nil {
+		return baseHostRows + 1
+	}
+	return baseHostRows
+}
+
+// RenderHostPanel draws the whole-machine block: CPU, memory, network
+// and disk, one line each, plus GPU when a privileged agent is
+// publishing a reading. Pure function of a sysmon.System.
 func RenderHostPanel(system sysmon.System, width int) string {
 	lines := []string{
 		hostLine("cpu", gauge(system.CPU.UsedPercent, gaugeWidth), cpuSummary(system)),
 		hostLine("mem", gauge(system.Memory.UsedPercent, gaugeWidth), memorySummary(system.Memory)),
+	}
+	if system.GPU != nil {
+		lines = append(lines,
+			hostLine("gpu", gauge(system.GPU.UtilizationPercent, gaugeWidth), gpuSummary(*system.GPU)))
+	}
+	lines = append(lines,
 		hostLine("net", "", networkSummary(system.Network)),
 		hostLine("disk", "", diskSummary(system)),
-	}
+	)
 
 	// Trimming is left to lipgloss's MaxWidth, which measures printable
 	// columns. Crop/CropRight count raw bytes, so handing them a styled
@@ -108,6 +130,27 @@ func memorySummary(memory sysmon.Memory) string {
 		)
 	}
 	return value + "  " + mutedText(detail)
+}
+
+// gpuSummary shows how old the reading is alongside it. Every other row
+// of this panel was measured by this process a moment ago; this one came
+// from a separate agent through a file, and a number with no age beside
+// it would look just as live after the agent had died.
+func gpuSummary(gpu sysmon.GPU) string {
+	value := lipgloss.NewStyle().Bold(true).Foreground(theme.Text).
+		Render(fmt.Sprintf("%5.1f%%", gpu.UtilizationPercent))
+	parts := []string{}
+	if gpu.FrequencyMHz > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f MHz", gpu.FrequencyMHz))
+	}
+	if gpu.PowerMilliwatts > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f mW", gpu.PowerMilliwatts))
+	}
+	parts = append(parts,
+		fmt.Sprintf("via %s", gpu.Source),
+		fmt.Sprintf("%s old", time.Since(gpu.SampledAt).Round(time.Second)),
+	)
+	return value + "  " + mutedText(strings.Join(parts, "  ·  "))
 }
 
 func networkSummary(network sysmon.Network) string {

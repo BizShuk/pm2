@@ -10,8 +10,12 @@ import (
 	"time"
 )
 
-// FileInfo describes one current or dated archive file belonging to a managed
-// application's configured stdout/stderr paths.
+// LogsDirName is the per-application log directory every application owns
+// under the shared config root (~/.config/<app>/logs).
+const LogsDirName = "logs"
+
+// FileInfo describes one log file: either a current file or one of its
+// <stem>.<YYYY-MM-DD><ext> daily archives.
 type FileInfo struct {
 	Path    string
 	Name    string
@@ -20,73 +24,91 @@ type FileInfo struct {
 	Current bool
 }
 
-// ListRelated lists existing currentPaths and their exact
-// <stem>.<YYYY-MM-DD><ext> archives. Missing directories and missing current
-// files are normal empty states; unrelated files in the same directories are
-// never returned.
-func ListRelated(currentPaths ...string) ([]FileInfo, error) {
-	current := make(map[string]struct{})
-	patternsByDir := make(map[string][]filePattern)
+// AppLogs groups every log file found in one application's log directory.
+type AppLogs struct {
+	App   string
+	Dir   string
+	Files []FileInfo
+}
 
-	for _, path := range currentPaths {
-		if path == "" {
+// TotalSize sums every listed file in the application's log directory.
+func (a AppLogs) TotalSize() int64 {
+	var total int64
+	for _, file := range a.Files {
+		total += file.Size
+	}
+	return total
+}
+
+// ListApps scans root for <app>/logs directories and returns one AppLogs per
+// application that owns at least one log file, ordered by application name.
+//
+// The scan is deliberately keyed on the log directory rather than on the
+// daemon's process list: an application's logs outlive the task that wrote
+// them, and a task that was deleted — or never registered with this daemon —
+// still has logs worth reading. A missing root, a missing log directory, and
+// an unreadable one are all ordinary empty states; one root-owned config
+// directory must not blank the whole listing.
+func ListApps(root string) ([]AppLogs, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read config root %q: %w", root, err)
+	}
+
+	apps := make([]AppLogs, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		absolute, err := filepath.Abs(path)
+		dir := filepath.Join(root, entry.Name(), LogsDirName)
+		files := listDir(dir)
+		if len(files) == 0 {
+			continue
+		}
+		apps = append(apps, AppLogs{App: entry.Name(), Dir: dir, Files: files})
+	}
+	sort.Slice(apps, func(i, j int) bool { return apps[i].App < apps[j].App })
+	return apps, nil
+}
+
+// listDir returns every regular file in dir, current files first and archives
+// newest first. Unreadable directories and unstattable entries are skipped.
+func listDir(dir string) []FileInfo {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	type listed struct {
+		FileInfo
+		archiveDate string
+	}
+	ordered := make([]listed, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
 		if err != nil {
-			return nil, fmt.Errorf("resolve log path %q: %w", path, err)
-		}
-		absolute = filepath.Clean(absolute)
-		if _, exists := current[absolute]; exists {
 			continue
 		}
-		current[absolute] = struct{}{}
-		dir := filepath.Dir(absolute)
-		patternsByDir[dir] = append(patternsByDir[dir], newFilePattern(filepath.Base(absolute)))
+		name := entry.Name()
+		date := archiveDate(name)
+		ordered = append(ordered, listed{
+			FileInfo: FileInfo{
+				Path:    filepath.Join(dir, name),
+				Name:    name,
+				Size:    info.Size(),
+				ModTime: info.ModTime(),
+				Current: date == "",
+			},
+			archiveDate: date,
+		})
 	}
 
-	listed := make(map[string]listedFile)
-	for dir, patterns := range patternsByDir {
-		entries, err := os.ReadDir(dir)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read log directory %q: %w", dir, err)
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			archiveDate, related := matchFilePatterns(name, patterns)
-			path := filepath.Join(dir, name)
-			_, isCurrent := current[path]
-			if !related && !isCurrent {
-				continue
-			}
-			info, err := entry.Info()
-			if err != nil {
-				return nil, fmt.Errorf("stat log file %q: %w", path, err)
-			}
-			listed[path] = listedFile{
-				FileInfo: FileInfo{
-					Path:    path,
-					Name:    name,
-					Size:    info.Size(),
-					ModTime: info.ModTime(),
-					Current: isCurrent,
-				},
-				archiveDate: archiveDate,
-			}
-		}
-	}
-
-	ordered := make([]listedFile, 0, len(listed))
-	for _, file := range listed {
-		ordered = append(ordered, file)
-	}
 	sort.Slice(ordered, func(i, j int) bool {
 		left, right := ordered[i], ordered[j]
 		if left.Current != right.Current {
@@ -102,49 +124,29 @@ func ListRelated(currentPaths ...string) ([]FileInfo, error) {
 	for i, file := range ordered {
 		files[i] = file.FileInfo
 	}
-	return files, nil
+	return files
 }
 
-type filePattern struct {
-	current string
-	stem    string
-	ext     string
-}
-
-func newFilePattern(current string) filePattern {
-	ext := filepath.Ext(current)
-	return filePattern{
-		current: current,
-		stem:    strings.TrimSuffix(current, ext),
-		ext:     ext,
+// archiveDate returns the YYYY-MM-DD segment a rotated file carries before its
+// extension, or "" for a current file. Extensionless logs keep their date in
+// the extension slot (worker.2026-07-29), so both positions are checked.
+func archiveDate(name string) string {
+	if date := trailingDate(strings.TrimSuffix(name, filepath.Ext(name))); date != "" {
+		return date
 	}
+	return trailingDate(name)
 }
 
-func matchFilePatterns(name string, patterns []filePattern) (string, bool) {
-	for _, pattern := range patterns {
-		if name == pattern.current {
-			return "", true
-		}
-		prefix := pattern.stem + "."
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, pattern.ext) {
-			continue
-		}
-		dateEnd := len(name) - len(pattern.ext)
-		if dateEnd < len(prefix) {
-			continue
-		}
-		date := name[len(prefix):dateEnd]
-		if len(date) != len(dateLayout) {
-			continue
-		}
-		if _, err := time.Parse(dateLayout, date); err == nil {
-			return date, true
-		}
+func trailingDate(stem string) string {
+	if len(stem) <= len(dateLayout) {
+		return ""
 	}
-	return "", false
-}
-
-type listedFile struct {
-	FileInfo
-	archiveDate string
+	candidate := stem[len(stem)-len(dateLayout):]
+	if stem[len(stem)-len(dateLayout)-1] != '.' {
+		return ""
+	}
+	if _, err := time.Parse(dateLayout, candidate); err != nil {
+		return ""
+	}
+	return candidate
 }

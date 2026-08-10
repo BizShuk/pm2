@@ -260,20 +260,27 @@ paths retain their own basename and directory.
 
 ### `pm2 logs monitor` / `pm2 logs m`
 
-Open the interactive managed-log split view. The optional target selects the
-initial application row.
+Browse and delete every log file under `~/.config/<app>/logs`, whether or not
+a task for it is registered with the daemon. The listing comes from the
+filesystem, so logs belonging to stopped, deleted, or never-registered tasks
+are all included, and the browser works with the daemon down.
+
+The optional argument names an application directory; it starts selected and
+expanded.
 
 ```bash
 pm2 logs monitor
-pm2 logs m api
-pm2 logs m production:api
+pm2 logs m vidnote
 ```
 
 ```text
 Tree Explorer (left) │ Log Viewer (right)
 ```
 
-- Application rows begin with `[<id>]`; current log files use the `🔶` marker.
+- Application rows show the directory name, file count, and total size; an
+  application with no log files is omitted.
+- Current log files use the `🔶` marker; dated archives are listed after them,
+  newest first.
 - With Tree focus, `↑` / `↓` or `j` / `k` moves through application/file rows.
 - `→`: expand an application or load and focus its selected log file.
 - `Enter`: load the selected Tree file and focus the right-hand Viewer.
@@ -359,12 +366,21 @@ pm2 taskmanager # short alias: pm2 tm
                                       │   2001   18.0%     3.0mb  /bin/worker
                                       │ LISTENING PORTS (1)
                                       │ tcp   0.0.0.0:8080            pid 2001
- ↑↓ / jk navigate  │  a all processes  │  s sort: cpu  │  q quit
+ ↑↓ / jk navigate  │  a all processes  │  s sort: cpu  │  d stop task  │  q quit
 ```
 
 Keys: `↑↓` / `jk` navigate, `PgUp` / `PgDn` page, `g` / `G` jump to
 top / bottom, `a` toggle between pm2 tasks and every OS process, `s` cycle
-the sort order (cpu → memory → name), `q` quit.
+the sort order (cpu → memory → name), `d` stop or kill the selected row,
+`q` quit.
+
+`d` asks before it acts — `y` confirms, `n` / `Esc` cancels — and what it
+does follows the list you are looking at. On a pm2 task it asks the daemon
+to stop it, so the auto-restart loop does not simply bring it back. On an
+OS process it sends one `SIGTERM` to that PID. It refuses a task that is
+not running, PID 1, and the taskmanager's own process, saying so on the
+footer; the outcome of a real one appears there too until the list catches
+up.
 
 On macOS, memory "used" follows the platform's own definition — everything
 that is not free or speculative — so a healthy Mac reads near 99%. The
@@ -433,6 +449,56 @@ Restore the last saved process list from `~/.pm2/dump.json`.
 pm2 resurrect
 pm2 r
 ```
+
+---
+
+### `pm2 gpu` (macOS)
+
+Adds a GPU row to `pm2 taskmanager`, a per-task `gpu` line in its detail
+pane, and a `gpu` object plus per-task `gpu_percent` to
+`pm2 taskmanager emit`. Off by default: macOS exposes GPU utilisation
+only through `powermetrics`, which requires root, so a small privileged
+agent samples the GPU and publishes each reading to a world-readable
+file. The daemon, the dashboard and the emitter only ever read that file
+— nothing else in pm2 needs root, and managed tasks keep running as you.
+
+```bash
+sudo pm2 gpu install   # register the agent as a LaunchDaemon, start it
+pm2 gpu status         # what pm2 is currently seeing (no privileges needed)
+```
+
+`pm2 gpu status` reports one of four states:
+
+| State | Meaning | Fix |
+| --- | --- | --- |
+| `publishing` | live reading, with its age | — |
+| `no agent` | nothing has published | `sudo pm2 gpu install` |
+| `stale` | agent stopped or wedged | `sudo launchctl kickstart -k system/com.shuk.pm2.gpu` |
+| `unreadable` | export file corrupt | reinstall |
+
+Per-process GPU time comes from the same sample (`--show-process-gpu`),
+so a task's share and the machine's total always describe one instant.
+The man page limits per-process attribution to "certain hardware";
+`pm2 gpu status` reports `unsupported on this hardware` where it is
+unavailable rather than showing zeros.
+
+The agent samples every 30s by default. That is deliberately slower than
+the dashboard's own refresh: attributing GPU time means walking the
+whole process table, and this runs as root forever. Override with
+`sudo pm2 gpu install --interval 10s`.
+
+Readings older than three sampling intervals are discarded rather than
+shown, so a dead agent leaves the GPU row empty instead of frozen.
+
+Remove it again:
+
+```bash
+sudo launchctl bootout system/com.shuk.pm2.gpu
+sudo rm /Library/LaunchDaemons/com.shuk.pm2.gpu.plist
+```
+
+`pm2 gpu agent` is the sampling loop itself; the LaunchDaemon runs it, and
+you would only invoke it by hand (under `sudo`) to see its output.
 
 ---
 

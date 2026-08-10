@@ -3,6 +3,7 @@ package views
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bizshuk/pm2/sysmon"
 )
@@ -38,8 +39,8 @@ func plain(text string) string {
 func TestRenderHostPanelHasOneLinePerResource(t *testing.T) {
 	lines := strings.Split(plain(RenderHostPanel(systemFixture(), 120)), "\n")
 
-	if len(lines) != dashboardHostRows {
-		t.Fatalf("got %d lines, want %d — the layout reserves a fixed panel height", len(lines), dashboardHostRows)
+	if len(lines) != baseHostRows {
+		t.Fatalf("got %d lines, want %d — the layout reserves a fixed panel height", len(lines), baseHostRows)
 	}
 	for index, want := range []string{"cpu", "mem", "net", "disk"} {
 		if !strings.Contains(lines[index], want) {
@@ -246,5 +247,43 @@ func TestFormatRate(t *testing.T) {
 	}
 	if got := formatRate(-5); got != "0b/s" {
 		t.Errorf("formatRate(-5) = %q, want 0b/s", got)
+	}
+}
+
+// The GPU row appears only while an agent publishes readings, so the
+// panel's height is a question and not a constant. A body sized against
+// a stale constant pushes the footer off the bottom of the terminal the
+// moment the agent comes up.
+func TestRenderHostPanelAddsGPURowOnlyWhenPublished(t *testing.T) {
+	system := systemFixture()
+	if got := HostPanelRows(system); got != baseHostRows {
+		t.Fatalf("HostPanelRows = %d, want %d without a reading", got, baseHostRows)
+	}
+
+	system.GPU = &sysmon.GPU{
+		Source:             "powermetrics",
+		UtilizationPercent: 61.5,
+		FrequencyMHz:       1398,
+		PowerMilliwatts:    8231,
+		SampledAt:          time.Now(),
+		IntervalSeconds:    2,
+	}
+	if got := HostPanelRows(system); got != baseHostRows+1 {
+		t.Fatalf("HostPanelRows = %d, want %d with a reading", got, baseHostRows+1)
+	}
+
+	lines := strings.Split(plain(RenderHostPanel(system, 160)), "\n")
+	if len(lines) != baseHostRows+1 {
+		t.Fatalf("got %d lines, want %d", len(lines), baseHostRows+1)
+	}
+	for index, want := range []string{"cpu", "mem", "gpu", "net", "disk"} {
+		if !strings.Contains(lines[index], want) {
+			t.Errorf("line %d = %q, want it to lead with %q", index, lines[index], want)
+		}
+	}
+	// The reading came from another process through a file, so its age
+	// has to be visible next to it.
+	if !strings.Contains(lines[2], "61.5%") || !strings.Contains(lines[2], "old") {
+		t.Errorf("gpu line = %q, want the utilisation and the reading's age", lines[2])
 	}
 }

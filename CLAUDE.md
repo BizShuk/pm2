@@ -58,6 +58,9 @@ Import direction (no cycles):
 - `sysmon` -> `process` only; it is imported by `cmd/taskmanager`, `tui`, and
   `tui/dashboard`, and never imports `daemon`, `cmd`, or `tui`
 - `cmd/daemon` -> `daemon` for the foreground server runtime
+- `cmd/gpu` -> `sysmon` and `sysmon/gpuagent`; `sysmon/gpuagent` -> `sysmon`
+  only. Nothing imports `gpuagent` back, so the elevated code path has
+  exactly one entry point
 - `cmd/wizard` -> `cmd/wizard/prompt` for Cobra-free planner prompt templates
 - `cmd/wizard` -> `config/wizard` for prompt, render, merge, and install logic
 
@@ -77,8 +80,8 @@ pm2/
 │   ├── execute.go            Execute(args) + version argument dispatch
 │   ├── root_test.go          root tree, alias, config, and version tests
 │   ├── runtime/              shared CLI runtime infrastructure
-│   │   ├── state.go          pm2Home initialization + PM2Home/SocketPath/
-│   │   │                     DaemonStopMarkerPath
+│   │   ├── state.go          lazy home resolution + PM2Home/SocketPath/
+│   │   │                     ConfigRoot/DaemonStopMarkerPath
 │   │   ├── client.go         CLIClient socket RPC wrapper
 │   │   └── client_autostart.go
 │   │                         silent daemon auto-spawn + readiness wait
@@ -124,6 +127,13 @@ pm2/
 │   ├── logs/                 logs subcommands
 │   │   └── monitor.go        MonitorCmd — interactive log-browser
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
+│   ├── gpu.go                GpuCmd parent (`pm2 gpu`)
+│   ├── gpu/                  gpu subcommands — the privilege boundary
+│   │   ├── agent.go          AgentCmd — root powermetrics loop (foreground)
+│   │   ├── status.go         StatusCmd + formatStatus — unprivileged reader
+│   │   ├── install.go        InstallCmd — LaunchDaemon install side
+│   │   └── install_template.go
+│   │                         launchDaemonPlist — the supervision contract
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
 │   ├── startup.go            StartupCmd — install side: paths + launchctl/
@@ -205,7 +215,8 @@ pm2/
 │   ├── follow.go             channel follower for append/recreate/truncate paths
 │   ├── rotation.go           leading daily-block split + archive naming
 │   ├── writer.go             per-line timestamp + midnight/reopen handling
-│   └── files.go              current/archive discovery for configured paths
+│   └── files.go              AppLogs + ListApps — ~/.config/<app>/logs
+│                             discovery, current vs dated-archive classification
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   ├── list.go               ListProcesses — CmdList + decode; the one path
@@ -235,7 +246,15 @@ pm2/
 │   ├── darwin.go             iostat / vm_stat / sysctl / netstat sampler
 │   ├── linux.go              /proc/{stat,meminfo,loadavg,net/dev,diskstats}
 │   ├── fallback.go           ErrUnsupportedPlatform sampler
-│   └── emit.go               Emitter + TaskSource + SnapshotEncoder
+│   ├── emit.go               Emitter + TaskSource + SnapshotEncoder
+│   ├── gpu.go                GPU wire type + DefaultGPUExportPath + ReadGPU
+│   │                         (staleness); the read half of the agent split
+│   └── gpuagent/             sysmon/gpuagent sub-package — the privileged
+│       │                     writer; imports sysmon, nothing imports it
+│       ├── doc.go            package boundary and the elevation argument
+│       ├── agent.go          Agent.Run — one long-lived powermetrics child
+│       ├── powermetrics.go   sample-block parser (darwin + intel shapes)
+│       └── publish.go        atomic, world-readable export write
 ├── cron/
 │   └── scheduler.go          Scheduler wraps robfig/cron; Register(name, expr, fn) / Remove(name)
 ├── plans/
@@ -252,11 +271,13 @@ pm2/
     ├── dashboard/            `pm2 dashboard` controller domain
     │   ├── model.go          Scope/SortField state, sort, selection, View ctx
     │   ├── commands.go       one-pass collect: daemon list + sysmon.Observe
-    │   └── keys.go           navigation, scope toggle, sort cycle
+    │   ├── kill.go           `d` target resolution, confirmation prompt,
+    │   │                     daemon stop / SIGTERM commands
+    │   └── keys.go           navigation, scope toggle, sort cycle, `d` confirm
     ├── logbrowser/           logs monitor controller domain
     │   ├── model.go          Tree/Viewer/delete-confirm async state
     │   ├── tree.go           application → log-file visible-row projection
-    │   ├── commands.go       daemon list + filesystem read/delete commands
+    │   ├── commands.go       config-root scan + filesystem read/delete
     │   └── keys.go           Left/Right, paging, and delete confirmation
     ├── views/                Stateless renderers; pure functions of ViewContext
     │   ├── context.go        ViewContext struct (Width/Height/Procs/Logs/...)
@@ -389,6 +410,9 @@ Daemon startup and task execution use separate namespaces:
 | `pm2 monitor`          | `pm2 m`     |
 | `pm2 list`             | `pm2 l`     |
 | `pm2 taskmanager`      | `pm2 tm`    |
+
+`pm2 gpu` is a canonical root command with no short alias: the alias
+table above is the product's, not a pattern to extend by default.
 
 The namespace aliases retain their child command trees, so `pm2 t restart`
 resolves to `pm2 task restart` and `pm2 d status` resolves to
@@ -537,6 +561,32 @@ Boundaries:
   `rateTracker`. The first observation of a key returns 0; a counter that
   moves backwards resets its baseline instead of reporting a spike.
 
+The one write path: `d` (`tui/dashboard/kill.go`). Everything else in
+taskmanager observes; this key acts, so it is deliberately fenced:
+
+- **The verb follows the scope.** In task scope `d` sends `CmdStop` for the
+  selected task. Signalling a managed task's PID directly would hand it
+  straight to the daemon's auto-restart loop — it would die and come back —
+  so the owner is asked instead, exactly as `pm2 task stop` does. In system
+  scope the process has no owner here, so it gets one `SIGTERM` through
+  `os.Process.Signal`. Escalation to `SIGKILL` stays with `executor.Stop`,
+  which owns the processes it can escalate against.
+- **Always a confirmation.** `d` arms a prompt naming the verb and the
+  subject; only `y` acts, `n`/`Esc` cancels, and every other key is
+  swallowed while it is armed — a cursor that moved under the prompt would
+  leave it describing a row the user has already left.
+- **A refusal is a message, not silence.** A task at PID 0 (stopped, or a
+  cron task idle between fires), PID 1, and the taskmanager's own PID all
+  refuse with a reason on the footer.
+- **The result never triggers a refresh.** `Update` re-arms exactly one
+  collection chain, from `observationMsg`; collecting on `killResultMsg`
+  too would leave two sampling loops running forever. The next ordinary
+  tick (≤1 s) shows the outcome, and the message itself expires after
+  `actionTTL` so it cannot be read as a description of the current frame.
+- The RPC goes through `model.SendRequest`, not the `cmd/runtime` client,
+  for the same reason the collection pass does: `tui/` never depends on
+  `cmd/`, and a dashboard must not spawn the daemon it is observing.
+
 Per-platform sources:
 
 | Reading | darwin | linux |
@@ -579,6 +629,105 @@ JSON encoding lives in sysmon (serialisation); the `text` encoder lives in
 the daemon — both use `model.ListProcesses`, because an observer asking
 "what is running" must not change the answer.
 
+### GPU metrics: a privileged agent behind a file
+
+macOS reports GPU residency and power through `powermetrics` alone, and
+that tool refuses to run as anyone but root. The obvious fix — run the
+pm2 daemon as root — is the wrong one, and expensively so:
+
+- `executor.BuildCommand` sets only `Setpgid`, never a `Credential`, so
+  every managed task would inherit root along with the daemon.
+- `~/.pm2/pm2.sock`, `dump.json` and every application log would become
+  root-owned, and an ordinary `pm2 list` could not open the socket.
+- `pm2 startup` installs a LaunchAgent in the user domain, so the whole
+  supervision contract would have to be rewritten too.
+
+The split inverts it. One small root process writes; everybody else only
+reads:
+
+```
+pm2 gpu agent (root, LaunchDaemon)      →  /var/run/pm2-gpu.json  →  Collector.Sample
+  powermetrics --samplers gpu_power,tasks    0644, atomic rename      pm2 gpu status
+                --show-process-gpu
+```
+
+`/var/run` is root-owned, world-readable, and cleared at boot — the
+lifetime a live metric wants. `sysmon.DefaultGPUExportPath` names it and
+is the whole interface between the two halves; neither package calls the
+other.
+
+Boundaries that hold it together:
+
+- **Absence is normal.** `Collector.Sample` discards every error
+  `ReadGPU` returns. A machine with no agent is not a machine with a
+  broken collector, and an entry in `Snapshot.Errors` on every host
+  would train operators to ignore the field. `System.GPU` is a pointer
+  so "no data" and "an idle GPU" stay distinguishable.
+- **Stale readings are rejected, not shown.** A reading carries its own
+  `sampled_at` and `interval_seconds`; `ReadGPU` drops anything older
+  than three intervals (floor 10 s) with `ErrGPUStale`. The agent also
+  deletes its export on exit. Without both, a dead agent leaves a frozen
+  number that renders exactly like a live one — which is why the
+  dashboard row and `pm2 gpu status` print the reading's age beside it.
+- **Publishing is atomic.** Temp file in the same directory, explicit
+  0644, then rename. `os.CreateTemp` opens at 0600, and the entire point
+  of the file is that an unprivileged reader can open it.
+- **One long-lived powermetrics child**, not one per sample: the tool
+  costs a noticeable fraction of a second to start and its first sample
+  is skewed by everything since boot — the same reason the darwin
+  sampler reads `iostat`'s second sample rather than `top`'s first. A
+  block is only known to be complete when the next `*** Sampled system
+  activity` header arrives, so a published reading trails by up to one
+  interval; the staleness floor is set well above that.
+- **Per-process attribution rides the same file.** One powermetrics
+  invocation carries both samplers, so the machine's figure and each
+  process's share describe the same instant; two invocations would each
+  pay the sampling cost and disagree. Only processes with non-zero GPU
+  time are published — the rest of a process table is zeros that would
+  turn a few hundred bytes into a few hundred kilobytes per interval.
+  `PerProcessSupported` exists because the man page limits
+  `--show-process-gpu` to "certain hardware", and an empty list would
+  otherwise read as an idle machine on one that simply cannot tell.
+- **The task table is parsed from its own header**, never from fixed
+  offsets: each `--show-process-*` flag adds a column, so the layout is
+  a runtime fact. Values are matched to headings by character overlap
+  because names are left-aligned and numbers right-aligned, and the
+  layout outlives a sample block — powermetrics reprints the header only
+  when the shape changes, so forgetting it at each boundary would
+  attribute GPU time to the first sample and nothing after. A row counts
+  only if the cell under `ID` is a positive PID, which is what makes it
+  safe to offer every unrecognised line to the table and what excludes
+  the `ALL_TASKS` aggregate.
+- **The default interval is 30 s, not the dashboard's 2 s.** The `tasks`
+  sampler walks the whole process table, making this the most expensive
+  thing pm2 runs, and it runs as root forever. `pm2 gpu install` bakes
+  `--interval` into the job only when the operator names one, so the
+  period tracks the binary rather than a plist written months ago.
+- **`KeepAlive` is unconditional** in the GPU LaunchDaemon, unlike the
+  daemon's `SuccessfulExit = false`. The daemon has `pm2 daemon stop`,
+  whose clean exit an unconditional restart would undo. The agent has no
+  such verb — `launchctl bootout` removes the job rather than letting it
+  exit — so any exit means powermetrics died.
+
+`pm2 gpu` has three verbs sitting across the privilege boundary:
+`agent` and `install` are root work, `status` is the same unprivileged
+read the dashboard performs each refresh and is therefore the command
+that answers "is the reading reaching pm2, and if not, whose fault is
+it". It reports `no agent` / `stale` / `unreadable` as distinct states
+because they have distinct fixes.
+
+Consumers see it as `System.GPU` for the machine and `Proc.GPUPercent`
+/ `Task.GPUPercent` / `Task.TreeGPUPercent` for processes. The join is
+`mergeProcessGPU`, called once inside `Observe` on the process table the
+pass already holds — the same single-collection-pass rule the rest of
+the dashboard follows. Renderers omit the GPU row entirely at zero
+rather than printing `0.0%`, so a machine with no agent does not give
+every task a permanent, authoritative-looking zero.
+
+Linux needs none of this: `nvidia-smi` answers to any user. No Linux
+sampler is written yet — the file protocol is platform-neutral, so it
+would be a second publisher, not a second design.
+
 ### Log streaming and interactive browsing
 
 Root `pm2 logs [target]` is non-interactive. It loads one daemon process
@@ -592,19 +741,54 @@ Go services. It returns receive-only `Entry` and error channels, begins existing
 paths at EOF, buffers partial lines, and resets to byte zero when a path is new,
 replaced, or truncated. Cancelling `ctx` closes both channels.
 
-Interactive file management belongs to `pm2 logs monitor [target]`; its child
-alias makes `pm2 logs m [target]` equivalent. Root `pm2 monitor`, `pm2 m`, and
-`pm2 dashboard` remain the process dashboard. The separate `tui/logbrowser`
-state machine projects applications and discovered files into a persistent
-40/60 left Tree/right Viewer layout. `screenTree` and `screenViewer` represent
-keyboard focus, not mutually exclusive screens; `viewerPath`, loaded lines,
-and the Viewer cursor persist when Left returns focus to the Tree. Right
-expands/opens, Enter on a file loads and focuses the Viewer, and
-PageUp/PageDown moves by its visible body height. Application rows begin with
-`[<id>]`, while a current file uses `🔶` instead of a `current` label. `d` is
-valid only on a Tree file row: it enters `screenConfirmDelete`, and only `y`
-dispatches `os.Remove`; `n` / `Esc` returns without mutation. Views remain
-pure and never read files.
+Interactive file management belongs to `pm2 logs monitor [app]`; its child
+alias makes `pm2 logs m [app]` equivalent. Root `pm2 monitor`, `pm2 m`, and
+`pm2 dashboard` remain the process dashboard.
+
+**The browser's subject is the filesystem, not the daemon.** It lists every
+`~/.config/<app>/logs` directory through `logfile.ListApps(root)` and never
+opens the socket. Root `pm2 logs` still streams from the daemon's snapshot,
+because streaming needs a live process to stream from; browsing does not, and
+the two answer different questions:
+
+| | root `pm2 logs` | `pm2 logs monitor` |
+| --- | --- | --- |
+| Subject | what a running task is writing now | every log file on disk |
+| Source | `CmdList` snapshot → `logfile.Follow` | `logfile.ListApps(~/.config)` |
+| Needs the daemon | yes | no |
+| Covers a deleted task's logs | no | yes |
+
+Three boundaries:
+
+- **Logs outlive their task.** Keying the listing on the process list hid
+  exactly the files worth managing — an application whose task was deleted,
+  renamed, or registered against a different ecosystem file kept a log
+  directory nobody could reach, and the browser existed to reclaim disk.
+- **Only `<app>/logs` is scanned**, never the config directory at large. A
+  `.log` file elsewhere under `~/.config/<app>/` belongs to whatever wrote it
+  (a LevelDB journal, an editor cache) and must not be offered for deletion.
+  An application with no log files produces no row rather than one that
+  expands into nothing.
+- **A missing or unreadable directory is an empty state, not an error.**
+  `ListApps` skips per-directory read failures so one root-owned config
+  directory cannot blank the whole listing; only an unreadable root fails.
+
+The `tui/logbrowser` state machine projects applications and their files into
+a persistent 40/60 left Tree/right Viewer layout. `screenTree` and
+`screenViewer` represent keyboard focus, not mutually exclusive screens;
+`viewerPath`, loaded lines, and the Viewer cursor persist when Left returns
+focus to the Tree. Right expands/opens, Enter on a file loads and focuses the
+Viewer, and PageUp/PageDown moves by its visible body height. Application rows
+show the directory name, file count, and total size; a current file uses `🔶`
+where an archive shows blank. Both name columns are cropped to a fixed width —
+the application from the right, a file from the left, where its stream and
+rotation date live — so the size column stays inside the tree pane.
+
+`expanded` is keyed by application name, not row index: `d` deletes through
+`os.Remove` and then rescans, and a row index would drift the moment a file
+disappears. `d` is valid only on a Tree file row: it enters
+`screenConfirmDelete`, and only `y` dispatches the removal; `n` / `Esc`
+returns without mutation. Views remain pure and never read files.
 
 ### Daemon singleton and service registration
 
@@ -803,9 +987,13 @@ executor fallback when a request has no configured log directory.
 - `logfile.Follow` is the sole public channel API for continuous managed-log
   consumption. Keep `logfile.Source` independent of daemon/process types;
   consumers receive typed `Entry` values and a separate error channel.
-- `tui/logbrowser` may delete only a path returned by `logfile.ListRelated` for
-  the selected process. Keep deletion behind the explicit `y/N` confirmation;
-  views remain pure and never touch the filesystem.
+- `tui/logbrowser` may delete only a path returned by `logfile.ListApps`, which
+  by construction lies inside some `~/.config/<app>/logs`. Keep deletion behind
+  the explicit `y/N` confirmation; views remain pure and never touch the
+  filesystem.
+- `logfile` owns log-file discovery; `tui/logbrowser` and `cmd/logs` never
+  walk directories themselves. Widening what counts as a log file is a change
+  to `ListApps`, not to a caller.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
 - **Executor lock direction (Phase 4 invariant)**: `daemon.ProcessManager` may
   call `executor.Executor` while holding the registry lock, because the
@@ -848,6 +1036,19 @@ executor fallback when a request has no configured log directory.
   CPU/memory reader inside `tui/` — that is what `tui/hostmetrics` was, and
   its macOS memory parser had drifted into reporting the wrong number by the
   time it was deleted.
+- No package `init()` may resolve `$HOME` or exit the process.
+  `cmd/runtime` resolves `~/.pm2` lazily through a `sync.OnceValue`
+  because launchd gives a system-domain LaunchDaemon no HOME at all: an
+  init that exited on a missing home dir killed `pm2 gpu agent` on every
+  spawn, before main ran, and reported it as a home-directory error in a
+  log nobody would connect to the GPU agent. A command that needs the
+  directory still fails loudly, at the point of use (regression test:
+  `TestPackageInitSurvivesMissingHome`).
+- Elevated code has exactly one home: `sysmon/gpuagent` plus the two
+  `cmd/gpu` verbs that drive it. Nothing else in pm2 requires root, and
+  no other package may shell out to a privileged tool or add a
+  `Credential` to a spawned command. If a new reading needs root, it
+  publishes through a file the same way the GPU one does.
 - Colour values come from `tui/theme/palette.go` only. The `clXxx`
   re-exports in `tui/theme.go` exist for backwards compatibility inside
   the tui package; new code outside the tui/views subtree should

@@ -12,14 +12,13 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.screen == screenConfirmDelete {
 		switch key {
 		case "y", "Y":
-			row, ok := m.selectedTreeRow()
 			path := m.selectedFilePath()
-			if !ok || row.kind != treeFile || path == "" {
+			if path == "" {
 				m.screen = screenTree
 				return m, nil
 			}
 			m.loading = true
-			return m, deleteFile(row.applicationIndex, path)
+			return m, deleteFile(path)
 		case "n", "N", "esc":
 			m.screen = screenTree
 			return m, nil
@@ -100,22 +99,17 @@ func (m Model) moveIn() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if row.kind == treeApplication {
-		m.ensureTreeMaps()
-		if m.expanded[row.applicationIndex] {
-			if len(m.filesByApplication[row.applicationIndex]) > 0 {
+	if row.kind == treeApp {
+		app := m.apps[row.appIndex]
+		m.ensureExpanded()
+		if m.expanded[app.App] {
+			if len(app.Files) > 0 {
 				m.treeCursor++
 			}
 			return m, nil
 		}
-		m.expanded[row.applicationIndex] = true
-		if _, loaded := m.filesByApplication[row.applicationIndex]; loaded {
-			return m, nil
-		}
-		m.loading = true
-		m.err = nil
-		m.notice = ""
-		return m, loadFiles(row.applicationIndex, m.applications[row.applicationIndex])
+		m.expanded[app.App] = true
+		return m, nil
 	}
 
 	return m.focusSelectedFile()
@@ -156,14 +150,14 @@ func (m Model) moveOut() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	app := m.apps[row.appIndex]
 	switch row.kind {
-	case treeApplication:
-		if m.expanded[row.applicationIndex] {
-			m.expanded[row.applicationIndex] = false
-		}
+	case treeApp:
+		m.ensureExpanded()
+		m.expanded[app.App] = false
 	case treeFile:
-		parentIndex := m.treeIndexForApplication(row.applicationIndex)
-		m.expanded[row.applicationIndex] = false
+		parentIndex := m.treeIndexForApp(row.appIndex)
+		m.expanded[app.App] = false
 		m.treeCursor = parentIndex
 	}
 	return m, nil

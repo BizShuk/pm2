@@ -128,3 +128,57 @@ func TestPortsForCombinesRootAndChildren(t *testing.T) {
 		t.Errorf("order = %d,%d, want ascending port order", got[0].Port, got[1].Port)
 	}
 }
+
+// A managed shell script that execs the real worker owns no GPU time
+// itself, exactly as it owns no CPU — so the number that matters is the
+// tree total, and per-process GPU has to reach it through the join.
+func TestBuildTasksSumsGPUAcrossTheProcessTree(t *testing.T) {
+	procs := []Proc{
+		{PID: 100, PPID: 1, GPUPercent: 1.5, Command: "/srv/run.sh"},
+		{PID: 200, PPID: 100, GPUPercent: 40, Command: "/bin/renderer"},
+		{PID: 300, PPID: 200, GPUPercent: 8.5, Command: "/bin/helper"},
+		{PID: 999, PPID: 1, GPUPercent: 77, Command: "/unrelated"},
+	}
+	managed := []process.ProcessInfo{{
+		AppConfig: process.AppConfig{Name: "api"},
+		ID:        1,
+		PID:       100,
+	}}
+
+	tasks := BuildTasks(managed, procs, nil)
+	if len(tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1", len(tasks))
+	}
+	if tasks[0].GPUPercent != 1.5 {
+		t.Errorf("GPUPercent = %v, want the root process's own 1.5", tasks[0].GPUPercent)
+	}
+	if tasks[0].TreeGPUPercent != 50 {
+		t.Errorf("TreeGPUPercent = %v, want 50 (1.5 + 40 + 8.5, excluding the unrelated process)", tasks[0].TreeGPUPercent)
+	}
+}
+
+func TestMergeProcessGPUMapsReadingsOntoTheProcessTable(t *testing.T) {
+	procs := []Proc{{PID: 100}, {PID: 200}}
+	mergeProcessGPU(procs, &GPU{Processes: []ProcGPU{
+		{PID: 200, MillisecondsPerSecond: 456.7},
+	}})
+
+	if procs[0].GPUPercent != 0 {
+		t.Errorf("unlisted process got %v, want 0", procs[0].GPUPercent)
+	}
+	// 1000 ms/s is one whole GPU-second per second, so the reported unit
+	// scales to the same 0-100 range CPUPercent uses.
+	if got := procs[1].GPUPercent; got < 45.66 || got > 45.68 {
+		t.Errorf("GPUPercent = %v, want 456.7 ms/s scaled to 45.67", got)
+	}
+}
+
+// A machine with no agent must not have every process silently rewritten.
+func TestMergeProcessGPUIsANoOpWithoutAReading(t *testing.T) {
+	procs := []Proc{{PID: 100, GPUPercent: 12}}
+	mergeProcessGPU(procs, nil)
+
+	if procs[0].GPUPercent != 12 {
+		t.Errorf("GPUPercent = %v, want the table left untouched", procs[0].GPUPercent)
+	}
+}

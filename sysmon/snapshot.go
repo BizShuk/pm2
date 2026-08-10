@@ -11,6 +11,11 @@ type System struct {
 	Network Network `json:"network"`
 	DiskIO  DiskIO  `json:"disk_io"`
 	Disks   []Disk  `json:"disks"`
+	// GPU is nil on any machine where no privileged agent is publishing
+	// a reading, which is the default state. A pointer rather than a
+	// zero-valued struct because "no GPU data" and "an idle GPU" are
+	// different facts and a renderer must be able to tell them apart.
+	GPU *GPU `json:"gpu,omitempty"`
 }
 
 // CPU is whole-machine processor utilisation over the sampling window.
@@ -90,6 +95,10 @@ type Proc struct {
 	MemoryBytes uint64  `json:"memory_bytes"`
 	State       string  `json:"state"`
 	Command     string  `json:"command"`
+	// GPUPercent is filled only where a GPU agent publishes per-process
+	// readings; it is zero everywhere else, including on hardware that
+	// cannot attribute GPU time at all.
+	GPUPercent float64 `json:"gpu_percent"`
 }
 
 // Port is one listening socket owned by a process.
@@ -114,8 +123,10 @@ type Task struct {
 	Restarts        int       `json:"restarts"`
 	CPUPercent      float64   `json:"cpu_percent"`
 	MemoryBytes     uint64    `json:"memory_bytes"`
+	GPUPercent      float64   `json:"gpu_percent"`
 	TreeCPUPercent  float64   `json:"tree_cpu_percent"`
 	TreeMemoryBytes uint64    `json:"tree_memory_bytes"`
+	TreeGPUPercent  float64   `json:"tree_gpu_percent"`
 	Command         string    `json:"command"`
 	Children        []Proc    `json:"children"`
 	Ports           []Port    `json:"ports"`

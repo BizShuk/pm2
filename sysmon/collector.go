@@ -31,11 +31,12 @@ type sampler interface {
 type Collector struct {
 	mu      sync.Mutex
 	sampler sampler
+	gpuPath string
 }
 
 // New returns a Collector bound to the sampler for the running OS.
 func New() *Collector {
-	return &Collector{sampler: newSampler(runtime.GOOS)}
+	return &Collector{sampler: newSampler(runtime.GOOS), gpuPath: DefaultGPUExportPath}
 }
 
 // newSampler is split out from New so tests can pin a platform without
@@ -55,10 +56,21 @@ func newSampler(goos string) sampler {
 // roughly one second because that is the shortest honest CPU window
 // `iostat` will report; call it from a goroutine, never from a render
 // path.
+// The GPU is the one reading a Collector does not measure. It arrives
+// through a file published by a privileged agent (see gpu.go), so its
+// absence is the normal case on a machine where nobody installed one
+// and must never surface as a collector failure — an unrelated error in
+// Snapshot.Errors on every machine would train operators to ignore the
+// field.
 func (c *Collector) Sample() (System, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sampler.sample()
+
+	system, err := c.sampler.sample()
+	if gpu, gpuErr := ReadGPU(c.gpuPath); gpuErr == nil {
+		system.GPU = gpu
+	}
+	return system, err
 }
 
 // Host returns the static machine identity plus uptime.

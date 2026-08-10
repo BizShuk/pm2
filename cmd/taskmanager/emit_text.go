@@ -5,6 +5,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/sysmon"
@@ -52,6 +53,10 @@ func encodeText(out io.Writer, snapshot sysmon.Snapshot) error {
 	return nil
 }
 
+// hostLine appends the GPU fields rather than interleaving them: they
+// are present only while a privileged agent publishes readings, and a
+// field that appears in the middle of the line on some machines would
+// break every column-counting reader on the others.
 func hostLine(snapshot sysmon.Snapshot) string {
 	system := snapshot.System
 	return fmt.Sprintf(
@@ -74,6 +79,21 @@ func hostLine(snapshot sysmon.Snapshot) string {
 		system.DiskIO.TransfersPerSecond,
 		snapshot.Processes.Total, snapshot.Processes.Running,
 		snapshot.Host.UptimeSeconds,
+	) + gpuFields(system.GPU)
+}
+
+// gpuFields renders the optional GPU tail, or nothing at all. An absent
+// agent leaves the fields out entirely rather than emitting zeros, which
+// a reader would happily average into "the GPU is idle".
+func gpuFields(gpu *sysmon.GPU) string {
+	if gpu == nil {
+		return ""
+	}
+	return fmt.Sprintf(" gpu=%.1f%% gpu_mhz=%.0f gpu_mw=%.0f gpu_age=%.0fs",
+		gpu.UtilizationPercent,
+		gpu.FrequencyMHz,
+		gpu.PowerMilliwatts,
+		time.Since(gpu.SampledAt).Seconds(),
 	)
 }
 
@@ -91,7 +111,17 @@ func taskLine(task sysmon.Task) string {
 		len(task.Children),
 		portList(task.Ports),
 		task.Restarts,
-	)
+	) + taskGPUFields(task)
+}
+
+// taskGPUFields appends per-process GPU only where it was measured. A
+// task on a machine with no agent, or on hardware that cannot attribute
+// GPU time, emits nothing rather than a zero a reader would average in.
+func taskGPUFields(task sysmon.Task) string {
+	if task.TreeGPUPercent <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" gpu=%.1f%% tree_gpu=%.1f%%", task.GPUPercent, task.TreeGPUPercent)
 }
 
 // portList renders a task's listeners as "tcp/8080,tcp/9229" so the whole

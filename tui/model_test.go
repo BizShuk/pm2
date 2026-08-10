@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/tui/views"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestBuildDetailScriptArgsCombined(t *testing.T) {

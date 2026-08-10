@@ -23,6 +23,11 @@ import (
 // cadence honest instead of queueing ticks behind a slow sampler.
 const refreshDelay = time.Second
 
+// actionTTL is how long the result of a kill/stop stays on the footer.
+// Long enough to read after a keystroke, short enough that it cannot be
+// mistaken for a description of the current frame.
+const actionTTL = 5 * time.Second
+
 // Scope selects what the list pane enumerates.
 type Scope string
 
@@ -57,6 +62,10 @@ type Model struct {
 	height   int
 	updated  time.Time
 	notice   string
+
+	confirm  *killTarget // pending `d` confirmation, nil when none
+	action   string      // result of the last kill/stop
+	actionAt time.Time
 }
 
 // New returns a dashboard bound to the daemon socket. The daemon only
@@ -87,9 +96,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.observation = message.observation
 		m.updated = time.Now()
 		m.notice = message.notice
+		m.expireAction()
 		m.applySort()
 		m.clampSelection()
 		return m, tea.Tick(refreshDelay, func(t time.Time) tea.Msg { return tickMsg(t) })
+
+	case killResultMsg:
+		m.action, m.actionAt = message.notice, time.Now()
+		return m, nil
 
 	case tickMsg:
 		return m, collect(m.socket, m.collector)
@@ -149,6 +163,14 @@ func (m Model) rowCount() int {
 	return len(m.observation.Snapshot.Tasks)
 }
 
+// expireAction drops a kill result once it is old enough that the list
+// beneath it has already caught up with what happened.
+func (m *Model) expireAction() {
+	if m.action != "" && time.Since(m.actionAt) > actionTTL {
+		m.action, m.actionAt = "", time.Time{}
+	}
+}
+
 func (m *Model) clampSelection() {
 	if m.selected >= m.rowCount() {
 		m.selected = max(0, m.rowCount()-1)
@@ -174,6 +196,10 @@ func (m Model) View() string {
 		SortBy:   string(m.sortBy),
 		Updated:  m.updated,
 		Notice:   m.notice,
+		Action:   m.action,
+	}
+	if m.confirm != nil {
+		ctx.Confirm = m.confirm.prompt()
 	}
 
 	if m.scope == ScopeSystem {
