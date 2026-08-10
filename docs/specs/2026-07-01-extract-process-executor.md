@@ -13,13 +13,13 @@
 我們對現有 `pm2` 專案的進程執行與生命週期管理邏輯進行了架構審查，診斷出以下關鍵的結構耦合與技術債問題：
 
 * `診斷一：進程生命週期執行邏輯與伺服器主體高度耦合 (Process Lifecycle Logic and Server Coupling)`
-  在 [server.go](../daemon/server.go) 中，`Server` 結構體內部直接實現了 `launchProcess`、`watchProcess` 與 `stopProcess` 等方法。這使得伺服器不僅負責 UNIX 套接字網路監聽 (UNIX socket server listener) 與請求協議分發，還需要直接處理與作業系統交互的進程衍生 (fork/exec), 信號發送 (signal transmission) 以及進程生命週期狀態監聽。這違反了 `單一職責原則 (Single Responsibility Principle, SRP)`，導致伺服器邏輯龐大且無法進行獨立的進程控制單元測試。
+  在 [server.go](../../daemon/server.go) 中，`Server` 結構體內部直接實現了 `launchProcess`、`watchProcess` 與 `stopProcess` 等方法。這使得伺服器不僅負責 UNIX 套接字網路監聽 (UNIX socket server listener) 與請求協議分發，還需要直接處理與作業系統交互的進程衍生 (fork/exec), 信號發送 (signal transmission) 以及進程生命週期狀態監聽。這違反了 `單一職責原則 (Single Responsibility Principle, SRP)`，導致伺服器邏輯龐大且無法進行獨立的進程控制單元測試。
 
 * `診斷二：檔案監聽器與伺服器機制緊密耦合且隱式相依 (File Watcher and Server Hard Coupling)`
-  在 [watcher.go](../daemon/watcher.go#L19) 中，`startFileWatcher` 作為 `Server` 的成員方法，且在背景協程中檔案發生變更時，直接呼叫了 `s.restartByName(pName)`。這種設計使得檔案變更監聽與伺服器的狀態鎖 `s.mu` 及重啟邏輯強烈依賴。若要在非網路伺服器環境下進行檔案監聽測試，會被迫實例化整個 `Server`。
+  在 [watcher.go](../../daemon/watcher.go#L19) 中，`startFileWatcher` 作為 `Server` 的成員方法，且在背景協程中檔案發生變更時，直接呼叫了 `s.restartByName(pName)`。這種設計使得檔案變更監聽與伺服器的狀態鎖 `s.mu` 及重啟邏輯強烈依賴。若要在非網路伺服器環境下進行檔案監聽測試，會被迫實例化整個 `Server`。
 
 * `診斷三：效能指標採集與伺服器內部對照表強綁定 (Metrics Collection Tied to Server Map)`
-  在 [metrics.go](../daemon/metrics.go#L80) 中的 `refreshMetrics` 方法直接讀寫了 `s.processes` 並操作 `s.mu` 讀寫鎖。雖然該方法已被重構為三階段以減少鎖佔用，但它依然需要遍歷伺服器內部的進程對照表並寫回屬性。這阻礙了我們在不依賴網路伺服器的情況下，單獨調用或測試效能指標採集器 (Metrics Collector)。
+  在 [metrics.go](../../daemon/metrics.go#L80) 中的 `refreshMetrics` 方法直接讀寫了 `s.processes` 並操作 `s.mu` 讀寫鎖。雖然該方法已被重構為三階段以減少鎖佔用，但它依然需要遍歷伺服器內部的進程對照表並寫回屬性。這阻礙了我們在不依賴網路伺服器的情況下，單獨調用或測試效能指標採集器 (Metrics Collector)。
 
 * `診斷四：沒有統一的執行器接口導致測試與擴充困難 (Lack of Executor Abstraction)`
   當前代碼直接呼叫作業系統的 `os/exec` 以及 `syscall`。如果未來需要支持容器化執行器 (e.g. Docker executor) 或進行模擬/單元測試 (mock testing)，由於沒有抽象出 `Executor` 接口，我們必須修改守護進程的核心邏輯，這增加了系統的脆弱性。

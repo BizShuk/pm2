@@ -8,7 +8,7 @@
 在抽離前，`daemon.Server` 同時承擔兩組本質迥異的職責：
 
 * `診斷一：Server 同時管網路傳輸與業務邏輯 (Transport and Business Mixed in Server)`
-  在 [server.go](../daemon/server.go) 中，`Server.Listen(socketPath)` 綁定 Unix socket、執行 accept 迴圈；`Server.handleConn(conn)` 解析 `model.Request` 並依 `Command` 分派至 11 個業務方法（`StartApp`/`StopByName`/`RestartByName`/`PauseByName`/`ResumeByName`/`DeleteByName`/`ListAll`/`Save`/`Resurrect`/`KillAll`/`Ping`）。伺服器結構體同時持有 socket 監聽迴圈與進程狀態註冊表，違反單一職責原則。
+  在 [server.go](../../daemon/server.go) 中，`Server.Listen(socketPath)` 綁定 Unix socket、執行 accept 迴圈；`Server.handleConn(conn)` 解析 `model.Request` 並依 `Command` 分派至 11 個業務方法（`StartApp`/`StopByName`/`RestartByName`/`PauseByName`/`ResumeByName`/`DeleteByName`/`ListAll`/`Save`/`Resurrect`/`KillAll`/`Ping`）。伺服器結構體同時持有 socket 監聽迴圈與進程狀態註冊表，違反單一職責原則。
 
 * `診斷二：handler 內聯在 Server 中,難以單獨測試 (Handler Coupled to Server)`
   `handleConn` 直接呼叫 `s.X()` 等業務方法，無法在沒有完整 Server 的前提下進行 RPC dispatch 邏輯的單元測試。若要測試一個錯誤的 `Request` 結構會產生怎樣的 `Response`，必須實例化整個 `Server`、綁定 socket、配置 cron / registry。

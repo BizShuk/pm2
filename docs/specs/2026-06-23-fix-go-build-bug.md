@@ -17,31 +17,31 @@
 
 ### 命令列工具元件 (CLI Component)
 
-#### [MODIFY] [stop.go](file:///Users/bytedance/projects/pm2/cmd/stop.go)
+#### [MODIFY] [stop.go](../../cmd/stop.go)
 更新匯入路徑，將 `github.com/shuk/pm2/daemon` 修正為 `github.com/bizshuk/pm2/daemon`。
 
 ---
 
 ### 背景服務元件 (Daemon Component)
 
-#### [MODIFY] [server_test.go](file:///Users/bytedance/projects/pm2/daemon/server_test.go)
+#### [MODIFY] [server_test.go](../../daemon/server_test.go)
 更新測試檔案中的匯入路徑，將 `github.com/shuk/pm2/process` 修正為 `github.com/bizshuk/pm2/process`。
 
 ---
 
 ### 文字介面元件 (TUI Component)
 
-#### [MODIFY] [model_test.go](file:///Users/bytedance/projects/pm2/tui/model_test.go)
+#### [MODIFY] [model_test.go](../../tui/model_test.go)
 更新測試檔案中的匯入路徑，將 `github.com/shuk/pm2/process` 修正為 `github.com/bizshuk/pm2/process`。
 
 ---
 
 ### 說明文件元件 (Documentation Component)
 
-#### [MODIFY] [CLAUDE.md](file:///Users/bytedance/projects/pm2/CLAUDE.md)
+#### [MODIFY] [CLAUDE.md](../../CLAUDE.md)
 將模組名稱由 `github.com/shuk/pm2` 修正為 `github.com/bizshuk/pm2`。
 
-#### [MODIFY] [README.md](file:///Users/bytedance/projects/pm2/README.md)
+#### [MODIFY] [README.md](../../README.md)
 將儲存庫網址 (repository URL) 中的 `github.com/shuk/pm2` 修正為 `github.com/bizshuk/pm2`。
 
 ## 驗證計畫 (Verification Plan)

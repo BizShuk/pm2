@@ -17,16 +17,16 @@
 
 ### 配置與協定模組 (Config & Protocol Modules)
 
-#### [MODIFY] [ecosystem.go](file:///Users/shuk/projects/pm2/config/ecosystem.go)
+#### [MODIFY] [ecosystem.go](../../config/ecosystem.go)
 
 - 在 `AppConfig` 結構體中新增 `OutFile` 欄位，tag 設定為 `json:"out_file"`。
 - 在 `AppConfig.Normalize()` 方法中加入邏輯：如果 `LogFile` 為空且 `OutFile` 不為空，則將 `LogFile` 設定為 `OutFile`。
 
-#### [MODIFY] [protocol.go](file:///Users/shuk/projects/pm2/daemon/protocol.go)
+#### [MODIFY] [protocol.go](../../daemon/protocol.go)
 
 - 在 `AppStartReq` 結構體中新增 `OutFile` 欄位，tag 設定為 `json:"out_file"`。
 
-#### [MODIFY] [types.go](file:///Users/shuk/projects/pm2/process/types.go)
+#### [MODIFY] [types.go](../../process/types.go)
 
 - 在 `DumpEntry` 結構體中新增 `OutFile` 欄位，tag 設定為 `json:"out_file"`。
 
@@ -34,11 +34,11 @@
 
 ### 命令與守護進程模組 (CLI Command & Daemon Modules)
 
-#### [MODIFY] [start.go](file:///Users/shuk/projects/pm2/cmd/start.go)
+#### [MODIFY] [start.go](../../cmd/start.go)
 
 - 在建構 `daemon.Request` 時，將 `app.OutFile` 賦值給 `daemon.AppStartReq.OutFile`。
 
-#### [MODIFY] [server.go](file:///Users/shuk/projects/pm2/daemon/server.go)
+#### [MODIFY] [server.go](../../daemon/server.go)
 
 - 在 `launchProcess()` 中，於讀取 `req.LogFile` 之後，若 `logFile` 為空且 `req.OutFile` 不為空，則 fallback 使用 `req.OutFile`。
 - 在 `resurrect()` 中，於建構 `AppStartReq` 時，將 `e.OutFile` 賦值給 `req.OutFile`。

@@ -16,7 +16,7 @@
 
 ### TUI 模組 (TUI Module)
 
-#### [MODIFY] [model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)
+#### [MODIFY] [model.go](../../tui/model.go)
 
 - `修改 sortProcs 簽章`:
   將 `sortProcs` 修改為接受一個可選的舊選取 ID `prevSelectedID int`。若傳入 `-1` 則會從當前的 `m.procs[m.selected]` 中自動獲取。
@@ -36,7 +36,7 @@
 
 ### 自動化測試 (Automated Tests)
 
-- 在 [model_test.go](file:///Users/shuk/projects/tmp/pm2/tui/model_test.go) 中新增測試 `TestRefreshPreservesSelection`：
+- 在 [model_test.go](../../tui/model_test.go) 中新增測試 `TestRefreshPreservesSelection`：
     - 模擬初始進程列表，並設定選中其中一個進程。
     - 觸發 `refreshMsg`，傳入一個順序不同（例如 ID 順序）的最新進程列表。
     - 驗證更新並排序後，`m.selected` 所指針的進程 `ID` 仍與原先選中的進程相同，且不會發生跳動。

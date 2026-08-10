@@ -5,22 +5,22 @@
 我們對現有 `pm2` 專案進行了完整的架構審查與技術債診斷，發現了以下關鍵痛點：
 
 ### 1.1 核心併發缺陷與競態條件 (Critical Concurrency & Race Conditions)
-在 [persistence.go](file:///Users/shuk/projects/tmp/pm2/daemon/persistence.go#L15) 中，`save` 函數會遍歷整個 `s.processes` 對照表 (Map)。然而，此函數內部並未取得任何互斥鎖 (Mutex) 保護。當命令列介面 (CLI) 發送 `save` 指令（由 `handleConn` 觸發，參見 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L168)）或 `startAutoSave` 背景任務（參見 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L82)）執行時，如果此時有其他協程 (Goroutine) 修改了對照表（例如 `startApp`、`stopProcess` 或 `watchProcess`），將會直接引發 Go 執行期的致命崩潰：`fatal error: concurrent map iteration and map write`。
+在 [persistence.go](../../daemon/persistence.go#L15) 中，`save` 函數會遍歷整個 `s.processes` 對照表 (Map)。然而，此函數內部並未取得任何互斥鎖 (Mutex) 保護。當命令列介面 (CLI) 發送 `save` 指令（由 `handleConn` 觸發，參見 [server.go](../../daemon/server.go#L168)）或 `startAutoSave` 背景任務（參見 [server.go](../../daemon/server.go#L82)）執行時，如果此時有其他協程 (Goroutine) 修改了對照表（例如 `startApp`、`stopProcess` 或 `watchProcess`），將會直接引發 Go 執行期的致命崩潰：`fatal error: concurrent map iteration and map write`。
 
 ### 1.2 監控指標收集時的阻塞效能瓶頸 (Lock Contention & Blocking in Metrics Collection)
-在 [metrics.go](file:///Users/shuk/projects/tmp/pm2/daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個對照表遍歷期間都持有 `s.mu.Lock` 寫鎖 (Write Lock)。在此寫鎖範圍內，它在迴圈中同步調用 `getProcessMetrics`，該函數會針對每個執行中的行程執行一次外部指令 `exec.Command("ps", ...)`。當受控行程增多時，多個 `ps` 行程的啟動與執行時間會累積。此期間由於整個伺服器 `Server` 寫鎖被鎖定，所有來自命令列介面網路連線的遠端程序呼叫 (RPC) 請求都會被完全阻塞，造成嚴重的效能瓶頸與延遲。
+在 [metrics.go](../../daemon/metrics.go#L39) 的 `StartMetricsCollector` 中，更新指標的背景協程在整個對照表遍歷期間都持有 `s.mu.Lock` 寫鎖 (Write Lock)。在此寫鎖範圍內，它在迴圈中同步調用 `getProcessMetrics`，該函數會針對每個執行中的行程執行一次外部指令 `exec.Command("ps", ...)`。當受控行程增多時，多個 `ps` 行程的啟動與執行時間會累積。此期間由於整個伺服器 `Server` 寫鎖被鎖定，所有來自命令列介面網路連線的遠端程序呼叫 (RPC) 請求都會被完全阻塞，造成嚴重的效能瓶頸與延遲。
 
 ### 1.3 信號傳播失效與孤兒行程問題 (Signal Propagation & Orphan Processes)
-在 [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go#L18) 中，程式將啟動指令包裝在 `/bin/bash -c` 中，並設置了 `Setpgid: true` 來建立行程組 (Process Group)。但在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L571) 的 `stopProcess` 中，終止行程是調用 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。這只會將信號發送給作為父行程的 `/bin/bash`，而不會傳播給其實際執行的子行程（即用戶真正要啟動的服務）。這會導致父行程終止後，子行程變成孤兒行程 (Orphan Process) 並繼續在系統背景運行，脫離 `pm2` 的管理。
+在 [builder.go](../../daemon/builder.go#L18) 中，程式將啟動指令包裝在 `/bin/bash -c` 中，並設置了 `Setpgid: true` 來建立行程組 (Process Group)。但在 [server.go](../../daemon/server.go#L571) 的 `stopProcess` 中，終止行程是調用 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。這只會將信號發送給作為父行程的 `/bin/bash`，而不會傳播給其實際執行的子行程（即用戶真正要啟動的服務）。這會導致父行程終止後，子行程變成孤兒行程 (Orphan Process) 並繼續在系統背景運行，脫離 `pm2` 的管理。
 
 ### 1.4 排程器名稱空間衝突 (Namespace Collision in Cron Scheduler)
-在 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go#L28) 中，`Register` 註冊排程任務時，使用行程名稱 `name` 作為對應對照表的鍵 (Key)。這意謂著如果用戶在不同的名稱空間（例如 `default:api` 和 `production:api`）中啟動了同名的行程，它們在定時任務 (Cron) 排程器內部的註冊將會互相覆蓋，造成排程邏輯混亂。
+在 [scheduler.go](../../cron/scheduler.go#L28) 中，`Register` 註冊排程任務時，使用行程名稱 `name` 作為對應對照表的鍵 (Key)。這意謂著如果用戶在不同的名稱空間（例如 `default:api` 和 `production:api`）中啟動了同名的行程，它們在定時任務 (Cron) 排程器內部的註冊將會互相覆蓋，造成排程邏輯混亂。
 
 ### 1.5 測試環境依賴過高 (Sandbox Isolation Failures in Tests)
-在 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L477) 中，`TestStartAppOutFileHomeExpansion` 測試使用了真實的家目錄路徑 `~/` 作為輸出日誌檔案。這在隔離的安全沙箱環境中會因為寫入家目錄的權限不足而直接報錯崩潰，且會污染用戶的主機環境。
+在 [server_test.go](../../daemon/server_test.go#L477) 中，`TestStartAppOutFileHomeExpansion` 測試使用了真實的家目錄路徑 `~/` 作為輸出日誌檔案。這在隔離的安全沙箱環境中會因為寫入家目錄的權限不足而直接報錯崩潰，且會污染用戶的主機環境。
 
 ### 1.6 RPC 傳輸協定耦合 (RPC Protocol Coupling)
-在 [protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go) 中定義了 `Request`、`Response`、`AppStartReq`、`CommandType` 和輔助函數 `SendRequest`。目前 CLI `cmd/` 和 `tui/` 包直接導入整個 `daemon/` 模組以取得這些結構與網路連接方法。這意謂著用戶端的代碼直接依賴於伺服器端的實作，增加了系統的雙向耦合度。
+在 [protocol.go](../../daemon/protocol.go) 中定義了 `Request`、`Response`、`AppStartReq`、`CommandType` 和輔助函數 `SendRequest`。目前 CLI `cmd/` 和 `tui/` 包直接導入整個 `daemon/` 模組以取得這些結構與網路連接方法。這意謂著用戶端的代碼直接依賴於伺服器端的實作，增加了系統的雙向耦合度。
 
 ---
 

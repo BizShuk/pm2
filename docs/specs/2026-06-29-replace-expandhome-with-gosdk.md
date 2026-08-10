@@ -9,11 +9,11 @@
 ## 變更詳情 (Changes Detail)
 
 ### 1. 移除舊封裝與輔助函數
-- 在 [daemon/helpers.go](file:///Users/shuk/projects/tmp/pm2/daemon/helpers.go) 中刪除 `expandHome` 與 `getCurrentUser` 函數。
+- 在 [daemon/helpers.go](../../daemon/helpers.go) 中刪除 `expandHome` 與 `getCurrentUser` 函數。
 - 移除不再使用的 `"strings"` 與 `"os/user"` 引入包。
 
 ### 2. 引入 go-homedir 與 inline 替換
-- 在 [daemon/server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 中加入 `"github.com/mitchellh/go-homedir"` 與 `"os/user"` 引入包。
+- 在 [daemon/server.go](../../daemon/server.go) 中加入 `"github.com/mitchellh/go-homedir"` 與 `"os/user"` 引入包。
 - 替換原日誌路徑展開邏輯，直接以 `homedir.Expand` 取代舊的 `expandHome`：
   ```go
   if h, err := homedir.Expand(logFile); err == nil {
@@ -30,4 +30,4 @@
   並直接賦值給 `ProcessInfo.User` 欄位。
 
 ### 3. 測試用例與驗證
-- 在 [daemon/server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go) 中新增了 `TestStartAppOutFileHomeExpansion` 單元測試，專門驗證傳入 `~/` 前綴路徑時，能正確展開為絕對路徑且不留存 `~` 符號。
+- 在 [daemon/server_test.go](../../daemon/server_test.go) 中新增了 `TestStartAppOutFileHomeExpansion` 單元測試，專門驗證傳入 `~/` 前綴路徑時，能正確展開為絕對路徑且不留存 `~` 符號。

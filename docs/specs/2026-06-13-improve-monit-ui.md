@@ -20,7 +20,7 @@
 
 ### 設定與資料模型 (Config and Data Model)
 
-#### [MODIFY] [process/types.go](file:///Users/shuk/projects/tmp/pm2/process/types.go)
+#### [MODIFY] [process/types.go](../../process/types.go)
 
 - 在 `ProcessInfo` 結構體中新增欄位：
     - `Version string json:"version"`：從專案目錄的 `package.json` 讀取的版本。
@@ -29,12 +29,12 @@
 - 在 `DumpEntry` 結構體中新增欄位：
     - `Watch bool json:"watch"`：以支援 `pm2 save` 和 `pm2 resurrect` 的持久化。
 
-#### [MODIFY] [daemon/protocol.go](file:///Users/shuk/projects/tmp/pm2/daemon/protocol.go)
+#### [MODIFY] [daemon/protocol.go](../../daemon/protocol.go)
 
 - 在 `AppStartReq` 中新增欄位：
     - `Watch bool json:"watch"`
 
-#### [MODIFY] [cmd/start.go](file:///Users/shuk/projects/tmp/pm2/cmd/start.go)
+#### [MODIFY] [cmd/start.go](../../cmd/start.go)
 
 - 新增 `--watch` / `-w` 命令列旗標。
 - 將 `config.AppConfig` 的 `Watch` 屬性或命令列 `--watch` 旗標正確地填充至 `AppStartReq.Watch` 中。
@@ -43,7 +43,7 @@
 
 ### 後端守護進程邏輯 (Daemon Server Logic)
 
-#### [MODIFY] [daemon/server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go)
+#### [MODIFY] [daemon/server.go](../../daemon/server.go)
 
 - 修改 `ManagedProcess` 結構體，新增 `Watcher *fsnotify.Watcher` 欄位以管理檔案監聽資源。
 - 在 `launchProcess` 時：
@@ -65,7 +65,7 @@
 
 ### 終端監控介面 (TUI Monit)
 
-#### [MODIFY] [tui/model.go](file:///Users/shuk/projects/tmp/pm2/tui/model.go)
+#### [MODIFY] [tui/model.go](../../tui/model.go)
 
 - 重構 `Model`，加入 `hostCPU` 與 `hostMem` 欄位。
 - 將 UI 版面改為「上下分欄」結構：

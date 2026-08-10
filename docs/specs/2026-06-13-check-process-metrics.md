@@ -17,7 +17,7 @@
 
 ### 監控命令模組 (Monitor Command Module)
 
-#### [MODIFY] [monitor.go](file:///Users/shuk/projects/tmp/pm2/cmd/monitor.go)
+#### [MODIFY] [monitor.go](../../cmd/monitor.go)
 
 - 新增 `getProcessMetrics(pid int) (float64, uint64)` 函數：
     - 當傳入的 `pid <= 0` 時，直接返回 `0, 0`。

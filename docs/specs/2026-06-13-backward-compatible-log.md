@@ -21,7 +21,7 @@
 
 ### 配置模組 (Config Module)
 
-#### [MODIFY] [ecosystem.go](file:///Users/shuk/projects/pm2/config/ecosystem.go)
+#### [MODIFY] [ecosystem.go](../../config/ecosystem.go)
 - 在 `AppConfig.Normalize()` 中新增向後相容的 `config_dir` 推導邏輯，程式碼範例如下：
   ```go
   if a.ConfigDir == "" {

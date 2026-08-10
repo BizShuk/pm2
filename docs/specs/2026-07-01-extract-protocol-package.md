@@ -5,20 +5,20 @@
 我們對當前 `pm2` 的 `daemon` 模組進行了架構審查與技術債診斷，發現了以下關鍵的結構耦合與核心缺陷：
 
 ### 1.1 執行器與網路監聽器的混合耦合 (Coupling of Executor and Network Listener)
-在當前 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 中，`Server` 結構體同時扮演著雙重角色：它既是 `Unix Socket` 網路連線接收者（負責 `Listen` 與 `handleConn` 的連線讀寫與協定路由分發），又是 `進程生命週期執行者`（負責 `launchProcess`, `watchProcess`, `stopProcess` 等與作業系統交互的底層調用）。這違反了 `單一職責原則 (Single Responsibility Principle)`，使得核心網路監聽代碼與進程控制邏輯高度盤根錯節，難以單獨進行單元測試。
+在當前 [server.go](../../daemon/server.go) 中，`Server` 結構體同時扮演著雙重角色：它既是 `Unix Socket` 網路連線接收者（負責 `Listen` 與 `handleConn` 的連線讀寫與協定路由分發），又是 `進程生命週期執行者`（負責 `launchProcess`, `watchProcess`, `stopProcess` 等與作業系統交互的底層調用）。這違反了 `單一職責原則 (Single Responsibility Principle)`，使得核心網路監聽代碼與進程控制邏輯高度盤根錯節，難以單獨進行單元測試。
 
 ### 1.2 排程命名空間衝突與幽靈排程任務 (Cron Namespace Collision and Ghost Tasks)
 現有的排程機制存在嚴重的併發與覆蓋漏洞：
-- `命名空間衝突`：在 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go#L28) 中，`Scheduler.Register` 使用進程名稱 `name` 作為追蹤 Map 的鍵值。若在不同的 `namespace`（如 `default:api` 與 `production:api`）中啟動同名進程，後註冊的排程會直接覆蓋前者的 map 記錄。
+- `命名空間衝突`：在 [scheduler.go](../../cron/scheduler.go#L28) 中，`Scheduler.Register` 使用進程名稱 `name` 作為追蹤 Map 的鍵值。若在不同的 `namespace`（如 `default:api` 與 `production:api`）中啟動同名進程，後註冊的排程會直接覆蓋前者的 map 記錄。
 - `幽靈排程任務 (Ghost Tasks)`：若同一個進程同時配置了定期運行 `Cron` 與崩潰重啟 `CronRestart`（雖然不常見，但為配置合法組合），它們會先後調用 `Register`。由於它們共享同一個進程名稱作為 map 鍵值，後註冊的排程會覆蓋前者在 `Scheduler.entries` 中的 `EntryID`。這導致調用 `Remove` 釋放資源時，只能移除其中一個任務，另一個任務將在背景永久運行，形成無法釋放的資源洩漏。
 
 ### 1.3 孤兒進程組信號未傳播問題 (Orphan Process Group Signal Propagation)
-在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L580) 的 `stopProcess` 函數中，系統僅調用了 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。雖然在 [builder.go](file:///Users/shuk/projects/tmp/pm2/daemon/builder.go#L20) 中，進程啟動時設置了 `Setpgid: true` 以建立獨立的 `進程組 (Process Group)`，但向父進程 PID 單獨發送信號並不會自動將信號傳播到整個子進程組。若被管理的進程啟動了多個子行程（例如 `bash` 腳本拉起其他二進制文件），在停止時這些子行程將不會收到 `SIGTERM`，從而殘留在系統中成為孤兒進程。
+在 [server.go](../../daemon/server.go#L580) 的 `stopProcess` 函數中，系統僅調用了 `mp.Cmd.Process.Signal(syscall.SIGTERM)`。雖然在 [builder.go](../../daemon/builder.go#L20) 中，進程啟動時設置了 `Setpgid: true` 以建立獨立的 `進程組 (Process Group)`，但向父進程 PID 單獨發送信號並不會自動將信號傳播到整個子進程組。若被管理的進程啟動了多個子行程（例如 `bash` 腳本拉起其他二進制文件），在停止時這些子行程將不會收到 `SIGTERM`，從而殘留在系統中成為孤兒進程。
 
 ### 1.4 單元測試污染真實家目錄與沙箱 socket 限制 (Home Directory Pollution and Sandbox Socket Restrictions)
-在 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L480) 的 `TestStartAppOutFileHomeExpansion` 測試案例中，其配置的輸出日誌路徑為 `~/test-home-expand-out.log`。在調用 `startApp` 進行路徑展開時，系統會調用真實的 `homedir.Expand` 並建立檔案。這導致運行測試時會直接在運行主機的真實 `家目錄 (Home Directory)` 下寫入測試日誌。在沙箱 (Sandbox) 安全限制環境下執行 `go test` 會引發以下錯誤：
+在 [server_test.go](../../daemon/server_test.go#L480) 的 `TestStartAppOutFileHomeExpansion` 測試案例中，其配置的輸出日誌路徑為 `~/test-home-expand-out.log`。在調用 `startApp` 進行路徑展開時，系統會調用真實的 `homedir.Expand` 並建立檔案。這導致運行測試時會直接在運行主機的真實 `家目錄 (Home Directory)` 下寫入測試日誌。在沙箱 (Sandbox) 安全限制環境下執行 `go test` 會引發以下錯誤：
 `server_test.go:496: startApp failed: launch homeexpandcheck: open /Users/shuk/test-home-expand-out.log: operation not permitted`
-另外，在 [protocol_test.go](file:///Users/shuk/projects/tmp/pm2/model/protocol_test.go#L185) 的 `TestSendRequestRoundTrip` 中，由於沙箱環境限制了對工作區外部 `/var/folders/` 底下臨時 Unix Socket 的讀寫，導致單元測試連線被阻擋而失敗：
+另外，在 [protocol_test.go](../../model/protocol_test.go#L185) 的 `TestSendRequestRoundTrip` 中，由於沙箱環境限制了對工作區外部 `/var/folders/` 底下臨時 Unix Socket 的讀寫，導致單元測試連線被阻擋而失敗：
 `protocol_test.go:185: SendRequest: daemon not running... connect: operation not permitted`
 這兩處錯誤深刻證實了測試對主機環境環境缺乏隔離的設計缺陷，必須在 Phase 1 優先解決。
 
@@ -122,9 +122,9 @@ type TaskScheduler interface {
 我們採用 `絞殺榕模式 (Strangler-Fig)` 分步實施，確保每一步都可獨立編譯、測試並支持快速回滾：
 
 ### Phase 1：缺陷修復與測試安全隔離 (Bug Fixes & Isolation)
-- `步驟 1`：修改 [scheduler.go](file:///Users/shuk/projects/tmp/pm2/cron/scheduler.go) 以支援複合鍵，並在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go) 中改以 `ns + ":" + name + ":restart"` 與 `ns + ":" + name + ":cron"` 進行註冊，修復排程任務覆蓋漏洞。
-- `步驟 2`：在 [server.go](file:///Users/shuk/projects/tmp/pm2/daemon/server.go#L580) 的 `stopProcess` 中，改用 `syscall.Kill(-pid, syscall.SIGTERM)` 替代 `mp.Cmd.Process.Signal`，確保進程組內的子行程被同步釋放。
-- `步驟 3`：修改 [server_test.go](file:///Users/shuk/projects/tmp/pm2/daemon/server_test.go#L480)，在測試開始時使用 `t.Setenv("HOME", testDir)` 隔離測試環境的家目錄，避免污染真實主機。
+- `步驟 1`：修改 [scheduler.go](../../cron/scheduler.go) 以支援複合鍵，並在 [server.go](../../daemon/server.go) 中改以 `ns + ":" + name + ":restart"` 與 `ns + ":" + name + ":cron"` 進行註冊，修復排程任務覆蓋漏洞。
+- `步驟 2`：在 [server.go](../../daemon/server.go#L580) 的 `stopProcess` 中，改用 `syscall.Kill(-pid, syscall.SIGTERM)` 替代 `mp.Cmd.Process.Signal`，確保進程組內的子行程被同步釋放。
+- `步驟 3`：修改 [server_test.go](../../daemon/server_test.go#L480)，在測試開始時使用 `t.Setenv("HOME", testDir)` 隔離測試環境的家目錄，避免污染真實主機。
 - `驗證命令`：`go test -race -v ./cron/... ./daemon/...`
 
 ### Phase 2：封裝狀態註冊表 (Encapsulate Registry)

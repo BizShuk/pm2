@@ -3,25 +3,25 @@
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 
 * 診斷一：`daemon` 封裝職責過多 (Daemon Over-Responsibility)
-  [server.go](file:///Users/bytedance/projects/pm2/daemon/server.go) 達 930 行，包含 UNIX 套接字 (UNIX Socket) 監聽、生命週期控制、自動儲存與載入、定時重啟調度、進程資源監控等多重職責，屬於典型神級對象 (God Object)。
+  [server.go](../../daemon/server.go) 達 930 行，包含 UNIX 套接字 (UNIX Socket) 監聽、生命週期控制、自動儲存與載入、定時重啟調度、進程資源監控等多重職責，屬於典型神級對象 (God Object)。
 * 診斷二：RPC 協議與服務端邏輯耦合 (RPC Protocol Coupling)
-  [protocol.go](file:///Users/bytedance/projects/pm2/daemon/protocol.go) 存在於 `daemon` 包下，將 Request/Response 結構與 Dial/Send 等客戶端邏輯與服務端代碼混在一起。使得 CLI 客戶端 [cmd](file:///Users/bytedance/projects/pm2/cmd) 與 [tui](file:///Users/bytedance/projects/pm2/tui) 必須引入整個 `daemon` 模組，破壞了模組邊界。
+  [protocol.go](../../daemon/protocol.go) 存在於 `daemon` 包下，將 Request/Response 結構與 Dial/Send 等客戶端邏輯與服務端代碼混在一起。使得 CLI 客戶端 [cmd](../../cmd) 與 [tui](../../tui) 必須引入整個 `daemon` 模組，破壞了模組邊界。
 * 診斷三：TUI 視圖渲染與狀態管理膨脹 (TUI Bloat)
-  [model.go](file:///Users/bytedance/projects/pm2/tui/model.go) 規模達 1169 行。該文件集成了 Bubble Tea 的 Update 狀態流轉、鍵盤事件處理，以及大量的 Lipgloss 佈局和字串切割邏輯，造成測試難度增加，結構難以複用。
+  [model.go](../../tui/model.go) 規模達 1169 行。該文件集成了 Bubble Tea 的 Update 狀態流轉、鍵盤事件處理，以及大量的 Lipgloss 佈局和字串切割邏輯，造成測試難度增加，結構難以複用。
 * 診斷四：配置標準化邏輯分散 (Scattered Configuration Normalization)
-  配置的加載與標準化本由 [ecosystem.go](file:///Users/bytedance/projects/pm2/config/ecosystem.go#L41-L85) 的 `Normalize` 函數負責。但在 [server.go](file:///Users/bytedance/projects/pm2/daemon/server.go#L264-L289) 中，`launchProcess` 依然自行推導及解析預設的 log_file 與 error_file 路徑，使得系統配置行為碎片化，易生不一致。
+  配置的加載與標準化本由 [ecosystem.go](../../config/ecosystem.go#L41-L85) 的 `Normalize` 函數負責。但在 [server.go](../../daemon/server.go#L264-L289) 中，`launchProcess` 依然自行推導及解析預設的 log_file 與 error_file 路徑，使得系統配置行為碎片化，易生不一致。
 
 ## 2. 複雜度量測 (Complexity Metrics)
 
 * 代碼行數 (Lines of Code) 分佈：
-  * [model.go](file:///Users/bytedance/projects/pm2/tui/model.go)：1169 行 (第 1 高)
-  * [server.go](file:///Users/bytedance/projects/pm2/daemon/server.go)：930 行 (第 2 高)
-  * [eco_test.go](file:///Users/bytedance/projects/pm2/cmd/eco_test.go)：964 行 (第 3 高)
+  * [model.go](../../tui/model.go)：1169 行 (第 1 高)
+  * [server.go](../../daemon/server.go)：930 行 (第 2 高)
+  * [eco_test.go](../../cmd/eco_test.go)：964 行 (第 3 高)
 * Git 改動頻率分析 (過去 12 個月)：
-  * [model.go](file:///Users/bytedance/projects/pm2/tui/model.go)：改動 13 次 (最高改動熱點)
-  * [types.go](file:///Users/bytedance/projects/pm2/process/types.go)：改動 9 次 (次高)
+  * [model.go](../../tui/model.go)：改動 13 次 (最高改動熱點)
+  * [types.go](../../process/types.go)：改動 9 次 (次高)
 * 依賴關係分析 (Fan-in/out)：
-  * [types.go](file:///Users/bytedance/projects/pm2/process/types.go) 具有最高扇入值 (Fan-in)，被 `cmd`, `tui`, `daemon`, `config` 引用。
+  * [types.go](../../process/types.go) 具有最高扇入值 (Fan-in)，被 `cmd`, `tui`, `daemon`, `config` 引用。
   * `daemon` 被 `cmd` 與 `tui` 引用，形成較重的高層向底層依賴。
 
 ## 3. 架構簡化與解耦設計 (Simplification & Decoupling Design)

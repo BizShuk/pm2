@@ -14,9 +14,9 @@
 
 `檔案`：
 
-- 修改：[process/types.go](file:///Users/shuk/projects/pm2/process/types.go)
-- 修改：[config/ecosystem.go](file:///Users/shuk/projects/pm2/config/ecosystem.go)
-- 修改：[daemon/protocol.go](file:///Users/shuk/projects/pm2/daemon/protocol.go)
+- 修改：[process/types.go](../../process/types.go)
+- 修改：[config/ecosystem.go](../../config/ecosystem.go)
+- 修改：[daemon/protocol.go](../../daemon/protocol.go)
 
 - [ ] `Step 1`：修改 `process/types.go`，在 `ProcessInfo` 和 `DumpEntry` 結構體中新增 `Namespace` 欄位。
 
@@ -60,8 +60,8 @@ Namespace string `json:"namespace"`
 
 `檔案`：
 
-- 修改：[daemon/server.go](file:///Users/shuk/projects/pm2/daemon/server.go)
-- 新增：[daemon/server_test.go](file:///Users/shuk/projects/pm2/daemon/server_test.go)
+- 修改：[daemon/server.go](../../daemon/server.go)
+- 新增：[daemon/server_test.go](../../daemon/server_test.go)
 
 - [ ] `Step 1`：在 `daemon` 目錄下建立單元測試 `server_test.go`。先寫一個會失敗的測試，用以測試 `findProcesses`。
 
@@ -177,7 +177,7 @@ func (s *Server) findProcesses(target string) []*ManagedProcess {
 
 `檔案`：
 
-- 修改：[daemon/server.go](file:///Users/shuk/projects/pm2/daemon/server.go)
+- 修改：[daemon/server.go](../../daemon/server.go)
 
 - [ ] `Step 1`：修改 `daemon/server.go` 中的 `startApp` 函數，使用 `req.Namespace + ":" + name` 作為 `processes` map 的鍵值 (key) 進行重複檢查，並使用複合鍵停止舊進程。
 
@@ -307,9 +307,9 @@ Namespace: e.Namespace,
 
 `檔案`：
 
-- 修改：[cmd/start.go](file:///Users/shuk/projects/pm2/cmd/start.go)
-- 修改：[cmd/list.go](file:///Users/shuk/projects/pm2/cmd/list.go)
-- 修改：[cmd/logs.go](file:///Users/shuk/projects/pm2/cmd/logs.go)
+- 修改：[cmd/start.go](../../cmd/start.go)
+- 修改：[cmd/list.go](../../cmd/list.go)
+- 修改：[cmd/logs.go](../../cmd/logs.go)
 
 - [ ] `Step 1`：修改 `cmd/start.go`，在 `newStartCmd()` 增加 `--namespace` (簡寫 `-ns`) flag，並填入 `AppStartReq` 中。
 
@@ -416,7 +416,7 @@ for _, p := range matchedProcs {
 
 `檔案`：
 
-- 修改：[tui/model.go](file:///Users/shuk/projects/pm2/tui/model.go)
+- 修改：[tui/model.go](../../tui/model.go)
 
 - [ ] `Step 1`：修改 `tui/model.go` 中的 `detailRows` 常數改為 `11`。
 
