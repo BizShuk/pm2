@@ -31,7 +31,7 @@ var wizardFlags = defaultInteractiveFlags()
 
 // WizardCmd is the `pm2 wizard` command. It only wires Cobra
 // flags + I/O streams and delegates every behavioural step to
-// config/wizard (see plans/architecture-wizard-decoupling.md).
+// config/wizard (see docs/specs/2026-07-01-architecture-wizard-decoupling.md).
 //
 // Subcommands live in cmd/wizard/:
 //

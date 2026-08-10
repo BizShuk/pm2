@@ -6,7 +6,7 @@
 > - `daemon/executor/` — 封裝單一進程生命週期（`executor.go` / `builder.go` / `watcher.go` / `metrics.go`）
 > - `daemon/network/` — 封裝 Unix socket 監聽與 RPC 路由（`listener.go` / `handler.go` / `manager.go`）
 >
-> 為打破 `*ManagedProcess` 跨界造成的循環依賴，`Executor` 改採**原始型別 API**（`*exec.Cmd` / `*os.File` / `chan struct{}` / callbacks），不持有 `ProcessRegistry` 鎖。Manager 介面（11 方法）由 `*Server` 隱性實作，`Server.Listen` 變成薄殼委派。Commit: `684ed77` + `31b36bc`。詳見 [abstract-strolling-scroll.md](./abstract-strolling-scroll.md)。
+> 為打破 `*ManagedProcess` 跨界造成的循環依賴，`Executor` 改採**原始型別 API**（`*exec.Cmd` / `*os.File` / `chan struct{}` / callbacks），不持有 `ProcessRegistry` 鎖。Manager 介面（11 方法）由 `*Server` 隱性實作，`Server.Listen` 變成薄殼委派。Commit: `684ed77` + `31b36bc`。詳見 [2026-07-02-extract-executor-phase4.md](./2026-07-02-extract-executor-phase4.md)。
 
 ## 1. 現有架構診斷與技術債 (Architecture Diagnosis & Technical Debt)
 

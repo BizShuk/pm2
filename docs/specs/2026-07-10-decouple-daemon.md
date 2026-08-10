@@ -17,17 +17,17 @@
 
 | 原始計畫目標 | 現況落實位置 | 狀態 | 對應子 spec |
 | :--- | :--- | :--- | :--- |
-| 1. 抽出 RPC 協定包 | `model/protocol.go`（含 `Request` / `Response` / `AppStartReq` / `SendRequest` / `Dial`） | ✅ 已完成 | `docs/specs/extract-protocol-package.md` |
-| 2. 統一進程配置定義 | `process.AppConfig` 為單一真相；`model.AppStartReq` 匿名嵌入 `process.AppConfig`；`process.ProcessInfo` 匿名嵌入 `process.AppConfig`；`process.DumpEntry` 已刪除 | ✅ 已完成（與計畫有些微差異，見 §3） | `docs/specs/unified-config-refactor.md` |
-| 3. 封裝 `ProcessRegistry` | `daemon/process_registry.go`（`Add` / `Get` / `Remove` / `UpdateInfo` / `UpdateMetrics` / `UpdateCronStatus` / `Snapshot` / `SnapshotAppConfigs` / `FindByTarget` / `Len`） | ✅ 已完成（位置與計畫不同，見 §3） | `docs/specs/extract-process-registry.md` |
+| 1. 抽出 RPC 協定包 | `model/protocol.go`（含 `Request` / `Response` / `AppStartReq` / `SendRequest` / `Dial`） | ✅ 已完成 | `docs/specs/2026-07-01-extract-protocol-package.md` |
+| 2. 統一進程配置定義 | `process.AppConfig` 為單一真相；`model.AppStartReq` 匿名嵌入 `process.AppConfig`；`process.ProcessInfo` 匿名嵌入 `process.AppConfig`；`process.DumpEntry` 已刪除 | ✅ 已完成（與計畫有些微差異，見 §3） | `docs/specs/2026-07-01-unified-config-refactor.md` |
+| 3. 封裝 `ProcessRegistry` | `daemon/process_registry.go`（`Add` / `Get` / `Remove` / `UpdateInfo` / `UpdateMetrics` / `UpdateCronStatus` / `Snapshot` / `SnapshotAppConfigs` / `FindByTarget` / `Len`） | ✅ 已完成（位置與計畫不同，見 §3） | `docs/specs/2026-07-01-extract-process-registry.md` |
 
 附帶的「解耦副作用」亦已落地：
 
 | 副目標 | 落實位置 | 對應子 spec |
 | :--- | :--- | :--- |
-| 抽離執行器子包 | `daemon/executor/`（`executor.go` / `builder.go` / `watcher.go` / `metrics.go`） | `docs/specs/extract-process-executor.md` |
-| 抽離網路監聽子包 | `daemon/network/`（`listener.go` / `handler.go` / `manager.go`） | `docs/specs/extract-network-layer.md` |
-| 排程命名空間衝突與幽靈任務修復 | `daemon/lifecycle.go` / `daemon/cron_key.go`（cron 鍵格式改為 `namespace:name:taskType`） | `docs/specs/daemon-decoupling-phase3.md` |
+| 抽離執行器子包 | `daemon/executor/`（`executor.go` / `builder.go` / `watcher.go` / `metrics.go`） | `docs/specs/2026-07-01-extract-process-executor.md` |
+| 抽離網路監聽子包 | `daemon/network/`（`listener.go` / `handler.go` / `manager.go`） | `docs/specs/2026-07-03-extract-network-layer.md` |
+| 排程命名空間衝突與幽靈任務修復 | `daemon/lifecycle.go` / `daemon/cron_key.go`（cron 鍵格式改為 `namespace:name:taskType`） | `docs/specs/2026-07-01-daemon-decoupling-phase3.md` |
 
 ## 3. 與原計畫的差異 (Deviations)
 
@@ -109,13 +109,13 @@ ok  	github.com/bizshuk/pm2/tui/views	1.905s
 
 | Spec | 主題 |
 | :--- | :--- |
-| `docs/specs/extract-protocol-package.md` | RPC 協定抽到 `model/` |
-| `docs/specs/extract-process-registry.md` | 進程 Map 封裝為 `ProcessRegistry` |
-| `docs/specs/extract-process-executor.md` | 抽離 OS 級執行器到 `daemon/executor/` |
-| `docs/specs/extract-network-layer.md` | 抽離網路監聽到 `daemon/network/` |
-| `docs/specs/daemon-decoupling-phase3.md` | Phase 3 收尾（cron 鍵修復 + 信號組發送 + 測試隔離） |
-| `docs/specs/unified-config-refactor.md` | `AppConfig` / `AppStartReq` / `ProcessInfo` 三型別收斂 |
-| `docs/specs/process-namespace-plan.md` | 進程命名空間的設計與邊界 |
+| `docs/specs/2026-07-01-extract-protocol-package.md` | RPC 協定抽到 `model/` |
+| `docs/specs/2026-07-01-extract-process-registry.md` | 進程 Map 封裝為 `ProcessRegistry` |
+| `docs/specs/2026-07-01-extract-process-executor.md` | 抽離 OS 級執行器到 `daemon/executor/` |
+| `docs/specs/2026-07-03-extract-network-layer.md` | 抽離網路監聽到 `daemon/network/` |
+| `docs/specs/2026-07-01-daemon-decoupling-phase3.md` | Phase 3 收尾（cron 鍵修復 + 信號組發送 + 測試隔離） |
+| `docs/specs/2026-07-01-unified-config-refactor.md` | `AppConfig` / `AppStartReq` / `ProcessInfo` 三型別收斂 |
+| `docs/specs/2026-06-13-process-namespace.md` | 進程命名空間的設計與邊界 |
 
 ## 7. 淘汰原始計畫
 

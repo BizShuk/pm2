@@ -47,7 +47,7 @@
 ## 完成後 TODO 動作
 
 - [x] 標記 Phase 4 為 `[x]`（本檔案）
-- [x] 將 `plans/architecture-extract-executor.md` 用 `git mv` 移到 `docs/specs/extract-process-executor.md`
+- [x] 將 `plans/architecture-extract-executor.md` 用 `git mv` 移到 `docs/specs/2026-07-01-extract-process-executor.md`
 - [x] 補上 Phase 4 條目的「規格」連結
 - [x] 在 spec 標頭加註位置偏離（子包結構）
 

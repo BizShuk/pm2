@@ -7,7 +7,7 @@
 
 ## Context
 
-`architecture-pm2-refactor.md` 的「驗證」階段(2026-07-10)執行 `go test -race -count=1 ./...` 時,daemon 子套件揭露一個 race:
+`2026-07-01-architecture-refactor.md` 的「驗證」階段(2026-07-10)執行 `go test -race -count=1 ./...` 時,daemon 子套件揭露一個 race:
 
 ```
 WARNING: DATA RACE
