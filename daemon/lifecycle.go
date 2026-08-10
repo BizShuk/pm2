@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/bizshuk/pm2/model"
@@ -90,6 +91,10 @@ func (pm *ProcessManager) stopProcess(mp *ManagedProcess) error {
 	)
 }
 
+// CronStatusSkipped is recorded on LastCronStatus when a fire was dropped
+// because the previous run had not finished.
+const CronStatusSkipped = "skipped"
+
 func (pm *ProcessManager) triggerCron(ns, name string, originalReq *model.AppStartReq) {
 	key := cronKey(ns, name)
 	mp, ok := pm.reg.Get(key)
@@ -97,10 +102,22 @@ func (pm *ProcessManager) triggerCron(ns, name string, originalReq *model.AppSta
 		return
 	}
 
+	firedAt := time.Now()
+
+	// Overlap guard: a fire that arrives while the previous run is still
+	// active is dropped, not stacked. The alternative — the stopProcess
+	// below — would SIGTERM a job the schedule itself asked for, so a task
+	// that occasionally runs longer than its interval would be truncated
+	// every time instead of simply running late.
+	if info, ok := pm.reg.SnapshotOne(key); ok && cronRunActive(info) {
+		slog.Info("cron fire skipped: previous run still active",
+			"name", key, "pid", info.PID, "status", info.Status)
+		pm.reg.UpdateCronStatus(key, firedAt, CronStatusSkipped)
+		return
+	}
+
 	triggerReq := *originalReq
 	triggerReq.CronTriggered = true
-
-	firedAt := time.Now()
 
 	_ = pm.stopProcess(mp)
 	_, err := pm.launchProcess(name, &triggerReq)
@@ -110,4 +127,13 @@ func (pm *ProcessManager) triggerCron(ns, name string, originalReq *model.AppSta
 		cronStatus = "failed"
 	}
 	pm.reg.UpdateCronStatus(key, firedAt, cronStatus)
+}
+
+// cronRunActive reports whether a previous cron fire is still in flight.
+// A live PID covers the running and stopping cases; StatusLaunching covers
+// the auto-restart window, where onProcessExit has already cleared the PID
+// but a replacement child is about to be spawned. An idle cron task between
+// fires sits at PID 0 / stopped and is therefore not active.
+func cronRunActive(info process.ProcessInfo) bool {
+	return info.PID != 0 || info.Status == process.StatusLaunching
 }

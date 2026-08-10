@@ -326,6 +326,30 @@ This prevents deliberate `pm2 task stop` from triggering the crash-restart loop.
 3. `stopProcess()` / `DeleteByName()` call `scheduler.Remove(key)` explicitly.
 4. Net effect: cron entry is always tied to the currently running instance.
 
+### Cron overlap: a fire yields to the run in flight
+
+`triggerCron` used to open with `stopProcess`, so a `cron` task whose run
+outlived its own interval was SIGTERMed mid-work on every tick and restarted
+from scratch — it could never finish once. The guard drops the fire instead:
+if `cronRunActive` (live PID, or `StatusLaunching` for the auto-restart
+window) says a run is still in flight, `triggerCron` records
+`LastCronStatus = "skipped"` with the fire's timestamp and returns before
+touching the process or the schedule.
+
+Three boundaries:
+
+- **Skipping is a recorded outcome, not silence.** A dropped fire still
+  stamps `LastCronAt`, so `pm2 monitor` distinguishes "ran late" from "never
+  fired"; the detail pane renders the badge in the warning colour beside
+  `ok` / `failed`.
+- **Idle is not active.** A cron task sits at PID 0 / `stopped` between
+  fires, which is exactly when it must launch. Keying the guard on entry
+  existence rather than on a live run would skip forever (regression tests:
+  `TestCronFireSkippedWhileRunning`, `TestCronFireRunsWhenIdle`).
+- **`cron_restart` is unaffected.** That schedule's whole purpose is to
+  reboot a long-lived process, so "the previous run is still going" is its
+  normal state, not a conflict.
+
 ### Pause / resume (cron suspension)
 
 `pm2 task pause <target>` suspends a process: `PauseByName()` reuses `stopProcess()`
