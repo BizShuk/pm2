@@ -12,6 +12,10 @@ import (
 )
 
 // StartupCmd generates an OS-specific service definition for the daemon.
+//
+// This file owns the install side (where the file goes, which CLI
+// loads it); the definitions themselves — and the supervision contract
+// they encode — live in startup_template.go.
 var StartupCmd = &cobra.Command{
 	Use:   "startup",
 	Short: "Generate startup script for this OS",
@@ -41,29 +45,7 @@ func generateLaunchd(exe string) error {
 	_ = exec.Command("launchctl", "bootout", target, plistPath).Run()
 	_ = os.Remove(plistPath)
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key><string>%s</string>
-	<key>ProgramArguments</key>
-	<array>
-	<string>%s</string>
-	<string>daemon</string>
-	<string>start</string>
-	</array>
-	<key>EnvironmentVariables</key>
-	<dict>
-	<key>PATH</key>
-	<string>%s</string>
-	</dict>
-	<key>RunAtLoad</key><true/>
-	<key>StandardOutPath</key><string>%s/daemon.log</string>
-	<key>StandardErrorPath</key><string>%s/daemon-err.log</string>
-</dict>
-</plist>
-`, label, exe, os.Getenv("PATH"), cliruntime.PM2Home(), cliruntime.PM2Home())
+	plist := launchdPlist(label, exe, os.Getenv("PATH"), cliruntime.PM2Home())
 
 	_ = os.MkdirAll(filepath.Dir(plistPath), 0o755)
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
@@ -89,18 +71,7 @@ func generateSystemd(exe string) error {
 	_ = exec.Command("systemctl", "--user", "disable", "pm2.service").Run()
 	_ = os.Remove(unitPath)
 
-	unit := fmt.Sprintf(`[Unit]
-Description=PM2 Daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=%s daemon start
-Environment="PATH=%s"
-
-[Install]
-WantedBy=default.target
-`, exe, os.Getenv("PATH"))
+	unit := systemdUnit(exe, os.Getenv("PATH"))
 
 	_ = os.MkdirAll(filepath.Dir(unitPath), 0o755)
 	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {

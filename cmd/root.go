@@ -14,9 +14,17 @@ import (
 )
 
 // Cmd is the customized PM2 root command.
+//
+// SilenceUsage keeps a failed run to a single error line. The daemon is
+// spawned with its stderr redirected to an append-only file no rotation
+// owns, so a respawn loop against an argv the binary rejects writes the
+// full usage block on every attempt — that is how ~/.pm2/daemon-err.log
+// reached 135 MB of repeated `unknown flag: --foreground` help text. A
+// usage block is for a human at a terminal, not for a supervisor's log.
 var Cmd = &cobra.Command{
-	Use:   "pm2",
-	Short: "PM2-like process manager written in Go",
+	Use:          "pm2",
+	Short:        "PM2-like process manager written in Go",
+	SilenceUsage: true,
 }
 
 func init() {

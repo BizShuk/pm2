@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 
 	cliruntime "github.com/bizshuk/pm2/cmd/runtime"
 	daemonruntime "github.com/bizshuk/pm2/daemon"
+	"github.com/bizshuk/pm2/model"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +50,19 @@ func RunStart(cmd *cobra.Command, _ []string) error {
 	}
 	if foreground {
 		srv := daemonruntime.NewServer(cliruntime.PM2Home())
-		return srv.Listen(cliruntime.SocketPath())
+		err := srv.Listen(cliruntime.SocketPath())
+		if errors.Is(err, daemonruntime.ErrAlreadyRunning) {
+			// Exit 0, deliberately. The request was "make sure a daemon
+			// is running" and one is — losing the singleton race is the
+			// guard working, not a failure. A supervisor restarts what
+			// exits non-zero, so reporting failure here would put
+			// launchd's KeepAlive (and systemd's Restart=on-failure)
+			// into a permanent retry loop against a socket it can never
+			// own.
+			fmt.Println("PM2 daemon is already running.")
+			return nil
+		}
+		return err
 	}
 	return startAsBackground()
 }
@@ -60,6 +74,18 @@ func RunStart(cmd *cobra.Command, _ []string) error {
 // daemon is its own process group leader (so `pm2 daemon kill` can
 // later signal the whole tree if needed).
 func startAsBackground() error {
+	// A daemon is a singleton per socket. Without this check the
+	// spawn "succeeds" and prints a start message while the child
+	// immediately dies on the listener's own singleton guard —
+	// reporting a start that never happened.
+	if resp, err := model.SendRequest(
+		cliruntime.SocketPath(),
+		model.Request{Command: model.CmdPing},
+	); err == nil && resp.OK {
+		fmt.Println("PM2 daemon is already running.")
+		return nil
+	}
+
 	// Clear the stop marker so future CLI invocations can auto-respawn
 	// again. The user just explicitly asked for a daemon — the
 	// auto-spawn opt-out from a previous `pm2 daemon stop` is no

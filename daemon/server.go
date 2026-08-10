@@ -12,6 +12,11 @@ import (
 	"github.com/bizshuk/pm2/daemon/network"
 )
 
+// ErrAlreadyRunning reports that another daemon already answers on the
+// socket. Re-exported from network so CLI callers can react to the
+// singleton guard without importing the daemon's network internals.
+var ErrAlreadyRunning = network.ErrDaemonAlreadyRunning
+
 // Server is the PM2 daemon — a thin wrapper around ProcessManager that
 // owns the Unix socket lifecycle and background goroutines (auto-save,
 // auto-resurrect). All process management logic lives in ProcessManager;
@@ -29,17 +34,32 @@ func NewServer(homeDir string) *Server {
 	}
 }
 
-// Listen starts the Unix socket server. It wires up the metrics
-// collector, auto-resurrect, and auto-save background goroutines,
-// then delegates to network.Listen which blocks until the socket
-// is closed or the daemon exits.
+// Listen starts the Unix socket server. It claims the socket, takes
+// ownership of the daemon log, wires up the metrics collector,
+// auto-resurrect, and auto-save background goroutines, then delegates
+// to network.Serve which blocks until the socket is closed or the
+// daemon exits.
+//
+// Claiming the socket comes first, and nothing else happens until it
+// succeeds. A second daemon losing that race must leave the incumbent's
+// state directory exactly as it found it — no rotated log, no
+// resurrect replay, no auto-save tick.
 func (s *Server) Listen(socketPath string) error {
+	ln, err := network.Bind(socketPath)
+	if err != nil {
+		return err
+	}
+	defer ln.Close()
+
+	defer installLogOrWarn(s.homeDir)()
+	slog.Info("daemon listening", "socketPath", socketPath)
+
 	s.StartMetricsCollector()
 
 	go s.startAutoResurrect()
 	go s.startAutoSave()
 
-	return network.Listen(socketPath, s.ProcessManager)
+	return network.Serve(ln, s.ProcessManager)
 }
 
 func (s *Server) startAutoResurrect() {

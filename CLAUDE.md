@@ -44,7 +44,8 @@ the daemon down — only the task list goes empty.
 Import direction (no cycles):
 
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
-- `daemon` -> `executor`, `network`, `model`, `process`, `cron`
+- `daemon` -> `executor`, `network`, `model`, `process`, `cron`, `logfile`
+  (`logfile` only for the daemon's own rotating log — see `daemon/logging.go`)
 - `executor` -> `logfile`, `model` only
 - `main` -> `cmd` as the thin executable boundary
 - `cmd` owns every first-layer Cobra command (`cmd/<command>.go`) and imports
@@ -125,7 +126,11 @@ pm2/
 │   ├── monitor.go            MonitorCmd — two-pane detail/log dashboard; no -d flag
 │   ├── save.go               SaveCmd
 │   ├── resurrect.go          ResurrectCmd
-│   └── startup.go            StartupCmd — launchd/systemd service generation
+│   ├── startup.go            StartupCmd — install side: paths + launchctl/
+│   │                         systemctl invocation
+│   └── startup_template.go   launchdPlist / systemdUnit — the supervision
+│                             contract (--foreground, restart-on-failure only,
+│                             restart throttle)
 ├── config/
 │   ├── ecosystem.go          Load() — parses .json and .js (goja) ecosystem files
 │   │                         Normalize() fills defaults; resolves relative script paths
@@ -169,6 +174,9 @@ pm2/
 │   │                         Also defines ManagedProcess.
 │   ├── process_registry.go   ProcessRegistry — sole owner of the process map
 │   │                         and its RWMutex (Add/Get/Remove/UpdateInfo/...)
+│   ├── logging.go            installLog/installLogOrWarn — routes the daemon's
+│   │                         own slog output to a rotating logfile.Writer on
+│   │                         <home>/daemon.log
 │   ├── helpers.go            getAppVersion() — version probe from package.json
 │   ├── server_test.go        daemon server unit tests
 │   ├── process_registry_test.go  ProcessRegistry unit + concurrency tests
@@ -181,7 +189,9 @@ pm2/
 │   │   └── metrics.go        MetricsCollector (3-phase refresh) +
 │   │                         MetricsBackend interface + GetProcessMetrics
 │   └── network/              daemon/network sub-package — Unix socket listener
-│       ├── listener.go       Listen(socketPath, m Manager) — bind + accept loop
+│       ├── listener.go       Bind(socketPath) — singleton guard + bind;
+│       │                     Serve(ln, m) — accept loop;
+│       │                     ErrDaemonAlreadyRunning
 │       ├── handler.go        Handle(conn, m Manager) — read Request, dispatch,
 │       │                     write Response, post-CmdKill exit hook
 │       └── manager.go        Manager interface — the only contract network
@@ -596,6 +606,60 @@ valid only on a Tree file row: it enters `screenConfirmDelete`, and only `y`
 dispatches `os.Remove`; `n` / `Esc` returns without mutation. Views remain
 pure and never read files.
 
+### Daemon singleton and service registration
+
+One daemon per socket path, enforced at bind time. `network.Bind` probes
+an existing socket with `CmdPing` (own 2 s deadline — `model.SendRequest`'s
+read is unbounded, and a wedged daemon would otherwise hang the probe
+forever) and refuses to start with `ErrDaemonAlreadyRunning` when someone
+answers. Only a socket nobody answers on is removed as stale, which is the
+ordinary crash aftermath.
+
+`Bind` is separate from `Serve` so a refused start touches nothing the
+incumbent owns: no rotated log, no resurrect replay, no auto-save tick.
+`Server.Listen` binds first, then installs the log, then starts the
+background goroutines.
+
+Two daemons against one `~/.pm2` is not a theoretical hazard. Both keep
+their own cron schedules and auto-restart loops, both write the same
+`dump.json`, and `pm2 list` shows only whichever one currently holds the
+socket — so tasks held by the other appear `errored` while their
+processes are very much alive, and the restart counter climbs forever
+because the port is already taken.
+
+`pm2 startup` generates both service definitions with `daemon start
+--foreground`. Bare `daemon start` re-execs itself and detaches, so the
+supervisor's direct child exits 0 at once: launchd records the job as
+`state = not running` and systemd's `Type=simple` considers the unit
+dead, while the real daemon reparents to PID 1 and runs unsupervised —
+invisible to the supervisor and to the next start attempt. That is how
+two daemons came to share one state directory.
+
+`pm2 daemon start` (background mode) pings before spawning and reports
+"already running" rather than printing a start message for a child that
+the singleton guard immediately kills.
+
+Both units keep the daemon alive only when it dies *unsuccessfully* —
+launchd `KeepAlive = {SuccessfulExit: false}`, systemd
+`Restart=on-failure` — with a 10 s throttle (`ThrottleInterval` /
+`RestartSec`). Unconditional restart (`KeepAlive = true`,
+`Restart=always`) is wrong here: `pm2 daemon stop` and `pm2 daemon kill`
+both end in `os.Exit(0)`, so the supervisor would respawn the daemon
+the user just stopped and silently defeat the stop marker.
+
+That makes the singleton guard's exit code load-bearing. `daemon start
+--foreground` exits **0** when it loses the race: the request was "make
+sure a daemon is running" and one is, so a non-zero exit would put
+KeepAlive into a permanent retry loop against a socket it can never
+own. Only a genuine failure (bad permissions, unusable socket path)
+exits non-zero and earns a restart.
+
+`cmd/startup.go` owns where the definitions are installed;
+`cmd/startup_template.go` owns the definitions themselves, and
+`cmd/startup_test.go` pins the three properties above — the launchd
+job and the systemd unit are one contract written twice, and they
+have drifted apart once already.
+
 ### Daemon lifecycle: `stop` vs `daemon kill`
 
 Two verbs that look superficially similar but operate on different
@@ -651,10 +715,22 @@ caller always picks an explicit verb.
 ~/.pm2/
 ├── pm2.sock        Unix socket
 ├── dump.json       serialised []process.AppConfig (pm2 save / resurrect)
+├── daemon.log      the daemon's own slog output, owned by logfile.Writer
+├── daemon.<date>.log  its daily archives
+├── daemon-err.log  raw stdout/stderr the supervisor redirects (panics,
+│                   argv errors) — not rotated; nothing in-process owns it
 └── logs/
     ├── <name>-out.log
     └── <name>-err.log
 ```
+
+`daemon.log` goes through `logfile.Writer` like every managed task log, so
+the daemon is no longer the one process writing an unbounded file. What it
+cannot rotate is `daemon-err.log`: that fd belongs to launchd or to the
+spawning CLI, not to the daemon. Keeping it small is instead a matter of
+not writing megabytes to it — hence `SilenceUsage` on the root command,
+after a respawn loop against a rejected `--foreground` flag filled it with
+300k copies of the same cobra usage block (135 MB).
 
 Normalized applications normally own logs under
 `~/.config/<app_name>/logs/daemon.{log,err}`. Dated archives stay beside the
