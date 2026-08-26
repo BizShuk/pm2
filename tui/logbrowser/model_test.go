@@ -14,7 +14,7 @@ func TestTreeRightOpensAndLeftReturns(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	logPath := writeAppLog(t, root, "worker", "daemon.log", "line one\nline two\nline three\n")
+	logPath := writeTaskLog(t, root, "worker", ".log", "line one\nline two\nline three\n")
 	m := loadedModel(t, root)
 
 	m, _ = updateKey(t, m, "right")
@@ -63,21 +63,21 @@ func TestScanListsEveryApplicationUnderTheConfigRoot(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeAppLog(t, root, "vidnote", "daemon.log", "a\n")
-	writeAppLog(t, root, "agentmemory", "daemon.log", "b\n")
-	writeAppLog(t, root, "agentmemory", "daemon.2026-07-29.log", "c\n")
+	writeTaskLog(t, root, "vidnote", ".log", "a\n")
+	writeTaskLog(t, root, "agentmemory", ".log", "b\n")
+	writeTaskLog(t, root, "agentmemory", ".2026-07-29.log", "c\n")
 	if err := os.MkdirAll(filepath.Join(root, "no-logs", "data"), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
 	m := loadedModel(t, root)
-	if len(m.apps) != 2 {
-		t.Fatalf("apps = %#v, want agentmemory and vidnote", m.apps)
+	if len(m.tasks) != 2 {
+		t.Fatalf("tasks = %#v, want agentmemory and vidnote", m.tasks)
 	}
-	if m.apps[0].App != "agentmemory" || m.apps[1].App != "vidnote" {
-		t.Fatalf("apps = %q, %q, want them sorted by name", m.apps[0].App, m.apps[1].App)
+	if m.tasks[0].Task != "agentmemory" || m.tasks[1].Task != "vidnote" {
+		t.Fatalf("tasks = %q, %q, want them sorted by name", m.tasks[0].Task, m.tasks[1].Task)
 	}
-	if got := len(m.apps[0].Files); got != 2 {
+	if got := len(m.tasks[0].Files); got != 2 {
 		t.Fatalf("agentmemory files = %d, want current plus archive", got)
 	}
 }
@@ -86,7 +86,7 @@ func TestTreeEnterFocusesViewerAndLoadsSelectedFile(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	path := writeAppLog(t, root, "worker", "daemon.log", "first\nsecond\n")
+	path := writeTaskLog(t, root, "worker", ".log", "first\nsecond\n")
 	m := expandedModel(t, root)
 
 	m, loadCmd := updateKey(t, m, "enter")
@@ -110,7 +110,7 @@ func TestTreeDeleteIsAvailableOnlyOnFileRow(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	path := writeAppLog(t, root, "worker", "daemon.2026-07-29.log", "archive\n")
+	path := writeTaskLog(t, root, "worker", ".2026-07-29.log", "archive\n")
 	m := expandedModel(t, root)
 
 	m.treeCursor = 0
@@ -154,8 +154,8 @@ func TestTreeDeleteIsAvailableOnlyOnFileRow(t *testing.T) {
 		t.Fatal("delete result command = nil, want rescan")
 	}
 	m = updateMessage(t, m, refreshCmd())
-	if len(m.apps) != 0 {
-		t.Fatalf("apps after deleting the only log = %#v, want empty", m.apps)
+	if len(m.tasks) != 0 {
+		t.Fatalf("tasks after deleting the only log = %#v, want empty", m.tasks)
 	}
 }
 
@@ -165,8 +165,8 @@ func TestRescanKeepsExpansionAcrossDelete(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeAppLog(t, root, "worker", "daemon.log", "current\n")
-	writeAppLog(t, root, "worker", "daemon.2026-07-29.log", "archive\n")
+	writeTaskLog(t, root, "worker", ".log", "current\n")
+	writeTaskLog(t, root, "worker", ".2026-07-29.log", "archive\n")
 	m := expandedModel(t, root)
 
 	m.treeCursor = 2
@@ -190,7 +190,7 @@ func TestViewerDoesNotDeleteFile(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeAppLog(t, root, "worker", "daemon.log", "line\n")
+	writeTaskLog(t, root, "worker", ".log", "line\n")
 	m := expandedModel(t, root)
 	m.screen = screenViewer
 
@@ -207,7 +207,7 @@ func TestViewerLeftReturnsTreeFocusAndKeepsPendingPreview(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	path := writeAppLog(t, root, "worker", "daemon.log", "line\n")
+	path := writeTaskLog(t, root, "worker", ".log", "line\n")
 	m := expandedModel(t, root)
 
 	m, loadCmd := updateKey(t, m, "right")
@@ -232,11 +232,11 @@ func TestInitialTargetSelectsAndExpandsMatchingApp(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	writeAppLog(t, root, "api", "daemon.log", "a\n")
-	writeAppLog(t, root, "worker", "daemon.log", "b\n")
+	writeTaskLog(t, root, "api", ".log", "a\n")
+	writeTaskLog(t, root, "worker", ".log", "b\n")
 
 	m := New(root, "worker")
-	m = updateMessage(t, m, appsMsg{apps: mustListApps(t, root)})
+	m = updateMessage(t, m, tasksMsg{tasks: mustListTasks(t, root)})
 
 	if m.treeCursor != 1 {
 		t.Fatalf("treeCursor = %d, want matching worker at index 1", m.treeCursor)
@@ -291,26 +291,27 @@ func TestViewerPageNavigationUsesBodyHeight(t *testing.T) {
 	}
 }
 
-func writeAppLog(t *testing.T, root, app, name, content string) string {
+// writeTaskLog writes one file into the flat task log directory. suffix is
+// everything after the task name: ".log", ".err", or ".<date>.log".
+func writeTaskLog(t *testing.T, dir, task, suffix, content string) string {
 	t.Helper()
-	dir := filepath.Join(root, app, logfile.LogsDirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", dir, err)
 	}
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, task+suffix)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 	return path
 }
 
-func mustListApps(t *testing.T, root string) []logfile.AppLogs {
+func mustListTasks(t *testing.T, root string) []logfile.TaskLogs {
 	t.Helper()
-	apps, err := logfile.ListApps(root)
+	tasks, err := logfile.ListTasks(root)
 	if err != nil {
-		t.Fatalf("ListApps() error = %v", err)
+		t.Fatalf("ListTasks() error = %v", err)
 	}
-	return apps
+	return tasks
 }
 
 // loadedModel runs the real Init scan so tests exercise the same path the

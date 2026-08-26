@@ -9,9 +9,12 @@ import (
 	"github.com/bizshuk/pm2/logfile"
 )
 
-// daemonLogName is the daemon's own log, a sibling of the managed
-// task logs and rotated by the same rules.
-const daemonLogName = "daemon.log"
+// daemonLogPath is the daemon's own log: <home>/logs/daemon.log, rotated by
+// the same rules as the managed task logs but kept out of tasks/logs/, which
+// belongs to the programs pm2 supervises rather than to pm2 itself.
+func daemonLogPath(homeDir string) string {
+	return filepath.Join(homeDir, "logs", "daemon.log")
+}
 
 // installLog routes the daemon's slog output to a rotating
 // logfile.Writer under homeDir and returns a close func.
@@ -32,7 +35,11 @@ const daemonLogName = "daemon.log"
 // start because of its log file is strictly worse than one that logs to
 // the inherited stderr. In that case the default handler stays in place.
 func installLog(homeDir string) (func(), error) {
-	writer, err := logfile.Open(filepath.Join(homeDir, daemonLogName))
+	path := daemonLogPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return func() {}, fmt.Errorf("create daemon log directory: %w", err)
+	}
+	writer, err := logfile.Open(path)
 	if err != nil {
 		return func() {}, fmt.Errorf("open daemon log: %w", err)
 	}

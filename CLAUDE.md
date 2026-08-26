@@ -23,7 +23,7 @@ flowchart TD
         R["process_registry.go"]
         E["executor/  (fork+exec, watch, stop, fsnotify, metrics)"]
         CR["cron/scheduler.go (robfig/cron)"]
-        D["~/.pm2/dump.json (persist)"]
+        D["~/.config/pm2/dump.json (persist)"]
 
         N -->|"Manager.StartApp / StopByName / ..."| PM
         S -->|"owns lifecycle"| PM
@@ -33,7 +33,7 @@ flowchart TD
         PM -->|"Save / Resurrect"| D
     end
 
-    C -- "JSON over ~/.pm2/pm2.sock" --> N
+    C -- "JSON over ~/.config/pm2/pm2.sock" --> N
 ```
 
 `sysmon` sits beside that flow rather than inside it: it reads the OS
@@ -81,7 +81,7 @@ pm2/
 │   ├── root_test.go          root tree, alias, config, and version tests
 │   ├── runtime/              shared CLI runtime infrastructure
 │   │   ├── state.go          lazy home resolution + PM2Home/SocketPath/
-│   │   │                     ConfigRoot/DaemonStopMarkerPath
+│   │   │                     TaskLogsDir/DaemonLogsDir/DaemonStopMarkerPath
 │   │   ├── client.go         CLIClient socket RPC wrapper
 │   │   └── client_autostart.go
 │   │                         silent daemon auto-spawn + readiness wait
@@ -186,7 +186,7 @@ pm2/
 │   │                         and its RWMutex (Add/Get/Remove/UpdateInfo/...)
 │   ├── logging.go            installLog/installLogOrWarn — routes the daemon's
 │   │                         own slog output to a rotating logfile.Writer on
-│   │                         <home>/daemon.log
+│   │                         <home>/logs/daemon.log
 │   ├── helpers.go            getAppVersion() — version probe from package.json
 │   ├── server_test.go        daemon server unit tests
 │   ├── process_registry_test.go  ProcessRegistry unit + concurrency tests
@@ -215,8 +215,9 @@ pm2/
 │   ├── follow.go             channel follower for append/recreate/truncate paths
 │   ├── rotation.go           leading daily-block split + archive naming
 │   ├── writer.go             per-line timestamp + midnight/reopen handling
-│   └── files.go              AppLogs + ListApps — ~/.config/<app>/logs
-│                             discovery, current vs dated-archive classification
+│   └── files.go              TaskLogs + ListTasks — the flat
+│                             ~/.config/pm2/tasks/logs directory, grouped by
+│                             task-name stem, current vs dated-archive
 ├── model/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   ├── list.go               ListProcesses — CmdList + decode; the one path
@@ -539,7 +540,7 @@ the value shown in `pm2 m`. The daemon always receives absolute paths.
 
 ### RPC protocol
 
-Newline-delimited JSON over a Unix socket (`~/.pm2/pm2.sock`).
+Newline-delimited JSON over a Unix socket (`~/.config/pm2/pm2.sock`).
 `model.SendRequest()` dials, sends one `Request`, reads one `Response`, closes.
 No persistent connection — each CLI invocation is a fresh dial.
 
@@ -661,7 +662,7 @@ pm2 daemon as root — is the wrong one, and expensively so:
 
 - `executor.BuildCommand` sets only `Setpgid`, never a `Credential`, so
   every managed task would inherit root along with the daemon.
-- `~/.pm2/pm2.sock`, `dump.json` and every application log would become
+- `~/.config/pm2/pm2.sock`, `dump.json` and every task log would become
   root-owned, and an ordinary `pm2 list` could not open the socket.
 - `pm2 startup` installs a LaunchAgent in the user domain, so the whole
   supervision contract would have to be rewritten too.
@@ -765,12 +766,12 @@ Go services. It returns receive-only `Entry` and error channels, begins existing
 paths at EOF, buffers partial lines, and resets to byte zero when a path is new,
 replaced, or truncated. Cancelling `ctx` closes both channels.
 
-Interactive file management belongs to `pm2 logs monitor [app]`; its child
-alias makes `pm2 logs m [app]` equivalent. Root `pm2 monitor`, `pm2 m`, and
+Interactive file management belongs to `pm2 logs monitor [task]`; its child
+alias makes `pm2 logs m [task]` equivalent. Root `pm2 monitor`, `pm2 m`, and
 `pm2 dashboard` remain the process dashboard.
 
-**The browser's subject is the filesystem, not the daemon.** It lists every
-`~/.config/<app>/logs` directory through `logfile.ListApps(root)` and never
+**The browser's subject is the filesystem, not the daemon.** It reads
+`~/.config/pm2/tasks/logs` through `logfile.ListTasks(dir)` and never
 opens the socket. Root `pm2 logs` still streams from the daemon's snapshot,
 because streaming needs a live process to stream from; browsing does not, and
 the two answer different questions:
@@ -778,24 +779,29 @@ the two answer different questions:
 | | root `pm2 logs` | `pm2 logs monitor` |
 | --- | --- | --- |
 | Subject | what a running task is writing now | every log file on disk |
-| Source | `CmdList` snapshot → `logfile.Follow` | `logfile.ListApps(~/.config)` |
+| Source | `CmdList` snapshot → `logfile.Follow` | `logfile.ListTasks(tasks/logs)` |
 | Needs the daemon | yes | no |
 | Covers a deleted task's logs | no | yes |
 
-Three boundaries:
+Four boundaries:
 
 - **Logs outlive their task.** Keying the listing on the process list hid
   exactly the files worth managing — an application whose task was deleted,
   renamed, or registered against a different ecosystem file kept a log
   directory nobody could reach, and the browser existed to reclaim disk.
-- **Only `<app>/logs` is scanned**, never the config directory at large. A
-  `.log` file elsewhere under `~/.config/<app>/` belongs to whatever wrote it
+- **Grouping is by filename stem, not by directory.** Every task writes
+  `<task>.log` / `<task>.err` plus their `<task>.<YYYY-MM-DD>` archives into
+  one flat directory, so the stem is the task identity. Only a *trailing*
+  `YYYY-MM-DD` is a rotation date, which is what keeps a task legitimately
+  named `api.v2` from being split into a task `api` with an archive.
+- **Only `tasks/logs` is scanned**, never `~/.config` at large. A `.log` file
+  under some application's own config directory belongs to whatever wrote it
   (a LevelDB journal, an editor cache) and must not be offered for deletion.
-  An application with no log files produces no row rather than one that
-  expands into nothing.
-- **A missing or unreadable directory is an empty state, not an error.**
-  `ListApps` skips per-directory read failures so one root-owned config
-  directory cannot blank the whole listing; only an unreadable root fails.
+  Scattering task logs across those directories is exactly what the flat
+  directory replaced.
+- **A missing or unreadable directory is an empty state, not an error.** A
+  daemon that has never launched a task has no `tasks/logs` at all; that is
+  an empty listing, not a failure.
 
 The `tui/logbrowser` state machine projects applications and their files into
 a persistent 40/60 left Tree/right Viewer layout. `screenTree` and
@@ -828,7 +834,7 @@ incumbent owns: no rotated log, no resurrect replay, no auto-save tick.
 `Server.Listen` binds first, then installs the log, then starts the
 background goroutines.
 
-Two daemons against one `~/.pm2` is not a theoretical hazard. Both keep
+Two daemons against one `~/.config/pm2` is not a theoretical hazard. Both keep
 their own cron schedules and auto-restart loops, both write the same
 `dump.json`, and `pm2 list` shows only whichever one currently holds the
 socket — so tasks held by the other appear `errored` while their
@@ -917,20 +923,45 @@ caller always picks an explicit verb.
 | `github.com/charmbracelet/bubbletea` | TUI event loop                                    |
 | `github.com/charmbracelet/lipgloss`  | TUI and `pm2 list` table styling                  |
 
-## State directory (`~/.pm2/`)
+## State directory (`~/.config/pm2/`)
 
 ```tree
-~/.pm2/
+~/.config/pm2/
 ├── pm2.sock        Unix socket
 ├── dump.json       serialised []process.AppConfig (pm2 save / resurrect)
-├── daemon.log      the daemon's own slog output, owned by logfile.Writer
-├── daemon.<date>.log  its daily archives
-├── daemon-err.log  raw stdout/stderr the supervisor redirects (panics,
-│                   argv errors) — not rotated; nothing in-process owns it
-└── logs/
-    ├── <name>-out.log
-    └── <name>-err.log
+├── daemon.stopped  marker that disables silent auto-spawn
+├── logs/           the daemon's own log — pm2 writes these
+│   ├── daemon.log       its slog output, owned by logfile.Writer
+│   ├── daemon.<date>.log   its daily archives
+│   └── daemon-err.log   raw stdout/stderr the supervisor redirects
+│                        (panics, argv errors) — not rotated; nothing
+│                        in-process owns it
+└── tasks/logs/     the supervised programs' logs — they write these
+    ├── <task-name>.log
+    ├── <task-name>.err
+    ├── <task-name>.<YYYY-MM-DD>.log
+    └── <task-name>.<YYYY-MM-DD>.err
 ```
+
+Everything pm2 owns lives under one root. `~/.pm2` is gone: a state
+directory beside `~/.config/pm2` meant two places to look, two places to
+back up, and a `dump.json` whose location did not match the convention
+every other application in the tree follows.
+
+**Task log paths are derived, never configured.** `process.TaskLogPath` /
+`TaskErrPath` join the state root with `NormalizeName(task)`, so no
+user-supplied string — a `~`, a relative path, a name with spaces — can
+steer a log file out of the directory pm2 owns. The `log_file`,
+`out_file`, `error_file`, and `config_dir` ecosystem fields were removed
+rather than re-pointed: `config_dir` existed only to derive the other
+three, none of them were used by any real ecosystem file, and keeping
+them would mean a saved dump could pin a task to a directory the current
+binary no longer manages.
+
+Scattering task logs under each application's own `~/.config/<app>/logs`
+was the previous scheme. It made them impossible to list, size, or clean
+without walking the whole config root, and a deleted task's logs were
+stranded beside files pm2 never wrote.
 
 `daemon.log` goes through `logfile.Writer` like every managed task log, so
 the daemon is no longer the one process writing an unbounded file. What it
@@ -940,10 +971,9 @@ not writing megabytes to it — hence `SilenceUsage` on the root command,
 after a respawn loop against a rejected `--foreground` flag filled it with
 300k copies of the same cobra usage block (135 MB).
 
-Normalized applications normally own logs under
-`~/.config/<app_name>/logs/daemon.{log,err}`. Dated archives stay beside the
-current file as `daemon.<YYYY-MM-DD>.{log,err}`; `~/.pm2/logs/` remains the
-executor fallback when a request has no configured log directory.
+The daemon's own log sits in `logs/`, not in `tasks/logs/`, because the two
+have different authors: one is pm2's, the others belong to the programs it
+supervises, and `pm2 logs monitor` offers only the latter for deletion.
 
 ## Conventions
 
@@ -1011,13 +1041,13 @@ executor fallback when a request has no configured log directory.
 - `logfile.Follow` is the sole public channel API for continuous managed-log
   consumption. Keep `logfile.Source` independent of daemon/process types;
   consumers receive typed `Entry` values and a separate error channel.
-- `tui/logbrowser` may delete only a path returned by `logfile.ListApps`, which
-  by construction lies inside some `~/.config/<app>/logs`. Keep deletion behind
+- `tui/logbrowser` may delete only a path returned by `logfile.ListTasks`, which
+  by construction lies inside `~/.config/pm2/tasks/logs`. Keep deletion behind
   the explicit `y/N` confirmation; views remain pure and never touch the
   filesystem.
 - `logfile` owns log-file discovery; `tui/logbrowser` and `cmd/logs` never
   walk directories themselves. Widening what counts as a log file is a change
-  to `ListApps`, not to a caller.
+  to `ListTasks`, not to a caller.
 - `config.AppConfig.Normalize()` is called on every loaded app. Do not skip it.
 - **Executor lock direction (Phase 4 invariant)**: `daemon.ProcessManager` may
   call `executor.Executor` while holding the registry lock, because the
@@ -1061,7 +1091,7 @@ executor fallback when a request has no configured log directory.
   its macOS memory parser had drifted into reporting the wrong number by the
   time it was deleted.
 - No package `init()` may resolve `$HOME` or exit the process.
-  `cmd/runtime` resolves `~/.pm2` lazily through a `sync.OnceValue`
+  `cmd/runtime` resolves `~/.config/pm2` lazily through a `sync.OnceValue`
   because launchd gives a system-domain LaunchDaemon no HOME at all: an
   init that exited on a missing home dir killed `pm2 gpu agent` on every
   spawn, before main ran, and reported it as a home-directory error in a

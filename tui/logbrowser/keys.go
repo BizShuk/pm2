@@ -99,16 +99,16 @@ func (m Model) moveIn() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if row.kind == treeApp {
-		app := m.apps[row.appIndex]
+	if row.kind == treeTask {
+		task := m.tasks[row.taskIndex]
 		m.ensureExpanded()
-		if m.expanded[app.App] {
-			if len(app.Files) > 0 {
+		if m.expanded[task.Task] {
+			if len(task.Files) > 0 {
 				m.treeCursor++
 			}
 			return m, nil
 		}
-		m.expanded[app.App] = true
+		m.expanded[task.Task] = true
 		return m, nil
 	}
 
@@ -150,14 +150,14 @@ func (m Model) moveOut() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	app := m.apps[row.appIndex]
+	task := m.tasks[row.taskIndex]
 	switch row.kind {
-	case treeApp:
+	case treeTask:
 		m.ensureExpanded()
-		m.expanded[app.App] = false
+		m.expanded[task.Task] = false
 	case treeFile:
-		parentIndex := m.treeIndexForApp(row.appIndex)
-		m.expanded[app.App] = false
+		parentIndex := m.treeIndexForTask(row.taskIndex)
+		m.expanded[task.Task] = false
 		m.treeCursor = parentIndex
 	}
 	return m, nil

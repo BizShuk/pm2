@@ -13,8 +13,8 @@ import (
 
 	"github.com/bizshuk/pm2/logfile"
 	"github.com/bizshuk/pm2/model"
+	"github.com/bizshuk/pm2/process"
 	"github.com/fsnotify/fsnotify"
-	"github.com/mitchellh/go-homedir"
 )
 
 // stopTimeout is how long Stop waits for the process group to exit
@@ -92,18 +92,11 @@ type StartResult struct {
 // responsible for building its ManagedProcess and registering it.
 // Start does NOT spawn the Watch goroutine — the caller does that.
 func (e *Executor) Start(req *model.AppStartReq, name string, onFileChanged func()) (*StartResult, error) {
-	logDir := filepath.Join(e.homeDir, "logs")
-	_ = os.MkdirAll(logDir, 0o755)
+	logFile := process.TaskLogPath(e.homeDir, name)
+	errFile := process.TaskErrPath(e.homeDir, name)
 
-	logFile := resolveLogPath(req.LogFile, req.OutFile, req.ConfigDir, logDir, name)
-	errFile := resolveLogPath(req.ErrorFile, "", req.ConfigDir, logDir, name)
-
-	// Create directories for log files (idempotent).
-	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
-		return nil, fmt.Errorf("create log directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(errFile), 0o755); err != nil {
-		return nil, fmt.Errorf("create error log directory: %w", err)
+	if err := os.MkdirAll(process.TaskLogsDir(e.homeDir), 0o755); err != nil {
+		return nil, fmt.Errorf("create task log directory: %w", err)
 	}
 
 	outF, err := logfile.Open(logFile)
@@ -281,30 +274,4 @@ func (e *Executor) Stop(
 		onStopped()
 	}
 	return nil
-}
-
-// resolveLogPath picks the actual on-disk path for a log file,
-// expanding ~ and applying the documented precedence:
-//  1. logFile (explicit request)
-//  2. altFile (req.OutFile fallback for the stdout file)
-//  3. configDir/logs/daemon.log (if ConfigDir set and no logFile)
-//  4. <home>/logs/<name> (default)
-//
-// It also expands ~ via homedir.Expand on the explicit logFile path.
-func resolveLogPath(logFile, altFile, configDir, logDir, name string) string {
-	resolved := logFile
-	if resolved == "" {
-		resolved = altFile
-	}
-	if resolved == "" && configDir != "" {
-		resolved = filepath.Join(configDir, "logs", "daemon.log")
-	}
-	if resolved == "" {
-		resolved = filepath.Join(logDir, name)
-	} else {
-		if h, err := homedir.Expand(resolved); err == nil {
-			resolved = h
-		}
-	}
-	return resolved
 }

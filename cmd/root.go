@@ -18,7 +18,7 @@ import (
 // SilenceUsage keeps a failed run to a single error line. The daemon is
 // spawned with its stderr redirected to an append-only file no rotation
 // owns, so a respawn loop against an argv the binary rejects writes the
-// full usage block on every attempt — that is how ~/.pm2/daemon-err.log
+// full usage block on every attempt — that is how the daemon-err.log
 // reached 135 MB of repeated `unknown flag: --foreground` help text. A
 // usage block is for a human at a terminal, not for a supervisor's log.
 var Cmd = &cobra.Command{

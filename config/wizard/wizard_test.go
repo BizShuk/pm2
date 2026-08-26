@@ -73,10 +73,6 @@ func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 		Watch:       true,
 		MaxRestarts: 7,
 		CWD:         "/srv/worker",
-		ConfigDir:   "/var/lib/worker",
-		LogFile:     "/var/log/worker.log",
-		OutFile:     "/var/log/worker.out",
-		ErrorFile:   "/var/log/worker.err",
 		Optional:    true,
 	}
 
@@ -94,10 +90,6 @@ func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 		"watch: true",
 		"max_restarts: 7",
 		`cwd: "/srv/worker"`,
-		`config_dir: "/var/lib/worker"`,
-		`log_file: "/var/log/worker.log"`,
-		`out_file: "/var/log/worker.out"`,
-		`error_file: "/var/log/worker.err"`,
 		"optional: true",
 	} {
 		if !strings.Contains(got, want) {
@@ -231,10 +223,6 @@ func TestRenderRoundTrip(t *testing.T) {
 					Watch:       true,
 					MaxRestarts: 7,
 					CWD:         "/srv/worker",
-					ConfigDir:   "/var/lib/worker",
-					LogFile:     "/var/log/worker.log",
-					OutFile:     "/var/log/worker.out",
-					ErrorFile:   "/var/log/worker.err",
 					Optional:    true,
 				},
 			},
@@ -269,8 +257,6 @@ func TestRenderRoundTrip(t *testing.T) {
 				want.Namespace != got.Namespace || want.Watch != got.Watch ||
 				want.Cron != got.Cron || want.CronRestart != got.CronRestart ||
 				want.MaxRestarts != got.MaxRestarts ||
-				want.ConfigDir != got.ConfigDir || want.LogFile != got.LogFile ||
-				want.OutFile != got.OutFile || want.ErrorFile != got.ErrorFile ||
 				want.Optional != got.Optional {
 				t.Errorf("%s[%d]: mismatch want=%+v got=%+v", tc.name, i, want, got)
 			}
@@ -388,19 +374,6 @@ func TestCollectAnswersSingle(t *testing.T) {
 	if got.CWD != "" {
 		t.Errorf("CWD = %q, want blank so config loading selects the ecosystem directory", got.CWD)
 	}
-	wantConfigDir := "~/.config/" + process.NormalizeName(got.Name) + "/"
-	if got.ConfigDir != wantConfigDir {
-		t.Errorf("ConfigDir = %q, want %q", got.ConfigDir, wantConfigDir)
-	}
-	if got.LogFile != filepath.Join(wantConfigDir, "logs", "daemon.log") {
-		t.Errorf("LogFile = %q, want derived default", got.LogFile)
-	}
-	if got.OutFile != "" {
-		t.Errorf("OutFile = %q, want blank", got.OutFile)
-	}
-	if got.ErrorFile != filepath.Join(wantConfigDir, "logs", "daemon.err") {
-		t.Errorf("ErrorFile = %q, want derived default", got.ErrorFile)
-	}
 	// The Optional prompt defaults to yes, so a blank answer must opt in.
 	if !got.Optional {
 		t.Errorf("Expected optional true on a blank answer")
@@ -466,19 +439,6 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 	}
 	if got.CWD != "/srv/worker" {
 		t.Errorf("CWD = %q, want /srv/worker", got.CWD)
-	}
-	wantConfigDir := "~/.config/" + process.NormalizeName(got.Name) + "/"
-	if got.ConfigDir != wantConfigDir {
-		t.Errorf("ConfigDir = %q, want derived default %q", got.ConfigDir, wantConfigDir)
-	}
-	if got.LogFile != filepath.Join(wantConfigDir, "logs", "daemon.log") {
-		t.Errorf("LogFile = %q, want derived default", got.LogFile)
-	}
-	if got.OutFile != "" {
-		t.Errorf("OutFile = %q, want blank default", got.OutFile)
-	}
-	if got.ErrorFile != filepath.Join(wantConfigDir, "logs", "daemon.err") {
-		t.Errorf("ErrorFile = %q, want derived default", got.ErrorFile)
 	}
 	if got.Optional {
 		t.Error("Optional = true, want false")

@@ -6,30 +6,27 @@ import (
 	"testing"
 )
 
-func TestListAppsGroupsLogsByApplicationDirectory(t *testing.T) {
+func TestListTasksGroupsFilesByTaskName(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.log"), "current stdout")
-	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.err"), "current stderr")
-	writeNestedTestFile(t, filepath.Join(root, "vidnote", LogsDirName, "daemon.2026-07-29.log"), "old")
-	writeNestedTestFile(t, filepath.Join(root, "agentmemory", LogsDirName, "daemon.log"), "other app")
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "vidnote.log"), "current stdout")
+	writeTestFile(t, filepath.Join(dir, "vidnote.err"), "current stderr")
+	writeTestFile(t, filepath.Join(dir, "vidnote.2026-07-29.log"), "old")
+	writeTestFile(t, filepath.Join(dir, "agentmemory.log"), "other task")
 
-	apps, err := ListApps(root)
+	tasks, err := ListTasks(dir)
 	if err != nil {
-		t.Fatalf("ListApps() error = %v", err)
+		t.Fatalf("ListTasks() error = %v", err)
 	}
-	if len(apps) != 2 {
-		t.Fatalf("ListApps() returned %d apps: %#v", len(apps), apps)
+	if len(tasks) != 2 {
+		t.Fatalf("ListTasks() returned %d tasks: %#v", len(tasks), tasks)
 	}
-	if apps[0].App != "agentmemory" || apps[1].App != "vidnote" {
-		t.Fatalf("apps not sorted by name: %q, %q", apps[0].App, apps[1].App)
+	if tasks[0].Task != "agentmemory" || tasks[1].Task != "vidnote" {
+		t.Fatalf("tasks not sorted by name: %q, %q", tasks[0].Task, tasks[1].Task)
 	}
 
-	vidnote := apps[1]
-	if vidnote.Dir != filepath.Join(root, "vidnote", LogsDirName) {
-		t.Errorf("AppLogs.Dir = %q, want the app's logs directory", vidnote.Dir)
-	}
+	vidnote := tasks[1]
 	gotNames := make([]string, 0, len(vidnote.Files))
 	for _, file := range vidnote.Files {
 		gotNames = append(gotNames, file.Name)
@@ -37,7 +34,7 @@ func TestListAppsGroupsLogsByApplicationDirectory(t *testing.T) {
 			t.Errorf("FileInfo.Size for %q = %d, want positive", file.Path, file.Size)
 		}
 	}
-	wantNames := []string{"daemon.err", "daemon.log", "daemon.2026-07-29.log"}
+	wantNames := []string{"vidnote.err", "vidnote.log", "vidnote.2026-07-29.log"}
 	for i, want := range wantNames {
 		if gotNames[i] != want {
 			t.Errorf("files[%d].Name = %q, want %q (all: %v)", i, gotNames[i], want, gotNames)
@@ -54,67 +51,59 @@ func TestListAppsGroupsLogsByApplicationDirectory(t *testing.T) {
 	}
 }
 
-// An application directory without a logs directory, and one whose logs
-// directory is empty, are both ordinary states — neither may produce a row the
-// user can only expand into nothing.
-func TestListAppsSkipsApplicationsWithoutLogFiles(t *testing.T) {
+// A task whose name itself contains a dotted segment must not be split on it:
+// only a trailing YYYY-MM-DD is a rotation date.
+func TestListTasksKeepsDottedTaskNamesIntact(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "empty", LogsDirName), 0o755); err != nil {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "api.v2.log"), "current")
+	writeTestFile(t, filepath.Join(dir, "api.v2.2026-07-29.log"), "old")
+
+	tasks, err := ListTasks(dir)
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Task != "api.v2" {
+		t.Fatalf("ListTasks() = %#v, want one task named api.v2", tasks)
+	}
+	if len(tasks[0].Files) != 2 {
+		t.Fatalf("api.v2 files = %#v, want its current file and its archive", tasks[0].Files)
+	}
+}
+
+// Subdirectories are not log files. The log directory is flat by
+// construction, but an unrelated directory dropped in it must not become a
+// row the user can delete.
+func TestListTasksIgnoresSubdirectories(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "archive"), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "data-only", "data"), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	writeNestedTestFile(t, filepath.Join(root, "data-only", "config.json"), "{}")
 
-	apps, err := ListApps(root)
+	tasks, err := ListTasks(dir)
 	if err != nil {
-		t.Fatalf("ListApps() error = %v", err)
+		t.Fatalf("ListTasks() error = %v", err)
 	}
-	if len(apps) != 0 {
-		t.Fatalf("ListApps() = %#v, want no apps", apps)
+	if len(tasks) != 0 {
+		t.Fatalf("ListTasks() = %#v, want no tasks", tasks)
 	}
 }
 
-// Only <app>/logs is scanned. A .log file elsewhere in a config directory
-// belongs to whatever wrote it (a browser cache, a database journal) and must
-// not be offered for deletion.
-func TestListAppsIgnoresFilesOutsideTheLogsDirectory(t *testing.T) {
+// A daemon that has never launched a task has no log directory at all. That
+// is an empty listing, not a failure.
+func TestListTasksReturnsNoTasksForMissingDir(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	writeNestedTestFile(t, filepath.Join(root, "editor", "data", "Session Storage", "000003.log"), "leveldb")
-	writeNestedTestFile(t, filepath.Join(root, "editor", "stray.log"), "stray")
-
-	apps, err := ListApps(root)
+	tasks, err := ListTasks(filepath.Join(t.TempDir(), "missing"))
 	if err != nil {
-		t.Fatalf("ListApps() error = %v", err)
+		t.Fatalf("ListTasks() error = %v", err)
 	}
-	if len(apps) != 0 {
-		t.Fatalf("ListApps() = %#v, want no apps", apps)
+	if len(tasks) != 0 {
+		t.Fatalf("ListTasks() = %#v, want no tasks", tasks)
 	}
-}
-
-func TestListAppsReturnsNoAppsForMissingRoot(t *testing.T) {
-	t.Parallel()
-
-	apps, err := ListApps(filepath.Join(t.TempDir(), "missing"))
-	if err != nil {
-		t.Fatalf("ListApps() error = %v", err)
-	}
-	if len(apps) != 0 {
-		t.Fatalf("ListApps() = %#v, want no apps", apps)
-	}
-}
-
-func writeNestedTestFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
-	}
-	writeTestFile(t, path, content)
 }
 
 func TestArchiveDateClassifiesCurrentAndRotatedNames(t *testing.T) {

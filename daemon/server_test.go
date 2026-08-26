@@ -16,7 +16,6 @@ import (
 	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
-	"github.com/mitchellh/go-homedir"
 )
 
 // testDir creates a sandbox-friendly scratch directory under
@@ -50,14 +49,14 @@ func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	// Bash expands $MARKER in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "envcheck",
-		Script:    "echo",
-		Args:      []string{`$` + marker + ` > ` + outPath},
-		Instances: 1,
-		// Snapshot does NOT live in the daemon's os.Environ().
-		BaseEnv: append(os.Environ(), marker+"="+want),
-	},
+			Namespace: "default",
+			Name:      "envcheck",
+			Script:    "echo",
+			Args:      []string{`$` + marker + ` > ` + outPath},
+			Instances: 1,
+			// Snapshot does NOT live in the daemon's os.Environ().
+			BaseEnv: append(os.Environ(), marker+"="+want),
+		},
 	}
 
 	if _, err := pm.StartApp(req); err != nil {
@@ -92,13 +91,13 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	pm := NewProcessManager(testDir)
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "persistcheck",
-		Script:    "sleep",
-		Args:      []string{"30"},
-		Instances: 1,
-		BaseEnv:   snapshot,
-	},
+			Namespace: "default",
+			Name:      "persistcheck",
+			Script:    "sleep",
+			Args:      []string{"30"},
+			Instances: 1,
+			BaseEnv:   snapshot,
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -159,28 +158,28 @@ func TestFindProcesses(t *testing.T) {
 	pm := NewProcessManager(testDir(t))
 	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{Name: "appA", Namespace: "default"},
-		ID: 0,
-	},
-})
+			AppConfig: process.AppConfig{Name: "appA", Namespace: "default"},
+			ID:        0,
+		},
+	})
 	pm.reg.Add("Infra:appB", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{Name: "appB", Namespace: "Infra"},
-		ID: 1,
-	},
-})
+			AppConfig: process.AppConfig{Name: "appB", Namespace: "Infra"},
+			ID:        1,
+		},
+	})
 	pm.reg.Add("Infra:appC", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{Name: "appC", Namespace: "Infra"},
-		ID: 2,
-	},
-})
+			AppConfig: process.AppConfig{Name: "appC", Namespace: "Infra"},
+			ID:        2,
+		},
+	})
 	pm.reg.Add("default:appB", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{Name: "appB", Namespace: "default"},
-		ID: 3,
-	},
-})
+			AppConfig: process.AppConfig{Name: "appB", Namespace: "default"},
+			ID:        3,
+		},
+	})
 
 	// 1. 測試 ID 匹配
 	res := pm.findProcesses("1")
@@ -219,15 +218,15 @@ func TestWatchStateInheritance(t *testing.T) {
 
 	pm.reg.Add("default:watch-app", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Name:      "watch-app",
-		Namespace: "default",
-		Watch:     true,
-		Script:    "test.js",
-	},
-				ID:        1,
-	},
-})
+			AppConfig: process.AppConfig{
+				Name:      "watch-app",
+				Namespace: "default",
+				Watch:     true,
+				Script:    "test.js",
+			},
+			ID: 1,
+		},
+	})
 
 	err := pm.Save()
 	if err != nil {
@@ -256,15 +255,15 @@ func TestVersionStateInheritance(t *testing.T) {
 
 	pm.reg.Add("default:version-app", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Name:      "version-app",
-		Namespace: "default",
-		Version:   "1.2.3",
-		Script:    "test.js",
-	},
-				ID:        1,
-	},
-})
+			AppConfig: process.AppConfig{
+				Name:      "version-app",
+				Namespace: "default",
+				Version:   "1.2.3",
+				Script:    "test.js",
+			},
+			ID: 1,
+		},
+	})
 
 	err := pm.Save()
 	if err != nil {
@@ -299,15 +298,15 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 	// Bash expands $PWD in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "pwdcheck",
-		Script:    "echo",
-		Args:      []string{"$PWD > " + outPath},
-		Instances: 1,
-		CWD:       workDir,
-		// Snapshot deliberately carries a stale PWD.
-		BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
-	},
+			Namespace: "default",
+			Name:      "pwdcheck",
+			Script:    "echo",
+			Args:      []string{"$PWD > " + outPath},
+			Instances: 1,
+			CWD:       workDir,
+			// Snapshot deliberately carries a stale PWD.
+			BaseEnv: append(os.Environ(), "PWD=/tmp/some/other/dir"),
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -376,14 +375,14 @@ func TestKillAllStopsEveryProcess(t *testing.T) {
 
 	for _, name := range []string{"a", "b", "c"} {
 		req := &model.AppStartReq{
-		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      name,
-		Script:    "/bin/sh",
-		Args:      []string{"-c", "sleep 30"},
-		Instances: 1,
-	},
-	}
+			AppConfig: process.AppConfig{
+				Namespace: "default",
+				Name:      name,
+				Script:    "/bin/sh",
+				Args:      []string{"-c", "sleep 30"},
+				Instances: 1,
+			},
+		}
 		if _, err := pm.StartApp(req); err != nil {
 			t.Fatalf("startApp %s failed: %v", name, err)
 		}
@@ -428,25 +427,25 @@ func TestConfigFileReplacement(t *testing.T) {
 
 	pm.reg.Add("default:agentmemory", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Name:       "agentmemory",
-		Namespace:  "default",
-		Script:     scriptFile,
-		ConfigFile: "/path/to/ecosystem.config.js",
-	},
-				ID:         42,
-	},
+			AppConfig: process.AppConfig{
+				Name:       "agentmemory",
+				Namespace:  "default",
+				Script:     scriptFile,
+				ConfigFile: "/path/to/ecosystem.config.js",
+			},
+			ID: 42,
+		},
 		done: make(chan struct{}),
-})
+	})
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:  "Agent",
-		Name:       "agentmemory",
-		Script:     scriptFile,
-		ConfigFile: "/path/to/ecosystem.config.js",
-		Instances:  1,
-	},
+			Namespace:  "Agent",
+			Name:       "agentmemory",
+			Script:     scriptFile,
+			ConfigFile: "/path/to/ecosystem.config.js",
+			Instances:  1,
+		},
 	}
 
 	_, err := pm.StartApp(req)
@@ -479,12 +478,12 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:   "default",
-		Name:        "fail-app",
-		Script:      "/usr/bin/false",
-		MaxRestarts: 5,
-		Instances:   1,
-	},
+			Namespace:   "default",
+			Name:        "fail-app",
+			Script:      "/usr/bin/false",
+			MaxRestarts: 5,
+			Instances:   1,
+		},
 	}
 
 	_, err := pm.StartApp(req)
@@ -527,23 +526,23 @@ func TestRestartsInheritance(t *testing.T) {
 
 	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Name:      "appA",
-		Namespace: "default",
-		Script:    "/bin/echo",
-	},
-				ID:        1,
-			Restarts:  5,
-	},
-})
+			AppConfig: process.AppConfig{
+				Name:      "appA",
+				Namespace: "default",
+				Script:    "/bin/echo",
+			},
+			ID:       1,
+			Restarts: 5,
+		},
+	})
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "appA",
-		Script:    "/bin/echo",
-		Instances: 1,
-	},
+			Namespace: "default",
+			Name:      "appA",
+			Script:    "/bin/echo",
+			Instances: 1,
+		},
 	}
 
 	_, err := pm.StartApp(req)
@@ -561,81 +560,43 @@ func TestRestartsInheritance(t *testing.T) {
 	}
 }
 
-func TestStartAppOutFileHomeExpansion(t *testing.T) {
+func TestStartAppLogsIntoTheSharedTaskLogDir(t *testing.T) {
 	testDir := testDir(t)
-
-	// Capture the REAL HOME via os.Getenv BEFORE Setenv. We can't
-	// use homedir.Dir() here because go-homedir caches the first
-	// result at package level — a subsequent t.Setenv("HOME", ...)
-	// has no effect on homedir.Expand for the rest of the test
-	// process. os.Getenv reads the live env without caching.
-	realHome := os.Getenv("HOME")
-	if realHome == "" {
-		t.Skip("HOME env var not set; nothing to protect against")
-	}
-
-	// Override HOME so `homedir.Expand("~/...")` resolves into the
-	// test temp dir, NOT the developer's real home directory.
-	// Without this, every run of `go test ./daemon/...` would
-	// create `~/test-home-expand-out.log` on the host.
-	t.Setenv("HOME", testDir)
-
-	// go-homedir caches the first resolved home at package level, so any
-	// earlier test in this package that expanded a `~` path (e.g. one
-	// resurrecting a normalized app) would pin the developer's real HOME
-	// and make the Setenv above a no-op. Disable the cache for the
-	// duration of this test so it does not depend on test ordering.
-	homedir.DisableCache = true
-	homedir.Reset()
-	t.Cleanup(func() {
-		homedir.DisableCache = false
-		homedir.Reset()
-	})
-
 	pm := NewProcessManager(testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "homeexpandcheck",
-		Script:    "/bin/sh",
-		Args:      []string{"-c", "sleep 1"},
-		Instances: 1,
-		OutFile:   "~/test-home-expand-out.log",
-		ErrorFile: "~/test-home-expand-err.log",
-	},
+			Namespace: "default",
+			Name:      "Log Path Check",
+			Script:    "/bin/sh",
+			Args:      []string{"-c", "sleep 1"},
+			Instances: 1,
+		},
 	}
 
 	pi, err := pm.StartApp(req)
 	if err != nil {
 		t.Fatalf("startApp failed: %v", err)
 	}
-	defer pm.StopByName("homeexpandcheck")
-
+	defer pm.StopByName("Log Path Check")
 	if len(pi) == 0 {
 		t.Fatalf("No process info returned")
 	}
 
-	// (1) Expansion must have happened — both files are absolute,
-	// no literal `~` left in the path.
-	if !strings.HasPrefix(pi[0].LogFile, "/") || strings.Contains(pi[0].LogFile, "~") {
-		t.Errorf("LogFile path was not expanded: got %s", pi[0].LogFile)
+	// Log paths are derived, never configured: they are always the state
+	// root joined with the normalized task name, so no user-supplied string
+	// — a `~`, a relative path, a name with spaces — can steer a log file
+	// out of the directory pm2 owns.
+	wantLog := process.TaskLogPath(testDir, "Log Path Check")
+	wantErr := process.TaskErrPath(testDir, "Log Path Check")
+	if pi[0].LogFile != wantLog {
+		t.Errorf("LogFile = %q, want %q", pi[0].LogFile, wantLog)
 	}
-	if !strings.HasPrefix(pi[0].ErrorFile, "/") || strings.Contains(pi[0].ErrorFile, "~") {
-		t.Errorf("ErrorFile path was not expanded: got %s", pi[0].ErrorFile)
+	if pi[0].ErrorFile != wantErr {
+		t.Errorf("ErrorFile = %q, want %q", pi[0].ErrorFile, wantErr)
 	}
-	// (2) Strengthened assertion (1.5): expanded paths must NOT live
-	// under the developer's real home dir. This is the user-visible
-	// invariant ("don't pollute my home") and is robust to changes
-	// in t.TempDir / t.Setenv semantics across Go versions.
-	if strings.HasPrefix(pi[0].LogFile, realHome) {
-		t.Errorf("LogFile=%q expanded under real HOME=%q — test must "+
-			"override HOME so ~ doesn't pollute the developer's home",
-			pi[0].LogFile, realHome)
-	}
-	if strings.HasPrefix(pi[0].ErrorFile, realHome) {
-		t.Errorf("ErrorFile=%q expanded under real HOME=%q",
-			pi[0].ErrorFile, realHome)
+	if _, err := os.Stat(wantLog); err != nil {
+		t.Errorf("stat %q: %v", wantLog, err)
 	}
 }
 
@@ -788,15 +749,15 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 		key := fmt.Sprintf("default:metric-%d", i)
 		pm.reg.Add(key, &ManagedProcess{
 			Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      fmt.Sprintf("metric-%d", i),
-	},
-					ID:        i,
-				PID:       10000 + i,
-				Status:    process.StatusOnline,
-	},
-})
+				AppConfig: process.AppConfig{
+					Namespace: "default",
+					Name:      fmt.Sprintf("metric-%d", i),
+				},
+				ID:     i,
+				PID:    10000 + i,
+				Status: process.StatusOnline,
+			},
+		})
 	}
 
 	// Run one refreshMetrics pass in a goroutine.
@@ -875,15 +836,15 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 	const key = "default:lonely"
 	pm.reg.Add(key, &ManagedProcess{
 		Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "lonely",
-	},
-				ID:        1,
-			PID:       1234,
-			Status:    process.StatusOnline,
-	},
-})
+			AppConfig: process.AppConfig{
+				Namespace: "default",
+				Name:      "lonely",
+			},
+			ID:     1,
+			PID:    1234,
+			Status: process.StatusOnline,
+		},
+	})
 
 	pm.refreshMetrics()
 
@@ -935,15 +896,15 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 		key := fmt.Sprintf("default:speed-%d", i)
 		pm.reg.Add(key, &ManagedProcess{
 			Info: process.ProcessInfo{
-		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      fmt.Sprintf("speed-%d", i),
-	},
-					ID:        i,
-				PID:       1000 + i,
-				Status:    process.StatusOnline,
-	},
-})
+				AppConfig: process.AppConfig{
+					Namespace: "default",
+					Name:      fmt.Sprintf("speed-%d", i),
+				},
+				ID:     i,
+				PID:    1000 + i,
+				Status: process.StatusOnline,
+			},
+		})
 	}
 
 	sequential := time.Duration(N) * stubMs * time.Millisecond
@@ -1019,14 +980,14 @@ func TestHighConcurrencyStartup(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			req := &model.AppStartReq{
-		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      fmt.Sprintf("concurrent-%d", idx),
-		Script:    "/bin/sleep",
-		Args:      []string{"30"},
-		Instances: 1,
-	},
-	}
+				AppConfig: process.AppConfig{
+					Namespace: "default",
+					Name:      fmt.Sprintf("concurrent-%d", idx),
+					Script:    "/bin/sleep",
+					Args:      []string{"30"},
+					Instances: 1,
+				},
+			}
 			if _, err := pm.StartApp(req); err != nil {
 				errs <- fmt.Errorf("startApp[%d]: %w", idx, err)
 			}
@@ -1087,12 +1048,12 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "errored-norestart",
-		Script:    "false",
-		Instances: 1,
-		// MaxRestarts defaults to 0 → no auto-restart.
-	},
+			Namespace: "default",
+			Name:      "errored-norestart",
+			Script:    "false",
+			Instances: 1,
+			// MaxRestarts defaults to 0 → no auto-restart.
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1146,17 +1107,17 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:   "default",
-		Name:        "errored-autorestart",
-		// Bash script that sleeps 100 ms then exits 1. This gives a
-		// ~100 ms "new instance alive" window between restart cycles so
-		// the test can observe the new PID without races against the
-		// watchProcess goroutine.
-		Script:    "sleep",
-		Args:      []string{"0.1", "&&", "false"},
-		Instances: 1,
-		MaxRestarts: 5,
-	},
+			Namespace: "default",
+			Name:      "errored-autorestart",
+			// Bash script that sleeps 100 ms then exits 1. This gives a
+			// ~100 ms "new instance alive" window between restart cycles so
+			// the test can observe the new PID without races against the
+			// watchProcess goroutine.
+			Script:      "sleep",
+			Args:        []string{"0.1", "&&", "false"},
+			Instances:   1,
+			MaxRestarts: 5,
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1234,12 +1195,12 @@ func TestProcessCleanExit(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:   "default",
-		Name:        "clean-exit",
-		Script:      "true",
-		Instances:   1,
-		MaxRestarts: 5, // even with budget, clean exit must NOT restart
-	},
+			Namespace:   "default",
+			Name:        "clean-exit",
+			Script:      "true",
+			Instances:   1,
+			MaxRestarts: 5, // even with budget, clean exit must NOT restart
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1281,9 +1242,9 @@ func TestProcessCleanExit(t *testing.T) {
 // TestCronRestartFiresReboot is the characterization test for the
 // cron_restart feature. It verifies that when a cron schedule fires,
 // the registered callback calls restartByName which:
-//   1. Stops the current process
-//   2. Launches a new instance
-//   3. Re-registers the cron entry on the new instance
+//  1. Stops the current process
+//  2. Launches a new instance
+//  3. Re-registers the cron entry on the new instance
 //
 // The new instance must have a different PID (proof that stopProcess
 // + launchProcess actually ran, not just no-op'd), and the cron
@@ -1300,16 +1261,16 @@ func TestCronRestartFiresReboot(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "cron-restart-app",
-		// Long-lived script so the test can observe the new PID
-		// in the window between restart cycles (otherwise `sleep`
-		// might exit too fast and the new PID is replaced by 0).
-		Script:      "/bin/sleep",
-		Args:        []string{"60"},
-		Instances:   1,
-		CronRestart: "@every 1s",
-	},
+			Namespace: "default",
+			Name:      "cron-restart-app",
+			// Long-lived script so the test can observe the new PID
+			// in the window between restart cycles (otherwise `sleep`
+			// might exit too fast and the new PID is replaced by 0).
+			Script:      "/bin/sleep",
+			Args:        []string{"60"},
+			Instances:   1,
+			CronRestart: "@every 1s",
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp failed: %v", err)
@@ -1417,11 +1378,11 @@ func TestStopProcessKillsChildren(t *testing.T) {
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace: "default",
-		Name:      "orphan-test",
-		Script:    scriptPath,
-		Instances: 1,
-	},
+			Namespace: "default",
+			Name:      "orphan-test",
+			Script:    scriptPath,
+			Instances: 1,
+		},
 	}
 	if _, err := pm.StartApp(req); err != nil {
 		t.Fatalf("startApp: %v", err)
@@ -1488,12 +1449,12 @@ func TestCronNamespaceIsolation(t *testing.T) {
 
 	req1 := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:   "default",
-		Name:        "api",
-		Script:      "/bin/sleep",
-		Args:        []string{"60"},
-		CronRestart: "@every 1h", // long interval — we only check EntryCount
-	},
+			Namespace:   "default",
+			Name:        "api",
+			Script:      "/bin/sleep",
+			Args:        []string{"60"},
+			CronRestart: "@every 1h", // long interval — we only check EntryCount
+		},
 	}
 	if _, err := pm.StartApp(req1); err != nil {
 		t.Fatalf("start default:api: %v", err)
@@ -1506,12 +1467,12 @@ func TestCronNamespaceIsolation(t *testing.T) {
 
 	req2 := &model.AppStartReq{
 		AppConfig: process.AppConfig{
-		Namespace:   "production",
-		Name:        "api",
-		Script:      "/bin/sleep",
-		Args:        []string{"60"},
-		CronRestart: "@every 1h",
-	},
+			Namespace:   "production",
+			Name:        "api",
+			Script:      "/bin/sleep",
+			Args:        []string{"60"},
+			CronRestart: "@every 1h",
+		},
 	}
 	if _, err := pm.StartApp(req2); err != nil {
 		t.Fatalf("start production:api: %v", err)
@@ -1872,4 +1833,3 @@ func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 		t.Errorf("race-restart vanished from registry after concurrent restarts")
 	}
 }
-

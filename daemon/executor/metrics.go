@@ -45,9 +45,9 @@ const MetricsWorkers = 8
 
 // MetricsCollector owns the three-phase refresh loop. The pipeline:
 //
-//	1. RLock     — snapshot (key, pid, online) per process.
-//	2. UNLOCKED  — call `ps` in parallel via a bounded worker pool.
-//	3. Lock      — write the samples back to the matching ProcessInfo.
+//  1. RLock     — snapshot (key, pid, online) per process.
+//  2. UNLOCKED  — call `ps` in parallel via a bounded worker pool.
+//  3. Lock      — write the samples back to the matching ProcessInfo.
 //
 // Phase 2 also re-checks (a) the key still exists in the map and
 // (b) the PID still matches the snapshot — that's the backend's job

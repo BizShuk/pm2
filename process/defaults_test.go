@@ -17,16 +17,18 @@ func TestAppConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestDefaultAppPaths(t *testing.T) {
-	configDir := DefaultConfigDir("My App")
-	if want := "~/.config/my-app/"; configDir != want {
-		t.Fatalf("DefaultConfigDir() = %q, want %q", configDir, want)
+func TestTaskLogPaths(t *testing.T) {
+	root := "/state"
+	if want := filepath.Join(root, "tasks", "logs"); TaskLogsDir(root) != want {
+		t.Fatalf("TaskLogsDir() = %q, want %q", TaskLogsDir(root), want)
 	}
-	if want := filepath.Join(configDir, "logs", "daemon.log"); DefaultLogFile(configDir) != want {
-		t.Fatalf("DefaultLogFile() = %q, want %q", DefaultLogFile(configDir), want)
+	// The task name is normalized into the filename, so a name with spaces
+	// or capitals cannot produce a path the shell has to quote.
+	if want := filepath.Join(root, "tasks", "logs", "my-app.log"); TaskLogPath(root, "My App") != want {
+		t.Fatalf("TaskLogPath() = %q, want %q", TaskLogPath(root, "My App"), want)
 	}
-	if want := filepath.Join(configDir, "logs", "daemon.err"); DefaultErrorFile(configDir) != want {
-		t.Fatalf("DefaultErrorFile() = %q, want %q", DefaultErrorFile(configDir), want)
+	if want := filepath.Join(root, "tasks", "logs", "my-app.err"); TaskErrPath(root, "My App") != want {
+		t.Fatalf("TaskErrPath() = %q, want %q", TaskErrPath(root, "My App"), want)
 	}
 }
 
@@ -42,14 +44,5 @@ func TestNormalizeUsesSharedDefaults(t *testing.T) {
 	}
 	if app.MaxRestarts != DefaultMaxRestarts {
 		t.Fatalf("MaxRestarts = %d, want %d", app.MaxRestarts, DefaultMaxRestarts)
-	}
-	if app.ConfigDir != DefaultConfigDir(app.Name) {
-		t.Fatalf("ConfigDir = %q, want %q", app.ConfigDir, DefaultConfigDir(app.Name))
-	}
-	if app.LogFile != DefaultLogFile(app.ConfigDir) {
-		t.Fatalf("LogFile = %q, want %q", app.LogFile, DefaultLogFile(app.ConfigDir))
-	}
-	if app.ErrorFile != DefaultErrorFile(app.ConfigDir) {
-		t.Fatalf("ErrorFile = %q, want %q", app.ErrorFile, DefaultErrorFile(app.ConfigDir))
 	}
 }

@@ -22,7 +22,7 @@ const gpuAgentErrLog = "/var/log/pm2-gpu.err.log"
 //
 //   - A LaunchDaemon, not a LaunchAgent. `pm2 startup` installs into
 //     ~/Library/LaunchAgents because the pm2 daemon must run as the
-//     user who owns ~/.pm2. This job is the exact opposite: it exists
+//     user who owns ~/.config/pm2. This job is the exact opposite: it exists
 //     only because it needs root, so it belongs in the system domain.
 //   - `gpu agent` runs in the foreground by construction, so launchd's
 //     direct child is the real worker and the job's reported state is

@@ -13,10 +13,10 @@ import (
 	"github.com/bizshuk/pm2/logfile"
 )
 
-func loadApps(root string) tea.Cmd {
+func loadTasks(root string) tea.Cmd {
 	return func() tea.Msg {
-		apps, err := logfile.ListApps(root)
-		return appsMsg{apps: apps, err: err}
+		tasks, err := logfile.ListTasks(root)
+		return tasksMsg{tasks: tasks, err: err}
 	}
 }
 

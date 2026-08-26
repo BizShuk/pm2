@@ -24,15 +24,19 @@ pm2 daemon kill                 # gracefully stop all processes and exit the dae
 
 > **Lifecycle verbs are split:** `pm2 task stop <name|id|all>` operates on a managed process (daemon keeps running). `pm2 daemon kill` operates on the daemon itself (everything exits). They share the same `executor.Stop` signal path (SIGTERM → 5s → SIGKILL); the only difference is the post-response `os.Exit(0)` hook in `daemon/network/handler.go:36-42`. The legacy top-level `pm2 kill` command has been removed; use `pm2 daemon kill`.
 
-State directory: `~/.pm2/`
+State directory: `~/.config/pm2/`
 
 ```tree
-~/.pm2/
-├── pm2.sock        # Unix socket for CLI ↔ daemon RPC
-├── dump.json       # saved process list (pm2 save)
-└── logs/
-    ├── <name>-out.log
-    └── <name>-err.log
+~/.config/pm2/
+├── pm2.sock          # Unix socket for CLI ↔ daemon RPC
+├── dump.json         # saved process list (pm2 save)
+├── daemon.stopped    # marker written by pm2 daemon stop
+├── logs/             # the daemon's own log
+│   └── daemon.log
+└── tasks/logs/       # every managed task's logs, one flat directory
+    ├── <task-name>.log
+    ├── <task-name>.err
+    └── <task-name>.<YYYY-MM-DD>.log
 ```
 
 ---
@@ -88,9 +92,7 @@ paths are resolved relative to the config file location (not CWD).
                 "PORT": "8080"
             },
             "cron_restart": "0 * * * *",
-            "max_restarts": 10,
-            "log_file": "/var/log/api-out.log",
-            "error_file": "/var/log/api-err.log"
+            "max_restarts": 10
         },
         {
             "name": "worker",
@@ -152,8 +154,9 @@ pm2 task start /path/to/ecosystem.config.js
 | `env`          | map[string]string | `{}`                         | Environment variables merged with inherited env             |
 | `cron_restart` | string            | `""`                         | 5-field cron expression for scheduled restart               |
 | `max_restarts` | int               | `15`                         | Auto-restart limit before giving up                         |
-| `log_file`     | string            | `~/.pm2/logs/<name>-out.log` | stdout log path                                             |
-| `error_file`   | string            | `~/.pm2/logs/<name>-err.log` | stderr log path                                             |
+
+Log paths are not configurable: every task writes to
+`~/.config/pm2/tasks/logs/<task-name>.log` and `<task-name>.err`.
 
 ---
 
@@ -368,7 +371,7 @@ pm2 save
 pm2 s
 ```
 
-Persists the current process list to `~/.pm2/dump.json`, including all fields
+Persists the current process list to `~/.config/pm2/dump.json`, including all fields
 needed to restore processes exactly (`cron_restart`, `env`, `args`, etc.).
 
 ### `pm2 resurrect` / `pm2 r`
@@ -378,7 +381,7 @@ pm2 resurrect
 pm2 r
 ```
 
-Reads `~/.pm2/dump.json` and starts every entry. Use this after a reboot to
+Reads `~/.config/pm2/dump.json` and starts every entry. Use this after a reboot to
 restore your last-saved process list. Typically called from the startup script.
 
 ### `pm2 startup`

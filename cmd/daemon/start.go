@@ -69,7 +69,8 @@ func RunStart(cmd *cobra.Command, _ []string) error {
 
 // startAsBackground re-execs the current binary with
 // `daemon start --foreground` and detaches it. Stdout/stderr are
-// redirected to `~/.pm2/daemon.log` / `~/.pm2/daemon-err.log` so
+// redirected to `~/.config/pm2/logs/daemon.log` /
+// `~/.config/pm2/logs/daemon-err.log` so
 // the user can `tail -f` them after the fact. Setpgid ensures the
 // daemon is its own process group leader (so `pm2 daemon kill` can
 // later signal the whole tree if needed).
@@ -103,7 +104,7 @@ func startAsBackground() error {
 		return err
 	}
 
-	logDir := cliruntime.PM2Home()
+	logDir := cliruntime.DaemonLogsDir()
 	_ = os.MkdirAll(logDir, 0o755)
 	logFile := filepath.Join(logDir, "daemon.log")
 	errFile := filepath.Join(logDir, "daemon-err.log")

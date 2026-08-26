@@ -10,16 +10,16 @@ import (
 )
 
 // MonitorCmd opens the interactive log Tree Explorer and Viewer over every
-// application log directory under ~/.config, daemon or no daemon.
+// managed task's logs, daemon or no daemon.
 var MonitorCmd = &cobra.Command{
-	Use:     "monitor [app]",
+	Use:     "monitor [task]",
 	Aliases: []string{"m"},
-	Short:   "Browse every application's logs under ~/.config",
-	Long: "Browse and delete log files under ~/.config/<app>/logs.\n\n" +
+	Short:   "Browse every task's logs under ~/.config/pm2/tasks/logs",
+	Long: "Browse and delete log files under ~/.config/pm2/tasks/logs.\n\n" +
 		"The listing is taken from the filesystem, not from the daemon's " +
 		"process list, so logs belonging to stopped, deleted, or never " +
 		"registered tasks are all included.\n\n" +
-		"[app] preselects and expands one application directory.",
+		"[task] preselects and expands one task.",
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
 		target := ""
@@ -27,7 +27,7 @@ var MonitorCmd = &cobra.Command{
 			target = args[0]
 		}
 		program := tea.NewProgram(
-			logbrowser.New(cliruntime.ConfigRoot(), target),
+			logbrowser.New(cliruntime.TaskLogsDir(), target),
 			tea.WithAltScreen(),
 		)
 		_, err := program.Run()

@@ -1,10 +1,11 @@
 // Package logbrowser owns the interactive log Tree Explorer, Viewer, and
 // delete-confirm state machine used by pm2 logs monitor.
 //
-// It browses the shared config root (~/.config/<app>/logs) rather than the
-// daemon's process list: logs outlive the task that wrote them, so a deleted,
-// renamed, or never-registered task still has files worth reading. The daemon
-// is therefore not consulted at all — the browser works with it down.
+// It browses the shared task log directory (~/.config/pm2/tasks/logs) rather
+// than the daemon's process list: logs outlive the task that wrote them, so a
+// deleted, renamed, or never-registered task still has files worth reading.
+// The daemon is therefore not consulted at all — the browser works with it
+// down.
 package logbrowser
 
 import (
@@ -25,9 +26,9 @@ const (
 	screenConfirmDelete
 )
 
-type appsMsg struct {
-	apps []logfile.AppLogs
-	err  error
+type tasksMsg struct {
+	tasks []logfile.TaskLogs
+	err   error
 }
 
 type fileMsg struct {
@@ -46,7 +47,7 @@ type Model struct {
 	root          string
 	initialTarget string
 	screen        screen
-	apps          []logfile.AppLogs
+	tasks         []logfile.TaskLogs
 	expanded      map[string]bool
 	treeCursor    int
 	viewerPath    string
@@ -76,7 +77,7 @@ func New(root, initialTarget string) Model {
 
 // Init scans the config root for application log directories.
 func (m Model) Init() tea.Cmd {
-	return loadApps(m.root)
+	return loadTasks(m.root)
 }
 
 // Update folds one Bubble Tea message into the log browser.
@@ -87,11 +88,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-	case appsMsg:
+	case tasksMsg:
 		m.loading = false
 		m.err = msg.err
 		if msg.err == nil {
-			m.apps = msg.apps
+			m.tasks = msg.tasks
 			m.ensureExpanded()
 			m.applyInitialTarget()
 			m.treeCursor = clampIndex(m.treeCursor, len(m.visibleTreeRows()))
@@ -124,7 +125,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// The removed row disappears on rescan, so the cursor lands on
 		// whatever now occupies its position rather than jumping away.
 		m.loading = true
-		return m, loadApps(m.root)
+		return m, loadTasks(m.root)
 	}
 	return m, nil
 }
@@ -159,12 +160,12 @@ func (m *Model) applyInitialTarget() {
 	}
 	target := m.initialTarget
 	m.initialTarget = ""
-	for index, app := range m.apps {
-		if !strings.EqualFold(app.App, target) {
+	for index, task := range m.tasks {
+		if !strings.EqualFold(task.Task, target) {
 			continue
 		}
-		m.expanded[app.App] = true
-		m.treeCursor = m.treeIndexForApp(index)
+		m.expanded[task.Task] = true
+		m.treeCursor = m.treeIndexForTask(index)
 		return
 	}
 }
@@ -173,7 +174,7 @@ func (m Model) breadcrumb() []string {
 	parts := []string{m.root}
 	row, ok := m.selectedTreeRow()
 	if ok {
-		parts = append(parts, m.apps[row.appIndex].App)
+		parts = append(parts, m.tasks[row.taskIndex].Task)
 	}
 	if m.viewerPath != "" {
 		parts = append(parts, filepath.Base(m.viewerPath))

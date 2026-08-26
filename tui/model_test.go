@@ -241,8 +241,8 @@ func TestDetailTuiStability(t *testing.T) {
 	// Setup a model with 2 processes in detail mode
 	m := New("mock_socket", true)
 	m.procs = []process.ProcessInfo{
-		{AppConfig: process.AppConfig{Name: "proc-1", LogFile: "/path/to/proc1.log"}, ID: 1},
-		{AppConfig: process.AppConfig{Name: "proc-2", LogFile: "/path/to/proc2.log"}, ID: 2},
+		{AppConfig: process.AppConfig{Name: "proc-1"}, ID: 1, LogFile: "/path/to/proc1.log"},
+		{AppConfig: process.AppConfig{Name: "proc-2"}, ID: 2, LogFile: "/path/to/proc2.log"},
 	}
 	m.selected = 0
 	m.logs = []string{"old log 1", "old log 2"}

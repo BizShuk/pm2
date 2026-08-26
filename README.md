@@ -10,7 +10,7 @@ cd pm2
 go build -o /usr/local/bin/pm2 .
 ```
 
-State directory: `~/.pm2/` (created automatically on first run)
+State directory: `~/.config/pm2/` (created automatically on first run)
 
 ---
 
@@ -199,7 +199,7 @@ pm2 task delete <name>
 pm2 task delete all
 ```
 
-Does not affect `~/.pm2/dump.json`.
+Does not affect `~/.config/pm2/dump.json`.
 
 ---
 
@@ -249,24 +249,24 @@ External Go services can consume the same typed stream through
 channels. Each `Entry` includes `Time`, `AppName`, `Stream`, and `Message`;
 `Entry.String()` produces the terminal format above.
 
-Managed stdout and stderr lines use a `[YYYY-MM-DD HH:MM:SS] ` prefix. The
-current `daemon.log` / `daemon.err` files keep the latest date; older leading
-date blocks move to `daemon.<YYYY-MM-DD>.log` and
-`daemon.<YYYY-MM-DD>.err`. Defaults live under
-`~/.config/<app_name>/logs/`; custom `log_file`, `out_file`, and `error_file`
-paths retain their own basename and directory.
+Managed stdout and stderr lines use a `[YYYY-MM-DD HH:MM:SS] ` prefix. Every
+task writes to `~/.config/pm2/tasks/logs/<task-name>.log` and
+`<task-name>.err`; older leading date blocks move to
+`<task-name>.<YYYY-MM-DD>.log` and `<task-name>.<YYYY-MM-DD>.err` beside them.
+The path is derived from the task name and cannot be overridden.
 
 ---
 
 ### `pm2 logs monitor` / `pm2 logs m`
 
-Browse and delete every log file under `~/.config/<app>/logs`, whether or not
-a task for it is registered with the daemon. The listing comes from the
-filesystem, so logs belonging to stopped, deleted, or never-registered tasks
-are all included, and the browser works with the daemon down.
+Browse and delete every log file under `~/.config/pm2/tasks/logs`, whether or
+not a task for it is registered with the daemon. Files are grouped by task
+name, so `api.log`, `api.err` and `api.<YYYY-MM-DD>.log` appear as one entry.
+The listing comes from the filesystem, so logs belonging to stopped, deleted,
+or never-registered tasks are all included, and the browser works with the
+daemon down.
 
-The optional argument names an application directory; it starts selected and
-expanded.
+The optional argument names a task; it starts selected and expanded.
 
 ```bash
 pm2 logs monitor
@@ -318,8 +318,8 @@ pm2 monitor  4 processes · 10:24:51
                       │ started   2026-06-09  19:31:04
                       │ restarts  0 / 15 max
                       │ cron      0 3 * * *  →  next 06-13 03:00
-                      │ stdout    ~/.pm2/logs/api-out.log
-                      │ stderr    ~/.pm2/logs/api-err.log
+                      │ stdout    ~/.config/pm2/tasks/logs/api.log
+                      │ stderr    ~/.config/pm2/tasks/logs/api.err
                       ├────────────────────────────────────────
                       │ LOGS — api
                       │ [2026-06-12 10:00:01] server listening on :8080
@@ -421,7 +421,7 @@ ship.
 
 ### `pm2 save` / `pm2 s`
 
-Persist the current process list to `~/.pm2/dump.json`.
+Persist the current process list to `~/.config/pm2/dump.json`.
 
 ```bash
 pm2 save
@@ -443,7 +443,7 @@ are not operations you issued and they change nothing that is persisted.
 
 ### `pm2 resurrect` / `pm2 r`
 
-Restore the last saved process list from `~/.pm2/dump.json`.
+Restore the last saved process list from `~/.config/pm2/dump.json`.
 
 ```bash
 pm2 resurrect
@@ -541,9 +541,7 @@ Two formats are supported. Relative `script` paths resolve relative to the confi
                 "PORT": "8080"
             },
             "cron_restart": "0 3 * * *",
-            "max_restarts": 10,
-            "log_file": "/var/log/api-out.log",
-            "error_file": "/var/log/api-err.log"
+            "max_restarts": 10
         }
     ]
 }
@@ -581,10 +579,6 @@ module.exports = {
 | `cron`         | string   | `""`                          | 5-field cron expression to trigger execution   |
 | `watch`        | bool     | `false`                       | Watch file changes to restart                  |
 | `max_restarts` | int      | `15`                          | Crash auto-restart ceiling                     |
-| `log_file`     | string   | `~/.pm2/logs/<name>-out.log`  | stdout path                                    |
-| `out_file`     | string   | `""`                          | Alias for stdout path                          |
-| `error_file`   | string   | `~/.pm2/logs/<name>-err.log`  | stderr path                                    |
-| `config_dir`   | string   | `"~/.config/<name>/"`         | Base directory for log files                   |
 | `config_file`  | string   | `"<cwd>/ecosystem.config.js"` | Path to ecosystem config file (auto-set)       |
 | `cwd`          | string   | ecosystem file directory      | Working directory used to run the process      |
 | `optional`     | bool     | `false`                       | Register paused unless selected by run flags   |
@@ -654,17 +648,19 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
 ## State files
 
 ```tree
-~/.pm2/
+~/.config/pm2/
 ├── pm2.sock            Unix socket — CLI ↔ daemon RPC
 ├── dump.json           saved process list (pm2 save / resurrect)
-└── logs/
-    └── ...              fallback logs when an app has no config directory
-
-~/.config/<app_name>/logs/
-├── daemon.log                  current stdout
-├── daemon.err                  current stderr
-├── daemon.<YYYY-MM-DD>.log     rotated stdout
-└── daemon.<YYYY-MM-DD>.err     rotated stderr
+├── daemon.stopped      marker written by pm2 daemon stop
+├── logs/               the daemon's own log, not the tasks'
+│   ├── daemon.log
+│   ├── daemon.<YYYY-MM-DD>.log
+│   └── daemon-err.log          raw stderr the supervisor redirects
+└── tasks/logs/         one flat directory for every managed task
+    ├── <task-name>.log                 current stdout
+    ├── <task-name>.err                 current stderr
+    ├── <task-name>.<YYYY-MM-DD>.log    rotated stdout
+    └── <task-name>.<YYYY-MM-DD>.err    rotated stderr
 ```
 
 ---

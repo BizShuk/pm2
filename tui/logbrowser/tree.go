@@ -9,31 +9,31 @@ import (
 type treeRowKind uint8
 
 const (
-	treeApp treeRowKind = iota
+	treeTask treeRowKind = iota
 	treeFile
 )
 
 type treeRow struct {
 	kind      treeRowKind
-	appIndex  int
+	taskIndex int
 	fileIndex int
 }
 
 func (m Model) visibleTreeRows() []treeRow {
-	rows := make([]treeRow, 0, len(m.apps))
-	for appIndex, app := range m.apps {
+	rows := make([]treeRow, 0, len(m.tasks))
+	for taskIndex, task := range m.tasks {
 		rows = append(rows, treeRow{
-			kind:      treeApp,
-			appIndex:  appIndex,
+			kind:      treeTask,
+			taskIndex: taskIndex,
 			fileIndex: -1,
 		})
-		if !m.expanded[app.App] {
+		if !m.expanded[task.Task] {
 			continue
 		}
-		for fileIndex := range app.Files {
+		for fileIndex := range task.Files {
 			rows = append(rows, treeRow{
 				kind:      treeFile,
-				appIndex:  appIndex,
+				taskIndex: taskIndex,
 				fileIndex: fileIndex,
 			})
 		}
@@ -54,16 +54,16 @@ func (m Model) selectedFilePath() string {
 	if !ok || row.kind != treeFile {
 		return ""
 	}
-	files := m.apps[row.appIndex].Files
+	files := m.tasks[row.taskIndex].Files
 	if row.fileIndex < 0 || row.fileIndex >= len(files) {
 		return ""
 	}
 	return files[row.fileIndex].Path
 }
 
-func (m Model) treeIndexForApp(appIndex int) int {
+func (m Model) treeIndexForTask(taskIndex int) int {
 	for index, row := range m.visibleTreeRows() {
-		if row.kind == treeApp && row.appIndex == appIndex {
+		if row.kind == treeTask && row.taskIndex == taskIndex {
 			return index
 		}
 	}
@@ -74,11 +74,11 @@ func (m Model) treeItems() []string {
 	rows := m.visibleTreeRows()
 	items := make([]string, len(rows))
 	for index, row := range rows {
-		if row.kind == treeApp {
-			items[index] = m.appTreeItem(row.appIndex)
+		if row.kind == treeTask {
+			items[index] = m.taskTreeItem(row.taskIndex)
 			continue
 		}
-		items[index] = m.fileTreeItem(row.appIndex, row.fileIndex)
+		items[index] = m.fileTreeItem(row.taskIndex, row.fileIndex)
 	}
 	return items
 }
@@ -88,25 +88,25 @@ func (m Model) treeItems() []string {
 // rather than allowed to push the columns behind the pane edge.
 const nameColumn = 22
 
-func (m Model) appTreeItem(appIndex int) string {
-	app := m.apps[appIndex]
+func (m Model) taskTreeItem(taskIndex int) string {
+	task := m.tasks[taskIndex]
 	marker := "▸"
-	if m.expanded[app.App] {
+	if m.expanded[task.Task] {
 		marker = "▾"
 	}
 	return fmt.Sprintf("%s %-*s  %3d files  %8s",
 		marker,
 		nameColumn,
-		// An application is identified by the head of its name; a log file
+		// A task is identified by the head of its name; a log file
 		// by the tail, where the stream and rotation date live.
-		views.CropRight(app.App, nameColumn),
-		len(app.Files),
-		formatFileSize(app.TotalSize()),
+		views.CropRight(task.Task, nameColumn),
+		len(task.Files),
+		formatFileSize(task.TotalSize()),
 	)
 }
 
-func (m Model) fileTreeItem(appIndex, fileIndex int) string {
-	file := m.apps[appIndex].Files[fileIndex]
+func (m Model) fileTreeItem(taskIndex, fileIndex int) string {
+	file := m.tasks[taskIndex].Files[fileIndex]
 	// The diamond is the whole current/archive distinction; an "archive"
 	// word in its place would cost seven columns to say "not that one".
 	marker := "  "

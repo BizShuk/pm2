@@ -7,10 +7,17 @@ import "time"
 // execution-time fields (PID, status, metrics, ...). JSON tags are
 // kept on the runtime fields; the AppConfig fields are promoted and
 // serialize to the top level just as before.
+//
+// LogFile and ErrorFile live here rather than on AppConfig because they
+// are derived, not configured: the executor resolves them from the task
+// name at launch and reports them back. Persisting them as configuration
+// is what let a renamed state directory keep writing to the old one.
 type ProcessInfo struct {
 	AppConfig
 
 	ID             int       `json:"id"`
+	LogFile        string    `json:"log_file"`
+	ErrorFile      string    `json:"error_file"`
 	PID            int       `json:"pid"`
 	Status         Status    `json:"status"`
 	Restarts       int       `json:"restarts"`

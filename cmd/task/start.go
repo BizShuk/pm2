@@ -46,7 +46,7 @@ func loadEcosystem(args []string) (*config.EcosystemConfig, error) {
 	}
 
 	// If target looks like a remote GitHub reference,
-	// clone/pull into ~/.pm2/repos/ and resolve to the
+	// clone/pull into ~/.config/pm2/repos/ and resolve to the
 	// ecosystem config inside.
 	if config.IsRemoteRef(target) {
 		cacheDir := filepath.Join(cliruntime.PM2Home(), "repos")

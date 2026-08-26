@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,8 +43,14 @@ func TestPackageInitSurvivesMissingHome(t *testing.T) {
 // deferring the lookup must not stop it from happening.
 func TestPM2HomeStillResolvesForCommandsThatNeedIt(t *testing.T) {
 	home := PM2Home()
-	if home == "" || !strings.HasSuffix(home, ".pm2") {
-		t.Fatalf("PM2Home = %q, want a ~/.pm2 path", home)
+	if home == "" || !strings.HasSuffix(home, filepath.Join(".config", "pm2")) {
+		t.Fatalf("PM2Home = %q, want a ~/.config/pm2 path", home)
+	}
+	if got := TaskLogsDir(); !strings.HasPrefix(got, home) {
+		t.Errorf("TaskLogsDir = %q, want it under %q", got, home)
+	}
+	if got := DaemonLogsDir(); !strings.HasPrefix(got, home) {
+		t.Errorf("DaemonLogsDir = %q, want it under %q", got, home)
 	}
 	if got := SocketPath(); !strings.HasPrefix(got, home) {
 		t.Errorf("SocketPath = %q, want it under %q", got, home)

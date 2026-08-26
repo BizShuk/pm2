@@ -32,14 +32,14 @@ func TestLogsMonitorIsInteractiveSubcommand(t *testing.T) {
 	if got := monitorCmd.Parent(); got != LogsCmd {
 		t.Fatalf("logs monitor Parent() = %v, want LogsCmd", got)
 	}
-	if monitorCmd.Use != "monitor [app]" {
-		t.Fatalf("logs monitor Use = %q, want %q", monitorCmd.Use, "monitor [app]")
+	if monitorCmd.Use != "monitor [task]" {
+		t.Fatalf("logs monitor Use = %q, want %q", monitorCmd.Use, "monitor [task]")
 	}
-	// The browser reads the config root, not the daemon's process list, and
-	// its help must say so: the two answer different questions about which
-	// logs exist.
-	if !strings.Contains(monitorCmd.Short, "~/.config") {
-		t.Fatalf("logs monitor Short = %q, want the config root named", monitorCmd.Short)
+	// The browser reads the task log directory, not the daemon's process
+	// list, and its help must say so: the two answer different questions
+	// about which logs exist.
+	if !strings.Contains(monitorCmd.Short, "~/.config/pm2/tasks/logs") {
+		t.Fatalf("logs monitor Short = %q, want the task log dir named", monitorCmd.Short)
 	}
 	if !strings.Contains(strings.ToLower(monitorCmd.Long), "not from the daemon") {
 		t.Fatalf("logs monitor Long = %q, want the filesystem source stated", monitorCmd.Long)
@@ -146,19 +146,19 @@ func TestLogSourcesResolveCompositeTargetAndBothStreams(t *testing.T) {
 			AppConfig: process.AppConfig{
 				Namespace: "production",
 				Name:      "api",
-				LogFile:   "/tmp/production-api.log",
-				ErrorFile: "/tmp/production-api.err",
 			},
-			ID: 1,
+			ID:        1,
+			LogFile:   "/tmp/production-api.log",
+			ErrorFile: "/tmp/production-api.err",
 		},
 		{
 			AppConfig: process.AppConfig{
 				Namespace: "staging",
 				Name:      "api",
-				LogFile:   "/tmp/staging-api.log",
-				ErrorFile: "/tmp/staging-api.err",
 			},
-			ID: 2,
+			ID:        2,
+			LogFile:   "/tmp/staging-api.log",
+			ErrorFile: "/tmp/staging-api.err",
 		},
 	}
 

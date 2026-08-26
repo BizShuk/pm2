@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-// LogsDirName is the per-application log directory every application owns
-// under the shared config root (~/.config/<app>/logs).
-const LogsDirName = "logs"
-
 // FileInfo describes one log file: either a current file or one of its
 // <stem>.<YYYY-MM-DD><ext> daily archives.
 type FileInfo struct {
@@ -24,15 +20,14 @@ type FileInfo struct {
 	Current bool
 }
 
-// AppLogs groups every log file found in one application's log directory.
-type AppLogs struct {
-	App   string
-	Dir   string
+// TaskLogs groups the current and archived log files belonging to one task.
+type TaskLogs struct {
+	Task  string
 	Files []FileInfo
 }
 
-// TotalSize sums every listed file in the application's log directory.
-func (a AppLogs) TotalSize() int64 {
+// TotalSize sums every log file the task owns.
+func (a TaskLogs) TotalSize() int64 {
 	var total int64
 	for _, file := range a.Files {
 		total += file.Size
@@ -40,53 +35,54 @@ func (a AppLogs) TotalSize() int64 {
 	return total
 }
 
-// ListApps scans root for <app>/logs directories and returns one AppLogs per
-// application that owns at least one log file, ordered by application name.
+// ListTasks reads the shared managed-task log directory and returns one
+// TaskLogs per task that owns at least one file, ordered by task name.
 //
-// The scan is deliberately keyed on the log directory rather than on the
-// daemon's process list: an application's logs outlive the task that wrote
-// them, and a task that was deleted — or never registered with this daemon —
-// still has logs worth reading. A missing root, a missing log directory, and
-// an unreadable one are all ordinary empty states; one root-owned config
-// directory must not blank the whole listing.
-func ListApps(root string) ([]AppLogs, error) {
-	entries, err := os.ReadDir(root)
+// Grouping is by filename stem, not by directory: every task writes
+// <task>.log / <task>.err plus their <task>.<YYYY-MM-DD> archives into one
+// flat directory, so the stem is the task identity. The scan is deliberately
+// not keyed on the daemon's process list — a task's logs outlive the task
+// that wrote them, and a deleted or never-registered task still has files
+// worth reading. A missing or unreadable directory is an ordinary empty
+// state, not an error.
+func ListTasks(dir string) ([]TaskLogs, error) {
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read config root %q: %w", root, err)
+		return nil, fmt.Errorf("read task log dir %q: %w", dir, err)
 	}
 
-	apps := make([]AppLogs, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, entry.Name(), LogsDirName)
-		files := listDir(dir)
-		if len(files) == 0 {
-			continue
-		}
-		apps = append(apps, AppLogs{App: entry.Name(), Dir: dir, Files: files})
+	grouped := make(map[string][]FileInfo)
+	for _, file := range listEntries(dir, entries) {
+		grouped[taskStem(file.Name)] = append(grouped[taskStem(file.Name)], file)
 	}
-	sort.Slice(apps, func(i, j int) bool { return apps[i].App < apps[j].App })
-	return apps, nil
+
+	tasks := make([]TaskLogs, 0, len(grouped))
+	for name, files := range grouped {
+		sortFiles(files)
+		tasks = append(tasks, TaskLogs{Task: name, Files: files})
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Task < tasks[j].Task })
+	return tasks, nil
 }
 
-// listDir returns every regular file in dir, current files first and archives
-// newest first. Unreadable directories and unstattable entries are skipped.
-func listDir(dir string) []FileInfo {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+// taskStem strips the stream extension and any rotation date from a log file
+// name, leaving the task name: worker.err, worker.log and
+// worker.2026-07-29.log all belong to "worker".
+func taskStem(name string) string {
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	if date := trailingDate(stem); date != "" {
+		stem = stem[:len(stem)-len(date)-1]
 	}
+	return stem
+}
 
-	type listed struct {
-		FileInfo
-		archiveDate string
-	}
-	ordered := make([]listed, 0, len(entries))
+// listEntries turns directory entries into FileInfo values, skipping
+// directories and unstattable entries.
+func listEntries(dir string, entries []os.DirEntry) []FileInfo {
+	files := make([]FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -96,35 +92,30 @@ func listDir(dir string) []FileInfo {
 			continue
 		}
 		name := entry.Name()
-		date := archiveDate(name)
-		ordered = append(ordered, listed{
-			FileInfo: FileInfo{
-				Path:    filepath.Join(dir, name),
-				Name:    name,
-				Size:    info.Size(),
-				ModTime: info.ModTime(),
-				Current: date == "",
-			},
-			archiveDate: date,
+		files = append(files, FileInfo{
+			Path:    filepath.Join(dir, name),
+			Name:    name,
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			Current: archiveDate(name) == "",
 		})
 	}
+	return files
+}
 
-	sort.Slice(ordered, func(i, j int) bool {
-		left, right := ordered[i], ordered[j]
+// sortFiles orders a task's files current-first, then archives newest first.
+func sortFiles(files []FileInfo) {
+	sort.Slice(files, func(i, j int) bool {
+		left, right := files[i], files[j]
 		if left.Current != right.Current {
 			return left.Current
 		}
-		if left.archiveDate != right.archiveDate {
-			return left.archiveDate > right.archiveDate
+		leftDate, rightDate := archiveDate(left.Name), archiveDate(right.Name)
+		if leftDate != rightDate {
+			return leftDate > rightDate
 		}
 		return left.Name < right.Name
 	})
-
-	files := make([]FileInfo, len(ordered))
-	for i, file := range ordered {
-		files[i] = file.FileInfo
-	}
-	return files
 }
 
 // archiveDate returns the YYYY-MM-DD segment a rotated file carries before its

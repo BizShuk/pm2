@@ -25,10 +25,6 @@ type AppConfig struct {
 	Watch       bool              `json:"watch"`        // Default: false
 	MaxRestarts int               `json:"max_restarts"` // Default: 15
 	Version     string            `json:"version"`      // Default: "-"
-	LogFile     string            `json:"log_file"`     // Default: "<config_dir>/logs/daemon.log"
-	OutFile     string            `json:"out_file"`     // Default: ""
-	ErrorFile   string            `json:"error_file"`   // Default: "<config_dir>/logs/daemon.err"
-	ConfigDir   string            `json:"config_dir"`   // Default: "~/.config/<name>/"
 	ConfigFile  string            `json:"config_file"`  // Default: "<cwd>/ecosystem.config.js"
 	CWD         string            `json:"cwd"`          // Working directory when the process is spawned
 	// BaseEnv is a snapshot of the CLI process environment (os.Environ()).
@@ -71,20 +67,6 @@ func (a *AppConfig) Normalize(baseDir string) {
 		base := filepath.Base(a.Script)
 		a.Name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	if a.ConfigDir == "" {
-		a.ConfigDir = a.inferConfigDir()
-	}
-	if a.ConfigDir != "" {
-		if a.LogFile == "" && a.OutFile == "" {
-			a.LogFile = DefaultLogFile(a.ConfigDir)
-		}
-		if a.ErrorFile == "" {
-			a.ErrorFile = DefaultErrorFile(a.ConfigDir)
-		}
-	}
-	if a.LogFile == "" && a.OutFile != "" {
-		a.LogFile = a.OutFile
-	}
 	if a.ConfigFile == "" {
 		cwd, err := os.Getwd()
 		if err == nil {
@@ -98,18 +80,5 @@ func (a *AppConfig) Normalize(baseDir string) {
 	}
 	if baseDir != "" {
 		a.Script = ResolveScriptPath(baseDir, a.Script)
-	}
-}
-
-func (a AppConfig) inferConfigDir() string {
-	switch {
-	case a.OutFile != "":
-		return filepath.Dir(a.OutFile)
-	case a.LogFile != "":
-		return filepath.Dir(a.LogFile)
-	case a.ErrorFile != "":
-		return filepath.Dir(a.ErrorFile)
-	default:
-		return DefaultConfigDir(a.Name)
 	}
 }

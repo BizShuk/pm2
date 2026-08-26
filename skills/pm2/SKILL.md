@@ -62,8 +62,8 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | `pm2 task delete <target>`                       | Remove a task from the registry                  | Removes configuration and stops process                                          |
 | `pm2 list` / `pm2 l` / `pm2 ls` / `pm2 status`   | Print a non-interactive process table            | Bordered snapshot; `--no-color` for plain output                                 |
 | `pm2 logs [name\|id\|namespace]`                 | Stream logs to stdout/stderr                     | Continues until Ctrl+C; output includes datetime and app name                    |
-| `pm2 save`                                       | Persist current app configs                      | Saves to `~/.pm2/dump.json`                                                      |
-| `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.pm2/dump.json`                                                    |
+| `pm2 save`                                       | Persist current app configs                      | Saves to `~/.config/pm2/dump.json`                                                      |
+| `pm2 resurrect`                                  | Restore saved app configs                        | Loads from `~/.config/pm2/dump.json`                                                    |
 | `pm2 monitor` / `pm2 m`                          | Launch Bubbletea terminal dashboard              | `--sort name\|namespace\|cpu\|memory\|status`; no `-d` flag                      |
 | `pm2 taskmanager` / `pm2 tm`                      | System activity monitor: host, tree, ports       | `a` toggles pm2 tasks / all processes; `s` cycles sort; works without a daemon   |
 | `pm2 taskmanager emit`                         | Emit a full system snapshot on a fixed period    | `--interval`, `--count`, `--out`, `--format json\|text`; never auto-starts daemon |
@@ -101,10 +101,10 @@ Blank namespace input selects `Agent`. Blank optional input selects option 1,
 so the generated app has `optional: true` and is registered paused by
 `pm2 task start`.
 
-The wizard does not prompt for `config_dir`, `log_file`, `out_file`, or
-`error_file`. PM2 normalization supplies the config and log defaults, while
-default-valued path keys are omitted from newly generated files. Existing
-custom values remain supported when ecosystem files are loaded or merged.
+The wizard does not prompt for log paths, because there are none to set: every
+task writes to `~/.config/pm2/tasks/logs/<task-name>.log` and `<task-name>.err`,
+derived from the task name. `config_dir`, `log_file`, `out_file`, and
+`error_file` no longer exist as ecosystem fields and are ignored if present.
 
 The generated `name` field uses the uppercase convention
 `NAMESPACE SCRIPT - NAME`. `SCRIPT` is the script filename without its path or
@@ -158,10 +158,6 @@ task's working directory.
 | `watch`        | bool     | `false`                           | Restart on script file changes via fsnotify           |
 | `max_restarts` | int      | `15`                              | Non-zero-exit restart ceiling                         |
 | `cwd`          | string   | ecosystem file directory          | Effective working directory for the child             |
-| `log_file`     | string   | `<config_dir>/logs/daemon.log`    | stdout log path                                       |
-| `out_file`     | string   | `""`                              | Alias used as stdout path when `log_file` is empty    |
-| `error_file`   | string   | `<config_dir>/logs/daemon.err`    | stderr log path                                       |
-| `config_dir`   | string   | `~/.config/<normalised-name>/`    | Base directory used to derive default log paths       |
 | `optional`     | bool     | `false`                           | Register paused unless selected by start flags        |
 
 This implementation does not define an `autorestart` field. A clean exit stays
@@ -398,7 +394,7 @@ working directory.
 ### Persist and restore across reboots
 
 ```bash
-pm2 save              # write ~/.pm2/dump.json
+pm2 save              # write ~/.config/pm2/dump.json
 pm2 startup           # generate launchd/systemd service
 # After reboot:
 pm2 resurrect         # reload saved processes

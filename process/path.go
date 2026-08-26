@@ -9,8 +9,8 @@ import (
 
 // NormalizeName returns a filesystem-safe form of a process name for
 // use as a path component: lowercased with spaces rewritten to hyphens.
-// Used as the default ConfigDir segment when the user does not supply
-// one (e.g. process "My App" → "my-app" → "~/.config/my-app/").
+// It names a task's log files (e.g. process "My App" → "my-app" →
+// ~/.config/pm2/tasks/logs/my-app.log).
 func NormalizeName(name string) string {
 	return strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 }

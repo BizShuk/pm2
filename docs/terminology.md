@@ -22,7 +22,7 @@
 | 一次性排程任務 | One-shot Scheduled Task | 由 cron 觸發、執行完即結束的任務；慣例組合為 `cron_restart` + `autorestart:false` + `max_retries:0` | `dux/ecosystem.config.js` |
 | 自動重啟 | Auto-restart | 行程異常結束後自動拉起的行為 | `README.md` Auto-restart behaviour |
 | 監看 | Watch | 檔案變更時重啟任務的行為 | `executor/`、`fsnotify` |
-| 復甦 | Resurrect | 由 dump 檔還原上次儲存的任務清單 | `pm2 resurrect`、`~/.pm2/dump.json` |
+| 復甦 | Resurrect | 由 dump 檔還原上次儲存的任務清單 | `pm2 resurrect`、`~/.config/pm2/dump.json` |
 | 儲存 | Save | 把目前任務清單寫入 dump 檔 | `pm2 save` |
 | 開機啟動 | Startup | 把 daemon 註冊到作業系統開機流程 | `pm2 startup` |
 
@@ -33,8 +33,8 @@
 | 常駐程式 | Daemon | 持有所有行程狀態的長期行程 | `server.go` |
 | 命令列客戶端 | CLI Client | 薄 RPC 客戶端；`本身不持有任何狀態` | `cmd/` |
 | Unix socket | Unix Socket | CLI 與 daemon 之間的傳輸層 | `network/` |
-| 狀態目錄 | State Directory | `~/.pm2/`，首次執行自動建立 | `README.md` State files |
-| 傾印檔 | Dump File | `~/.pm2/dump.json`，任務清單的持久化形式 | `process_manager.go` |
+| 狀態目錄 | State Directory | `~/.config/pm2/`，首次執行自動建立 | `README.md` State files |
+| 傾印檔 | Dump File | `~/.config/pm2/dump.json`，任務清單的持久化形式 | `process_manager.go` |
 
 ## 介面 (Interfaces)
 

@@ -45,7 +45,14 @@ func generateLaunchd(exe string) error {
 	_ = exec.Command("launchctl", "bootout", target, plistPath).Run()
 	_ = os.Remove(plistPath)
 
-	plist := launchdPlist(label, exe, os.Getenv("PATH"), cliruntime.PM2Home())
+	// The daemon's own log directory must exist before launchd opens its
+	// redirect targets: a missing StandardOutPath directory makes the job
+	// fail to spawn, with the reason recorded only in launchd's log.
+	logsDir := cliruntime.DaemonLogsDir()
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		return err
+	}
+	plist := launchdPlist(label, exe, os.Getenv("PATH"), logsDir)
 
 	_ = os.MkdirAll(filepath.Dir(plistPath), 0o755)
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {

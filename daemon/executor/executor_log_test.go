@@ -15,8 +15,8 @@ func TestStartTimestampsAndRotatesManagedOutput(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "logs", "daemon.log")
-	errPath := filepath.Join(dir, "logs", "daemon.err")
+	logPath := process.TaskLogPath(dir, "logger")
+	errPath := process.TaskErrPath(dir, "logger")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -28,9 +28,6 @@ func TestStartTimestampsAndRotatesManagedOutput(t *testing.T) {
 	req := &model.AppStartReq{AppConfig: process.AppConfig{
 		Name:        "logger",
 		Script:      `printf 'out one\nout two\n'; printf 'err one\n' >&2`,
-		LogFile:     logPath,
-		ErrorFile:   errPath,
-		ConfigDir:   dir,
 		ConfigFile:  filepath.Join(dir, "ecosystem.config.js"),
 		CWD:         dir,
 		BaseEnv:     os.Environ(),
@@ -44,11 +41,12 @@ func TestStartTimestampsAndRotatesManagedOutput(t *testing.T) {
 	}
 	executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, nil, nil)
 
-	assertExecutorFile(t, filepath.Join(dir, "logs", "daemon.2000-01-01.log"),
+	logsDir := process.TaskLogsDir(dir)
+	assertExecutorFile(t, filepath.Join(logsDir, "logger.2000-01-01.log"),
 		"[2000-01-01 01:00:00] old stdout\n")
-	assertExecutorFile(t, filepath.Join(dir, "logs", "daemon.2000-01-02.log"),
+	assertExecutorFile(t, filepath.Join(logsDir, "logger.2000-01-02.log"),
 		"[2000-01-02 01:00:00] newer stdout\n")
-	assertExecutorFile(t, filepath.Join(dir, "logs", "daemon.2000-01-02.err"),
+	assertExecutorFile(t, filepath.Join(logsDir, "logger.2000-01-02.err"),
 		"[2000-01-02 02:00:00] old stderr\n")
 
 	assertTimestampedExecutorLines(t, logPath, []string{"out one\\n", "out two\\n"})

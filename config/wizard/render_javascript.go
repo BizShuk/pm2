@@ -55,10 +55,6 @@ func writeAppJS(output *strings.Builder, app renderedApp) {
 	writeJSString(output, "cron_restart", app.CronRestart)
 	writeJSString(output, "cron", app.Cron)
 	fmt.Fprintf(output, "            max_restarts: %d,\n", app.MaxRestarts)
-	writeJSString(output, "config_dir", app.ConfigDir)
-	writeJSString(output, "log_file", app.LogFile)
-	writeJSString(output, "out_file", app.OutFile)
-	writeJSString(output, "error_file", app.ErrorFile)
 	if app.Optional {
 		output.WriteString("            optional: true,\n")
 	}

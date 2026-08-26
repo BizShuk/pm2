@@ -12,8 +12,8 @@ func TestAppTreeItemShowsDirectoryNameCountAndSize(t *testing.T) {
 	t.Parallel()
 
 	m := Model{
-		apps: []logfile.AppLogs{{
-			App: "vidnote",
+		tasks: []logfile.TaskLogs{{
+			Task: "vidnote",
 			Files: []logfile.FileInfo{
 				{Name: "daemon.log", Size: 2048},
 				{Name: "daemon.err", Size: 1024},
@@ -22,7 +22,7 @@ func TestAppTreeItemShowsDirectoryNameCountAndSize(t *testing.T) {
 		expanded: map[string]bool{"vidnote": true},
 	}
 
-	item := m.appTreeItem(0)
+	item := m.taskTreeItem(0)
 	for _, want := range []string{"▾", "vidnote", "2 files", "3.0 KiB"} {
 		if !strings.Contains(item, want) {
 			t.Errorf("app item = %q, want it to contain %q", item, want)
@@ -34,8 +34,8 @@ func TestCurrentFileTreeItemUsesDiamondMarker(t *testing.T) {
 	t.Parallel()
 
 	m := Model{
-		apps: []logfile.AppLogs{{
-			App: "vidnote",
+		tasks: []logfile.TaskLogs{{
+			Task: "vidnote",
 			Files: []logfile.FileInfo{{
 				Current: true,
 				Name:    "daemon.log",

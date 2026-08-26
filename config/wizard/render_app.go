@@ -16,31 +16,11 @@ type renderedApp struct {
 	Watch       bool              `json:"watch,omitempty"`
 	MaxRestarts int               `json:"max_restarts"`
 	CWD         string            `json:"cwd,omitempty"`
-	ConfigDir   string            `json:"config_dir,omitempty"`
-	LogFile     string            `json:"log_file,omitempty"`
-	OutFile     string            `json:"out_file,omitempty"`
-	ErrorFile   string            `json:"error_file,omitempty"`
 	Optional    bool              `json:"optional,omitempty"`
 }
 
 func appForRender(app process.AppConfig) renderedApp {
 	app.Normalize("")
-
-	configDir := app.ConfigDir
-	if configDir == process.DefaultConfigDir(app.Name) {
-		configDir = ""
-	}
-
-	logFile := app.LogFile
-	if logFile == process.DefaultLogFile(app.ConfigDir) ||
-		(app.OutFile != "" && app.OutFile == logFile) {
-		logFile = ""
-	}
-
-	errorFile := app.ErrorFile
-	if errorFile == process.DefaultErrorFile(app.ConfigDir) {
-		errorFile = ""
-	}
 
 	return renderedApp{
 		Name:        app.Name,
@@ -54,10 +34,6 @@ func appForRender(app process.AppConfig) renderedApp {
 		Watch:       app.Watch,
 		MaxRestarts: app.MaxRestarts,
 		CWD:         app.CWD,
-		ConfigDir:   configDir,
-		LogFile:     logFile,
-		OutFile:     app.OutFile,
-		ErrorFile:   errorFile,
 		Optional:    app.Optional,
 	}
 }

@@ -22,7 +22,7 @@ const restartThrottleSeconds = 10
 //     `pm2 daemon stop` and `pm2 daemon kill` end in os.Exit(0), so a
 //     plain `KeepAlive = true` would respawn the daemon the user just
 //     deliberately stopped, silently defeating the stop marker.
-func launchdPlist(label, exe, path, home string) string {
+func launchdPlist(label, exe, path, logsDir string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,7 +51,7 @@ func launchdPlist(label, exe, path, home string) string {
 	<key>StandardErrorPath</key><string>%s/daemon-err.log</string>
 </dict>
 </plist>
-`, label, exe, path, restartThrottleSeconds, home, home)
+`, label, exe, path, restartThrottleSeconds, logsDir, logsDir)
 }
 
 // systemdUnit renders the user unit for the daemon.
