@@ -58,13 +58,18 @@ type ManagedProcess struct {
 // persistence. It implements network.Manager so the network layer can
 // dispatch RPC commands directly without knowing about Server.
 type ProcessManager struct {
-	reg          *ProcessRegistry
-	executor     *executor.Executor
-	nextID       int
-	homeDir      string
-	scheduler    *cron.Scheduler
-	history      *runhistory.Store
-	workflows    *wfengine.Engine
+	reg       *ProcessRegistry
+	executor  *executor.Executor
+	nextID    int
+	homeDir   string
+	scheduler *cron.Scheduler
+	history   *runhistory.Store
+	workflows *wfengine.Engine
+
+	// webStatus is set by Server once it knows where — or whether — the
+	// HTTP dashboard bound. Nil when no Server owns this manager, which
+	// is the shape every daemon unit test uses.
+	webStatus    *webState
 	startedAt    time.Time
 	RestartDelay time.Duration
 
@@ -377,13 +382,19 @@ func (pm *ProcessManager) Ping() {
 //
 // Satisfies network.Manager (CmdStatus).
 func (pm *ProcessManager) Status() process.DaemonInfo {
-	return process.DaemonInfo{
+	info := process.DaemonInfo{
 		PID:          os.Getpid(),
 		StartedAt:    pm.startedAt,
 		Version:      model.PM2Version,
 		HomeDir:      pm.homeDir,
 		ProcessCount: pm.reg.Len(),
 	}
+	// A web bind failure degrades the daemon rather than failing it, so
+	// status is where that refusal becomes visible to a human.
+	if pm.webStatus != nil {
+		info.WebAddr, info.WebError = pm.webStatus.read()
+	}
+	return info
 }
 
 // ---------------------------------------------------------------------------

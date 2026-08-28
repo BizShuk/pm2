@@ -78,5 +78,15 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  home:        %s\n", info.HomeDir)
 	fmt.Printf("  socket:      %s\n", sock)
 	fmt.Printf("  processes:   %d\n", info.ProcessCount)
+	// The web server degrades rather than failing the daemon, so this is
+	// where both outcomes have to become visible to a human.
+	switch {
+	case info.WebError != "":
+		fmt.Printf("  web:         unavailable (%s)\n", info.WebError)
+	case info.WebAddr != "":
+		fmt.Printf("  web:         %s (no authentication)\n", info.WebAddr)
+	default:
+		fmt.Printf("  web:         disabled\n")
+	}
 	return nil
 }

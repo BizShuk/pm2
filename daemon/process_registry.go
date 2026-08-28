@@ -192,12 +192,12 @@ func (r *ProcessRegistry) Len() int {
 // FindByTarget replicates the four-tier matching logic that used to live in
 // daemon.findProcesses:
 //
-//	0. exact "namespace:name" key match (so cron callbacks with composite
-//	   keys resolve to the correct process across namespaces)
-//	1. numeric ID match
-//	2. plain name match (returns all matches across namespaces)
-//	3. namespace match (returns every process in that namespace)
-//	"all" is a special target that returns every registered process.
+//  0. exact "namespace:name" key match (so cron callbacks with composite
+//     keys resolve to the correct process across namespaces)
+//  1. numeric ID match
+//  2. plain name match (returns all matches across namespaces)
+//  3. namespace match (returns every process in that namespace)
+//     "all" is a special target that returns every registered process.
 func (r *ProcessRegistry) FindByTarget(target string) []*ManagedProcess {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

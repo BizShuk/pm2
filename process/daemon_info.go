@@ -12,4 +12,11 @@ type DaemonInfo struct {
 	Version      string    `json:"version"`
 	HomeDir      string    `json:"home_dir"`
 	ProcessCount int       `json:"process_count"`
+
+	// WebAddr is where the HTTP dashboard is listening, and WebError
+	// why it is not. A failed web bind degrades the daemon rather than
+	// failing it, so these two fields are how the refusal reaches a
+	// human — `pm2 daemon status` prints them.
+	WebAddr  string `json:"web_addr,omitempty"`
+	WebError string `json:"web_error,omitempty"`
 }

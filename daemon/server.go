@@ -10,6 +10,7 @@ import (
 	_ "github.com/bizshuk/gosdk/log" // initialize gosdk slog default handler
 
 	"github.com/bizshuk/pm2/daemon/network"
+	"github.com/bizshuk/pm2/daemon/web"
 )
 
 // ErrAlreadyRunning reports that another daemon already answers on the
@@ -23,15 +24,29 @@ var ErrAlreadyRunning = network.ErrDaemonAlreadyRunning
 // Server only coordinates the daemon's start-up and shut-down.
 type Server struct {
 	*ProcessManager
+
+	// WebHost and WebPort configure the HTTP dashboard. The defaults
+	// publish on every interface without authentication; see
+	// daemon/web's package doc for what that means. WebPort 0 disables
+	// the server entirely.
+	WebHost string
+	WebPort int
+
+	web webState
 }
 
 // NewServer returns a new Server initialised with a ProcessManager for
 // the given home directory. The daemon is not listening yet — call
 // Listen() to bind the socket and start accepting RPC requests.
 func NewServer(homeDir string) *Server {
-	return &Server{
-		ProcessManager: NewProcessManager(homeDir),
+	pm := NewProcessManager(homeDir)
+	srv := &Server{
+		ProcessManager: pm,
+		WebHost:        web.DefaultHost,
+		WebPort:        web.DefaultPort,
 	}
+	pm.webStatus = &srv.web
+	return srv
 }
 
 // Listen starts the Unix socket server. It claims the socket, takes
@@ -57,6 +72,7 @@ func (s *Server) Listen(socketPath string) error {
 	s.StartMetricsCollector()
 	s.pruneHistory()
 	s.startWorkflows()
+	s.startWeb()
 
 	go s.startAutoResurrect()
 	go s.startAutoSave()

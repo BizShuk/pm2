@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pm2</title>
+<style>
+/* Colours mirror tui/theme/palette.go so the dashboard and the TUI
+   cannot disagree about what "errored" looks like. ui_test.go pins them. */
+:root {
+  --online:#16a34a; --stopped:#64748b; --errored:#dc2626; --warn:#d97706;
+  --muted:#64748b; --text:#0f172a;
+  --bg:#f8fafc; --panel:#ffffff; --line:#e2e8f0; --accent:#2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --online:#3fb950; --stopped:#6e7681; --errored:#f85149; --warn:#e3b341;
+    --muted:#8b949e; --text:#e6edf3;
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --accent:#58a6ff;
+  }
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+header {
+  display:flex; flex-wrap:wrap; gap:8px 20px; align-items:baseline;
+  padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel);
+}
+h1 { font-size:16px; margin:0 12px 0 0; letter-spacing:.5px; }
+.meta { color:var(--muted); font-size:12px; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.dot.live { background:var(--online); } .dot.stale { background:var(--errored); }
+.warnbar {
+  padding:8px 20px; background:color-mix(in srgb, var(--warn) 18%, transparent);
+  border-bottom:1px solid var(--line); font-size:12px; color:var(--text);
+}
+nav { display:flex; gap:4px; padding:10px 20px 0; }
+nav button {
+  font:inherit; color:var(--muted); background:none; cursor:pointer;
+  border:1px solid transparent; border-bottom:none; padding:6px 14px; border-radius:6px 6px 0 0;
+}
+nav button.on { color:var(--text); background:var(--panel); border-color:var(--line); }
+main { padding:0 20px 40px; }
+section { display:none; background:var(--panel); border:1px solid var(--line); border-radius:0 8px 8px 8px; padding:4px 0; }
+section.on { display:block; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; font-weight:600; color:var(--muted); font-size:11px; letter-spacing:.6px; text-transform:uppercase; }
+th, td { padding:7px 14px; border-bottom:1px solid var(--line); white-space:nowrap; }
+tbody tr.clickable { cursor:pointer; }
+tbody tr.clickable:hover { background:color-mix(in srgb, var(--accent) 8%, transparent); }
+td.wide { white-space:normal; word-break:break-all; }
+.s-online,.s-success { color:var(--online); }
+.s-errored,.s-failed { color:var(--errored); }
+.s-stopped,.s-paused { color:var(--stopped); }
+.s-skipped,.s-launching,.s-running,.s-cancelled { color:var(--warn); }
+.empty { padding:22px 14px; color:var(--muted); }
+.sub { background:color-mix(in srgb, var(--muted) 8%, transparent); }
+.sub td { padding:0; border-bottom:1px solid var(--line); }
+.sub table { font-size:12px; }
+pre {
+  margin:0; padding:12px 14px; max-height:340px; overflow:auto;
+  background:var(--bg); border-top:1px solid var(--line); font-size:12px; white-space:pre-wrap;
+}
+.chips { display:flex; gap:6px; padding:10px 14px; }
+.chips button {
+  font:inherit; font-size:12px; color:var(--muted); background:none; cursor:pointer;
+  border:1px solid var(--line); border-radius:999px; padding:3px 12px;
+}
+.chips button.on { color:var(--text); border-color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>pm2</h1>
+  <span class="meta"><span id="dot" class="dot stale"></span><span id="conn">connecting…</span></span>
+  <span class="meta" id="daemon"></span>
+</header>
+<div class="warnbar" id="warnbar" hidden></div>
+
+<nav>
+  <button data-tab="tasks" class="on">Tasks</button>
+  <button data-tab="workflows">Workflows</button>
+  <button data-tab="history">History</button>
+</nav>
+
+<main>
+  <section id="tasks" class="on"><div class="empty">Loading…</div></section>
+  <section id="workflows"><div class="empty">Loading…</div></section>
+  <section id="history">
+    <div class="chips" id="filters">
+      <button data-filter="all" class="on">All</button>
+      <button data-filter="workflows">Workflows</button>
+      <button data-filter="tasks">Tasks</button>
+      <button data-filter="failed">Failed only</button>
+    </div>
+    <div id="historyBody"><div class="empty">Loading…</div></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+var TICK_FAST = 2000, TICK_SLOW = 5000, BACKOFF = 30000;
+var state = {
+  tab: "tasks", filter: "all", failures: 0,
+  openTask: null, openRun: null, openStage: null,
+  tasks: [], workflows: [], runs: [], taskRuns: [], stageLog: ""
+};
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+function cls(s) { return "s-" + String(s || "").replace(/[^a-z]/gi, "").toLowerCase(); }
+function ts(v) { return v && !String(v).startsWith("0001") ? new Date(v).toLocaleString() : "—"; }
+function ms(v) { return !v ? "—" : v < 1000 ? v + "ms" : (v / 1000).toFixed(1) + "s"; }
+function mem(b) { return !b ? "—" : (b / 1048576).toFixed(1) + " MB"; }
+function exitOf(s) { return s.signal ? s.signal : (s.exit_code === null || s.exit_code === undefined ? "—" : s.exit_code); }
+
+async function get(path) {
+  var res = await fetch(path, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error(res.status + " " + res.statusText);
+  return res.json();
+}
+
+function rows(head, body) {
+  return "<table><thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") +
+    "</tr></thead><tbody>" + body + "</tbody></table>";
+}
+
+/* ── Tasks ───────────────────────────────────────────────────────── */
+function renderTasks() {
+  var el = document.getElementById("tasks");
+  if (!state.tasks.length) { el.innerHTML = '<div class="empty">No tasks registered. Run: pm2 apply</div>'; return; }
+
+  var body = state.tasks.map(function (t) {
+    var key = t.namespace + ":" + t.name;
+    var out = "<tr class='clickable' data-task='" + esc(key) + "'>" +
+      "<td>" + t.id + "</td><td>" + esc(t.namespace) + "</td><td>" + esc(t.name) + "</td>" +
+      "<td class='" + cls(t.status) + "'>" + esc(t.status) + "</td>" +
+      "<td>" + (t.pid || "—") + "</td><td>" + t.cpu.toFixed(1) + "%</td><td>" + mem(t.memory) + "</td>" +
+      "<td>" + t.restarts + "</td><td>" + esc(t.cron || t.cron_restart || "—") + "</td>" +
+      "<td class='" + cls(t.last_cron_status) + "'>" + esc(t.last_cron_status || "—") + "</td></tr>";
+    if (state.openTask === key) {
+      out += "<tr class='sub'><td colspan='10'>" + renderTaskRuns() + "</td></tr>";
+    }
+    return out;
+  }).join("");
+
+  el.innerHTML = rows(["ID", "NS", "Name", "Status", "PID", "CPU", "Memory", "Restarts", "Schedule", "Last cron"], body);
+}
+
+function renderTaskRuns() {
+  if (!state.taskRuns.length) return '<div class="empty">No runs recorded for this task yet.</div>';
+  return rows(["When", "Event", "Trigger", "Status", "Exit", "Duration"], state.taskRuns.map(function (r) {
+    return "<tr><td>" + ts(r.ts) + "</td><td>" + esc(r.event) + "</td><td>" + esc(r.trigger) + "</td>" +
+      "<td class='" + cls(r.status) + "'>" + esc(r.status) + "</td><td>" + exitOf(r) + "</td>" +
+      "<td>" + ms(r.duration_ms) + "</td></tr>";
+  }).join(""));
+}
+
+/* ── Workflows ───────────────────────────────────────────────────── */
+function renderWorkflows() {
+  var el = document.getElementById("workflows");
+  if (!state.workflows.length) {
+    el.innerHTML = '<div class="empty">No workflows registered. Declare them in the workflows: block of your ecosystem file, then run: pm2 apply</div>';
+    return;
+  }
+  var body = state.workflows.map(function (w) {
+    var st = w.running ? "running" : (w.last_status || "never run");
+    return "<tr><td>" + esc(w.category) + "</td><td>" + esc(w.name) + "</td>" +
+      "<td class='wide'>" + esc(w.stages.join(" → ")) + "</td>" +
+      "<td>" + esc(w.cron || "—") + "</td>" +
+      "<td class='" + cls(st) + "'>" + esc(st) + "</td>" +
+      "<td>" + (w.running ? esc(w.run_id) : ts(w.last_run_at)) + "</td></tr>";
+  }).join("");
+  el.innerHTML = rows(["Category", "Name", "Stages", "Cron", "State", "Last run"], body);
+}
+
+/* ── History (workflow runs and task runs, one timeline) ─────────── */
+function mergedHistory() {
+  var items = [];
+  if (state.filter !== "tasks") {
+    state.runs.forEach(function (r) {
+      items.push({
+        kind: "workflow", at: r.running ? r.started_at : r.finished_at,
+        subject: r.workflow, trigger: r.trigger,
+        status: r.running ? "running" : r.status,
+        detail: r.run_id, duration: r.duration_ms, runID: r.run_id, running: r.running
+      });
+    });
+  }
+  if (state.filter !== "workflows") {
+    state.taskRuns.forEach(function (r) {
+      items.push({
+        kind: "task", at: r.ts, subject: r.ns + ":" + r.name, trigger: r.trigger,
+        status: r.status, detail: "exit " + exitOf(r), duration: r.duration_ms
+      });
+    });
+  }
+  if (state.filter === "failed") items = items.filter(function (i) { return i.status === "failed"; });
+  items.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
+  return items;
+}
+
+function renderHistory() {
+  var el = document.getElementById("historyBody");
+  var items = mergedHistory();
+  if (!items.length) { el.innerHTML = '<div class="empty">Nothing recorded yet.</div>'; return; }
+
+  var body = items.map(function (i) {
+    var clickable = i.kind === "workflow" && !i.running;
+    var out = "<tr" + (clickable ? " class='clickable' data-run='" + esc(i.runID) + "'" : "") + ">" +
+      "<td>" + ts(i.at) + "</td><td>" + esc(i.kind) + "</td><td>" + esc(i.subject) + "</td>" +
+      "<td>" + esc(i.trigger) + "</td>" +
+      "<td class='" + cls(i.status) + "'>" + esc(i.status) + "</td>" +
+      "<td>" + ms(i.duration) + "</td><td class='wide'>" + esc(i.detail) + "</td></tr>";
+    if (clickable && state.openRun && state.openRun.run_id === i.runID) {
+      out += "<tr class='sub'><td colspan='7'>" + renderRunDetail(state.openRun) + "</td></tr>";
+    }
+    return out;
+  }).join("");
+
+  el.innerHTML = rows(["When", "Kind", "Subject", "Trigger", "Status", "Duration", "Detail"], body);
+}
+
+function renderRunDetail(run) {
+  var body = run.stages.map(function (s, n) {
+    return "<tr class='clickable' data-stage='" + esc(s.name) + "'>" +
+      "<td>" + (n + 1) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.kind) + "</td>" +
+      "<td class='" + cls(s.status) + "'>" + esc(s.status) + "</td>" +
+      "<td>" + exitOf(s) + "</td><td>" + ms(s.duration_ms) + "</td>" +
+      "<td class='wide'>" + esc(s.error || "") + "</td></tr>";
+  }).join("");
+  var out = rows(["#", "Stage", "Kind", "Status", "Exit", "Duration", "Error"], body);
+  if (state.stageLog) out += "<pre>" + esc(state.stageLog) + "</pre>";
+  return out;
+}
+
+/* ── Polling ─────────────────────────────────────────────────────── */
+function renderAll() { renderTasks(); renderWorkflows(); renderHistory(); }
+
+function setConn(ok, note) {
+  document.getElementById("dot").className = "dot " + (ok ? "live" : "stale");
+  document.getElementById("conn").textContent = note;
+}
+
+async function refresh() {
+  try {
+    var status = await get("/api/status");
+    document.getElementById("daemon").textContent =
+      "pid " + status.pid + " · " + status.process_count + " tasks · v" + status.version +
+      (status.web_addr ? " · " + status.web_addr : "");
+
+    var bar = document.getElementById("warnbar");
+    bar.hidden = false;
+    bar.textContent = "This dashboard and its webhook are reachable without authentication. " +
+      "Anyone who can reach " + (status.web_addr || "this port") + " can trigger a workflow, which runs shell commands on this machine.";
+
+    state.tasks = await get("/api/tasks");
+    state.workflows = await get("/api/workflows");
+    state.runs = await get("/api/workflows/runs?limit=100");
+    state.taskRuns = await get("/api/tasks/runs?limit=100" + (state.openTask ? "&name=" + encodeURIComponent(state.openTask) : ""));
+
+    state.failures = 0;
+    setConn(true, "live");
+    renderAll();
+  } catch (err) {
+    state.failures++;
+    setConn(false, "unreachable (" + err.message + ")");
+  }
+  schedule();
+}
+
+function schedule() {
+  var delay = state.failures >= 3 ? BACKOFF : (state.tab === "tasks" ? TICK_FAST : TICK_SLOW);
+  // A forgotten background tab must not keep waking the daemon forever.
+  if (document.hidden) delay = BACKOFF;
+  setTimeout(refresh, delay);
+}
+
+/* ── Events ──────────────────────────────────────────────────────── */
+document.querySelector("nav").addEventListener("click", function (e) {
+  var btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  state.tab = btn.dataset.tab;
+  document.querySelectorAll("nav button").forEach(function (b) { b.classList.toggle("on", b === btn); });
+  document.querySelectorAll("main section").forEach(function (s) { s.classList.toggle("on", s.id === state.tab); });
+});
+
+document.getElementById("filters").addEventListener("click", function (e) {
+  var btn = e.target.closest("button[data-filter]");
+  if (!btn) return;
+  state.filter = btn.dataset.filter;
+  document.querySelectorAll("#filters button").forEach(function (b) { b.classList.toggle("on", b === btn); });
+  renderHistory();
+});
+
+document.getElementById("tasks").addEventListener("click", async function (e) {
+  var row = e.target.closest("tr[data-task]");
+  if (!row) return;
+  var key = row.dataset.task;
+  state.openTask = state.openTask === key ? null : key;
+  state.taskRuns = await get("/api/tasks/runs?limit=100" + (state.openTask ? "&name=" + encodeURIComponent(state.openTask) : ""));
+  renderTasks();
+});
+
+document.getElementById("history").addEventListener("click", async function (e) {
+  var stageRow = e.target.closest("tr[data-stage]");
+  if (stageRow && state.openRun) {
+    var stage = stageRow.dataset.stage;
+    state.openStage = state.openStage === stage ? null : stage;
+    state.stageLog = "";
+    if (state.openStage) {
+      var res = await fetch("/api/workflows/runs/" + encodeURIComponent(state.openRun.run_id) +
+        "/logs/" + encodeURIComponent(state.openStage));
+      state.stageLog = res.ok ? await res.text() : "(log unavailable)";
+    }
+    renderHistory();
+    return;
+  }
+
+  var runRow = e.target.closest("tr[data-run]");
+  if (!runRow) return;
+  var id = runRow.dataset.run;
+  if (state.openRun && state.openRun.run_id === id) {
+    state.openRun = null; state.openStage = null; state.stageLog = "";
+  } else {
+    state.openRun = await get("/api/workflows/runs/" + encodeURIComponent(id));
+    state.openStage = null; state.stageLog = "";
+  }
+  renderHistory();
+});
+
+document.addEventListener("visibilitychange", function () {
+  if (!document.hidden) refresh();
+});
+
+refresh();
+</script>
+</body>
+</html>

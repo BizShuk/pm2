@@ -42,6 +42,7 @@ func init() {
 		GpuCmd,
 		TaskCmd,
 		WorkflowCmd,
+		WebCmd,
 		MonitorCmd,
 		TaskmanagerCmd,
 		WizardCmd,
