@@ -50,7 +50,7 @@ func startSleeper(t *testing.T, pm *ProcessManager, name string) {
 // otherwise a daemon restart within the auto-save interval loses it.
 func TestStartAppAutoSaves(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -66,7 +66,7 @@ func TestStartAppAutoSaves(t *testing.T) {
 // tasks that were just deleted.
 func TestDeleteByNameAutoSaves(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -86,7 +86,7 @@ func TestDeleteByNameAutoSaves(t *testing.T) {
 // the dump exactly as it was rather than rewriting it.
 func TestFailedDeleteLeavesDumpUntouched(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -113,7 +113,7 @@ func TestFailedDeleteLeavesDumpUntouched(t *testing.T) {
 // a pause (or re-apply one the user just lifted).
 func TestPauseAndResumeAutoSave(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -137,7 +137,7 @@ func TestPauseAndResumeAutoSave(t *testing.T) {
 // though neither changes what it stores.
 func TestStopAndRestartAutoSave(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -167,7 +167,7 @@ func TestStopAndRestartAutoSave(t *testing.T) {
 // dump stores, so they must not rewrite it once a minute.
 func TestInternalRestartDoesNotAutoSave(t *testing.T) {
 	home := testDir(t)
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 
 	startSleeper(t, pm, "autosave-a")
@@ -222,7 +222,7 @@ func TestResurrectDoesNotRewriteDump(t *testing.T) {
 		t.Fatalf("write dump.json: %v", err)
 	}
 
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	t.Cleanup(func() { _ = pm.StopByName("all") })
 	if err := pm.Resurrect(); err != nil {
 		t.Fatalf("resurrect: %v", err)

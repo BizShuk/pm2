@@ -18,7 +18,7 @@ import (
 // original child keeps its PID.
 func TestCronFireSkippedWhileRunning(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	const key = "default:cron-overlap-app"
 
@@ -85,7 +85,7 @@ func TestCronFireSkippedWhileRunning(t *testing.T) {
 // "the entry exists" rather than "a run is in flight" would skip forever.
 func TestCronFireRunsWhenIdle(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	const key = "default:cron-idle-app"
 

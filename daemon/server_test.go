@@ -27,6 +27,25 @@ func testDir(t *testing.T) string {
 	return d
 }
 
+// newTestPM builds a ProcessManager whose background writes are
+// guaranteed to be finished before the test's temp directory is
+// removed.
+//
+// executor.Watch closes a process's `done` channel *before* it runs
+// onProcessExit, so a test could observe its process as finished and
+// return while the run-journal append was still in flight — and
+// t.TempDir's RemoveAll then raced a write that recreated
+// <home>/tasks/runs underneath it ("directory not empty"). KillAll
+// stops what is left and waits for that bookkeeping, and a cleanup
+// registered here runs before the TempDir cleanup registered inside
+// testDir, because t.Cleanup is LIFO.
+func newTestPM(t *testing.T, home string) *ProcessManager {
+	t.Helper()
+	pm := NewProcessManager(home)
+	t.Cleanup(pm.KillAll)
+	return pm
+}
+
 // TestBaseEnvSnapshotReachesProcess verifies that an env var present only in
 // req.BaseEnv (the CLI snapshot) — and absent from the daemon's own
 // environment — is passed through to the spawned process.
@@ -37,7 +56,7 @@ func testDir(t *testing.T) string {
 // writes the value to the daemon's stdout (captured via logFile).
 func TestBaseEnvSnapshotReachesProcess(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	const marker = "PM2_BASEENV_MARKER"
 	const want = "from_cli_snapshot"
@@ -88,7 +107,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	const want = "snapshot_value"
 	snapshot := append(os.Environ(), marker+"="+want)
 
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
 			Namespace: "default",
@@ -124,7 +143,7 @@ func TestBaseEnvSurvivesRestartAndResurrect(t *testing.T) {
 	}
 	_ = pm.StopByName("persistcheck")
 
-	pm2 := NewProcessManager(testDir)
+	pm2 := newTestPM(t, testDir)
 	if err := pm2.Resurrect(); err != nil {
 		t.Fatalf("resurrect failed: %v", err)
 	}
@@ -155,7 +174,7 @@ func pauseState(pm *ProcessManager, key string) (status process.Status, paused, 
 }
 
 func TestFindProcesses(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
 			AppConfig: process.AppConfig{Name: "appA", Namespace: "default"},
@@ -214,7 +233,7 @@ func TestFindProcesses(t *testing.T) {
 
 func TestWatchStateInheritance(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	pm.reg.Add("default:watch-app", &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -251,7 +270,7 @@ func TestWatchStateInheritance(t *testing.T) {
 
 func TestVersionStateInheritance(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	pm.reg.Add("default:version-app", &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -293,7 +312,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 	workDir := filepath.Join(testDir, "work")
 	_ = os.MkdirAll(workDir, 0o755)
 
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	outPath := filepath.Join(testDir, "pwd.out")
 	// Bash expands $PWD in the env; redirect to outPath via shell.
 	req := &model.AppStartReq{
@@ -327,7 +346,7 @@ func TestCWDInjectedAsPWD(t *testing.T) {
 
 func TestStartAppReportsEffectiveExecutionCWD(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	actualCWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get daemon cwd: %v", err)
@@ -371,7 +390,7 @@ func TestStartAppReportsEffectiveExecutionCWD(t *testing.T) {
 // processes are stopped and their PIDs cleared.
 func TestKillAllStopsEveryProcess(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	for _, name := range []string{"a", "b", "c"} {
 		req := &model.AppStartReq{
@@ -421,7 +440,7 @@ func TestConfigFileReplacement(t *testing.T) {
 	_ = probe.Wait()
 
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	scriptFile := "/bin/echo"
 
@@ -473,7 +492,7 @@ func TestConfigFileReplacement(t *testing.T) {
 
 func TestDeleteDuringRestartSleep(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	pm.RestartDelay = 500 * time.Millisecond
 
 	req := &model.AppStartReq{
@@ -522,7 +541,7 @@ func TestDeleteDuringRestartSleep(t *testing.T) {
 
 func TestRestartsInheritance(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	pm.reg.Add("default:appA", &ManagedProcess{
 		Info: process.ProcessInfo{
@@ -562,7 +581,7 @@ func TestRestartsInheritance(t *testing.T) {
 
 func TestStartAppLogsIntoTheSharedTaskLogDir(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -618,7 +637,7 @@ func TestStartAppLogsIntoTheSharedTaskLogDir(t *testing.T) {
 // is the actual verification; the assertions inside are sanity checks
 // that save() returns no error.
 func TestSaveConcurrentWithMapMutation(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 	stop := make(chan struct{})
 
 	// Writer goroutine: continuously add entries (and mutate an
@@ -724,7 +743,7 @@ func TestSaveConcurrentWithMapMutation(t *testing.T) {
 //   - Wait for refreshMetrics() to complete and verify the samples
 //     were written back correctly.
 func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 
 	// Barrier signal: the stub fires this on its very first invocation,
 	// guaranteeing the test proceeds only when refreshMetrics has dropped
@@ -810,7 +829,7 @@ func TestRefreshMetricsDoesNotBlockRPC(t *testing.T) {
 // during the slow ps phase does NOT inherit the stale sample. This
 // guards the "mp.Info.PID != t.pid" check in phase 3.
 func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 
 	// Save the real implementation and restore on exit so subsequent
 	// tests still get a working `ps` call.
@@ -879,7 +898,7 @@ func TestRefreshMetricsSkipsRestartedProcess(t *testing.T) {
 // This is a smoke test, not a precise perf assertion — CI jitter
 // means we only require a clear speedup, not an exact ratio.
 func TestRefreshMetricsParallelSpeedup(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 
 	orig := executor.GetProcessMetrics
 	defer func() { executor.GetProcessMetrics = orig }()
@@ -970,7 +989,7 @@ func TestRefreshMetricsParallelSpeedup(t *testing.T) {
 // and/or functionally (missing / duplicated entries).
 func TestHighConcurrencyStartup(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	const N = 20
 	var wg sync.WaitGroup
@@ -1043,7 +1062,7 @@ func TestHighConcurrencyStartup(t *testing.T) {
 // Status update non-atomically, this test catches it.
 func TestProcessErroredExitNoRestart(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	pm.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
@@ -1102,7 +1121,7 @@ func TestProcessErroredExitNoRestart(t *testing.T) {
 // catches it.
 func TestProcessErroredExitAutoRestart(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	pm.RestartDelay = 200 * time.Millisecond
 
 	req := &model.AppStartReq{
@@ -1190,7 +1209,7 @@ func TestProcessErroredExitAutoRestart(t *testing.T) {
 // restart cleanly-exiting processes.
 func TestProcessCleanExit(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	pm.RestartDelay = 100 * time.Millisecond
 
 	req := &model.AppStartReq{
@@ -1257,7 +1276,7 @@ func TestProcessCleanExit(t *testing.T) {
 // idle. The two-tick observation below catches that.
 func TestCronRestartFiresReboot(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1364,7 +1383,7 @@ func TestCronRestartFiresReboot(t *testing.T) {
 //   - Verify the child PID is GONE — kill(pid, 0) returns ESRCH.
 func TestStopProcessKillsChildren(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	childFile := filepath.Join(testDir, "child.pid")
 	scriptPath := filepath.Join(testDir, "spawn_child.sh")
 
@@ -1440,7 +1459,7 @@ func TestStopProcessKillsChildren(t *testing.T) {
 // distinct entries (not 1, which would indicate the bug).
 func TestCronNamespaceIsolation(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	// Sanity: nothing registered yet.
 	if got := pm.scheduler.EntryCount(); got != 0 {
@@ -1494,7 +1513,7 @@ func TestCronNamespaceIsolation(t *testing.T) {
 // carries), and resume re-registers the schedule and returns it to idle.
 func TestPauseResumeCronTask(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1570,7 +1589,7 @@ func TestPauseResumeCronTask(t *testing.T) {
 //   - the cron scheduler has NO entry for the resurrected process
 func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 	testDir := testDir(t)
-	pm1 := NewProcessManager(testDir)
+	pm1 := newTestPM(t, testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1602,7 +1621,7 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 	}
 
 	// Simulate a daemon restart: fresh server, same home dir.
-	pm2 := NewProcessManager(testDir)
+	pm2 := newTestPM(t, testDir)
 	if err := pm2.Resurrect(); err != nil {
 		t.Fatalf("resurrect: %v", err)
 	}
@@ -1630,7 +1649,7 @@ func TestPausedCronTaskSurvivesResurrect(t *testing.T) {
 }
 
 func TestStartAppRegistersOptionalRequestAsPaused(t *testing.T) {
-	pm := NewProcessManager(testDir(t))
+	pm := newTestPM(t, testDir(t))
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
 			Namespace: "default",
@@ -1668,7 +1687,7 @@ func TestStartAppRegistersOptionalRequestAsPaused(t *testing.T) {
 // cleared, status paused) and resume brings it back online.
 func TestPauseResumeRunningProcess(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 
 	req := &model.AppStartReq{
 		AppConfig: process.AppConfig{
@@ -1748,7 +1767,7 @@ func TestPauseResumeRunningProcess(t *testing.T) {
 // naked reads, this test trips `go test -race`.
 func TestConcurrentRestartDoesNotRaceOnMpInfo(t *testing.T) {
 	testDir := testDir(t)
-	pm := NewProcessManager(testDir)
+	pm := newTestPM(t, testDir)
 	pm.RestartDelay = 30 * time.Millisecond
 
 	req := &model.AppStartReq{

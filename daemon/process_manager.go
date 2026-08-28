@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,11 @@ import (
 	"github.com/bizshuk/pm2/runhistory"
 	"github.com/fsnotify/fsnotify"
 )
+
+// exitDrainTimeout bounds how long a shutdown waits for in-flight exit
+// bookkeeping. It is generous next to a single append to an open file
+// and short next to any human waiting for `pm2 daemon kill` to return.
+const exitDrainTimeout = 2 * time.Second
 
 // errProcessNotFound is returned by RPC handlers when the target
 // resolves to zero managed processes (wrong name, unknown
@@ -78,6 +84,14 @@ type ProcessManager struct {
 	// reading from it would let a single failed launch erase that
 	// app's saved config.
 	suppressAutoSave atomic.Bool
+
+	// exits counts the watcher goroutines that have not yet finished
+	// their exit bookkeeping. executor.Watch closes `done` *before* it
+	// calls onExit, so stopProcess returns while onProcessExit is still
+	// writing the run journal — everything downstream of a stop
+	// (shutdown, a test's temp directory) would otherwise race a write
+	// it cannot see. WaitForExits is the join.
+	exits sync.WaitGroup
 }
 
 // NewProcessManager returns an initialized ProcessManager ready to
@@ -366,6 +380,31 @@ func (pm *ProcessManager) Resurrect() error {
 func (pm *ProcessManager) KillAll() {
 	for _, mp := range pm.findProcesses("all") {
 		_ = pm.stopProcess(mp)
+	}
+	// The runs this kill just ended are finished runs, and the journal
+	// records what finished. Returning before their records land would
+	// lose them to the os.Exit the dispatcher schedules ~150 ms later —
+	// a run the daemon itself ended, missing from the history of the
+	// shutdown that ended it. The bound is what makes it safe: a wedged
+	// watcher delays shutdown, it does not prevent it.
+	pm.WaitForExits(exitDrainTimeout)
+}
+
+// WaitForExits blocks until every in-flight exit handler has finished
+// its bookkeeping, or until timeout. It reports whether the wait
+// drained; a false means bookkeeping is still running and whatever the
+// caller was about to do — exit, delete a directory — will race it.
+func (pm *ProcessManager) WaitForExits(timeout time.Duration) bool {
+	drained := make(chan struct{})
+	go func() {
+		pm.exits.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 

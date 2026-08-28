@@ -732,7 +732,8 @@ finished, the daemon reports what is running.* A JSONL line cannot be
 updated, so recording at start would mean either a fold on every read or
 a file that is not really append-only.
 
-The stated cost: a run in flight when the daemon dies is never indexed.
+The stated cost: a run still *in flight* when the daemon dies is never
+indexed — a run the shutdown itself ended is, see `WaitForExits` below.
 Its stage logs still exist; only the index line is lost. That is also
 how "stateless" is implemented — no resume, and no record left claiming
 to be running.
@@ -750,6 +751,19 @@ to be running.
 - Appends follow the `autoSave` contract: best-effort, logged, never
   returned — with the log rate-limited so a full disk cannot turn
   `daemon.log` into a copy of the journal it could not write.
+- The append is joinable. `executor.Watch` closes a process's `done`
+  channel *before* it calls `onProcessExit`, so `stopProcess` returns
+  while the record is still being written — and the registry already
+  says `stopped` by then, because the status write precedes the append
+  inside the same callback. `ProcessManager.exits` counts the watcher
+  goroutines and `WaitForExits(timeout)` is the join. `KillAll` uses it
+  so the runs a shutdown ends are journaled before the dispatcher's
+  `os.Exit`, and the daemon tests use it (via `newTestPM`) so
+  `t.TempDir`'s `RemoveAll` cannot race an append that recreates
+  `tasks/runs` underneath it. The timeout is what keeps it safe: a
+  wedged watcher delays shutdown, it never prevents it. Regression
+  tests: `TestKillAllJournalsTheRunsItEnded`,
+  `TestWaitForExitsDrainsTheRunJournal`.
 - A run ID carries its own date (`20260828T030012-a1b2c3`) so
   `WorkflowRun` opens exactly one day file. Do not "clean it up" into a
   UUID.
@@ -1397,6 +1411,11 @@ supervises, and `pm2 logs monitor` offers only the latter for deletion.
   case that needs the private `paused` flag alongside `Status`) uses
   `pm.reg.Get(key)` for a live `*ManagedProcess` or `UpdateInfo` to read
   atomically under the write lock.
+- Every watcher goroutine is counted in `ProcessManager.exits` and
+  released only after `onProcessExit` returns. Anything that must not
+  race the run-journal append — a shutdown, a test's temp directory —
+  joins through `WaitForExits`, never by observing a process's status:
+  the status write happens inside the same callback, before the append.
 - `onProcessExit` (the `executor.Watch` callback) is the only place that
   transitions a process from `online` → `errored` or `stopped` _for processes
   that exit on their own_. Deliberate stops update status from inside

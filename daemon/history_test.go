@@ -58,7 +58,7 @@ func waitForRecords(t *testing.T, home string, want int) []runhistory.TaskRecord
 // indistinguishable traces.
 func TestRunRecordCarriesExitCode(t *testing.T) {
 	home := t.TempDir()
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	if _, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
@@ -92,7 +92,7 @@ func TestRunRecordCarriesExitCode(t *testing.T) {
 
 func TestRunRecordSuccess(t *testing.T) {
 	home := t.TempDir()
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	if _, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
@@ -115,7 +115,7 @@ func TestRunRecordSuccess(t *testing.T) {
 // task that failed every single night reported healthy forever.
 func TestCronOkMeansExitedZero(t *testing.T) {
 	home := t.TempDir()
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	req := &model.AppStartReq{AppConfig: process.AppConfig{
@@ -159,7 +159,7 @@ func TestCronOkMeansExitedZero(t *testing.T) {
 // distinguishable from "never fired".
 func TestCronFireSkipIsJournaled(t *testing.T) {
 	home := t.TempDir()
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	req := &model.AppStartReq{AppConfig: process.AppConfig{
@@ -210,7 +210,7 @@ func TestHistoryFailureDoesNotBlockLaunch(t *testing.T) {
 		t.Fatalf("block journal dir: %v", err)
 	}
 
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	infos, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
@@ -228,7 +228,7 @@ func TestHistoryFailureDoesNotBlockLaunch(t *testing.T) {
 // from the launch path to the journal rather than defaulting.
 func TestRunRecordCarriesTrigger(t *testing.T) {
 	home := t.TempDir()
-	pm := NewProcessManager(home)
+	pm := newTestPM(t, home)
 	defer pm.KillAll()
 
 	if _, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
@@ -253,5 +253,73 @@ func TestRunRecordCarriesTrigger(t *testing.T) {
 	}
 	if triggers[1] != runhistory.TriggerRestart {
 		t.Errorf("restarted run: want %q, got %q (triggers=%v)", runhistory.TriggerRestart, triggers[1], triggers)
+	}
+}
+
+// waitForStatus blocks until a process reaches the wanted status. It
+// reads through SnapshotOne, the sanctioned value-copy path, because a
+// naked read of mp.Info races onProcessExit's own write.
+func waitForStatus(t *testing.T, pm *ProcessManager, key string, want process.Status) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if info, ok := pm.reg.SnapshotOne(key); ok && info.Status == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s did not reach status %q within 5s", key, want)
+}
+
+// TestWaitForExitsDrainsTheRunJournal pins the ordering that made every
+// caller downstream of a finished process racy: executor.Watch closes
+// `done` before it runs onProcessExit, and the status write inside that
+// callback happens before the journal append. So "the registry says
+// stopped" is precisely the window in which the record is not yet on
+// disk — the window a test's temp-directory cleanup used to delete the
+// directory the append then recreated.
+func TestWaitForExitsDrainsTheRunJournal(t *testing.T) {
+	home := t.TempDir()
+	pm := newTestPM(t, home)
+
+	if _, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
+		Name: "quick", Script: "true", MaxRestarts: 0,
+	}}); err != nil {
+		t.Fatalf("StartApp: %v", err)
+	}
+	waitForStatus(t, pm, "default:quick", process.StatusStopped)
+
+	if !pm.WaitForExits(exitDrainTimeout) {
+		t.Fatal("exit bookkeeping did not drain within the timeout")
+	}
+	if recs := readTaskJournal(t, home); len(recs) != 1 {
+		t.Fatalf("journal holds %d records after the drain, want 1", len(recs))
+	}
+}
+
+// TestKillAllJournalsTheRunsItEnded is the product half of the same
+// fix: the dispatcher calls os.Exit ~150 ms after KillAll returns, so a
+// KillAll that returned while the append was in flight would drop the
+// record of a run the daemon itself had just ended.
+func TestKillAllJournalsTheRunsItEnded(t *testing.T) {
+	home := t.TempDir()
+	pm := newTestPM(t, home)
+
+	if _, err := pm.StartApp(&model.AppStartReq{AppConfig: process.AppConfig{
+		Name: "longrunner", Script: "sleep", Args: []string{"30"}, MaxRestarts: 0,
+	}}); err != nil {
+		t.Fatalf("StartApp: %v", err)
+	}
+
+	pm.KillAll()
+
+	// No polling: the point is that the record is already there when
+	// KillAll returns.
+	recs := readTaskJournal(t, home)
+	if len(recs) != 1 {
+		t.Fatalf("journal holds %d records right after KillAll, want 1", len(recs))
+	}
+	if recs[0].Name != "longrunner" {
+		t.Errorf("journalled %q, want longrunner", recs[0].Name)
 	}
 }

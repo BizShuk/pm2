@@ -133,9 +133,16 @@ func (pm *ProcessManager) launchProcessWith(name string, req *model.AppStartReq,
 	}
 
 	if !isCronTask && !isPaused {
-		go pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(exit executor.ExitInfo) {
-			pm.onProcessExit(mp, exit)
-		})
+		// Counted before the goroutine starts, released only after
+		// onProcessExit returns — the journal append lives inside that
+		// callback, and executor.Watch closes mp.done before calling it.
+		pm.exits.Add(1)
+		go func() {
+			defer pm.exits.Done()
+			pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(exit executor.ExitInfo) {
+				pm.onProcessExit(mp, exit)
+			})
+		}()
 	}
 
 	mp.paused = isPaused
