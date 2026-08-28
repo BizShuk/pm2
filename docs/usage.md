@@ -160,6 +160,64 @@ Log paths are not configurable: every task writes to
 
 ---
 
+### Workflows in the ecosystem file
+
+```javascript
+module.exports = {
+    apps: [
+        { name: "unit-tests", script: "./scripts/test.sh", optional: true }
+    ],
+    workflows: [
+        {
+            name: "nightly",       // required — no filename to derive one from
+            category: "ci",        // grouping label; default "default"
+            cron: "0 2 * * *",     // optional schedule for the whole workflow
+            timeout: "30m",        // default ceiling for each stage
+            cwd: "./repo",         // default working directory
+            env: { CI: "1" },      // merged into every script stage
+            stages: [
+                { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
+                { name: "test", task: "unit-tests" },
+                { name: "ship", workflow: "ci:deploy" }
+            ]
+        },
+        {
+            name: "deploy",
+            category: "ci",
+            stages: [{ name: "push", script: "./scripts/push.sh" }]
+        }
+    ]
+};
+```
+
+Each stage sets **exactly one** of `script`, `task`, or `workflow`; declaring
+none or several is a load error that names what it actually found. `args`,
+`env`, and `cwd` apply to a `script` stage only — on a `task` or `workflow`
+stage they are rejected rather than ignored, because they would silently have
+no effect.
+
+A `task:` stage runs the registered task's command once and ignores
+`instances`, `cron`, `cron_restart`, `watch`, `max_restarts`, `paused`, and
+`optional`: those describe how a task is *supervised*, which has no meaning for
+a single execution. If the referenced task is currently running as a service,
+the stage starts a second process — declare it `optional: true` if it should
+only ever run inside a workflow.
+
+A `workflow:` stage runs the child inline and waits; the child's outcome is the
+stage's outcome. Loops are refused three ways, and the third is the one that
+matters:
+
+1. A cycle among declared `workflow:` stages fails `pm2 apply`, naming the path.
+2. A nested call to a workflow already on the chain fails that stage. Nesting
+   is capped at 8.
+3. **A workflow can only have one run in flight.** A stage script that calls
+   `pm2 workflow run` or the webhook arrives as a brand-new request the first
+   two guards cannot see; this one stops it.
+
+A cron fire that lands on a running workflow is recorded `skipped` and dropped,
+so the workflow runs late rather than being truncated. An explicit trigger gets
+an error with the in-flight run's id instead — somebody is waiting for it.
+
 ## Full CLI reference
 
 ### `pm2 task start` / `pm2 apply`
@@ -363,6 +421,74 @@ names, mount points, error messages — are quoted.
 
 The daemon is never auto-started. A task list that cannot be read appears
 in the snapshot's `errors` field and the machine readings still ship.
+
+### `pm2 workflow`
+
+Runs several tasks in order, stopping at the first failure. Workflows are
+declared in the same ecosystem file, under a `workflows:` key beside `apps:`.
+
+```bash
+pm2 workflow list                     # declared workflows + latest outcome
+pm2 workflow run ci:nightly           # trigger; returns as soon as it starts
+pm2 workflow run ci:nightly --wait    # block, print every stage, exit non-zero on failure
+pm2 workflow runs --limit 20          # history across all workflows
+pm2 workflow runs ci:nightly          # history for one
+pm2 workflow show <run-id>            # one run and its stages
+pm2 workflow show <run-id> --logs     # ... plus each stage's captured output
+```
+
+`runs` and `show` read the run journal on disk and never open the socket, so
+they work with the daemon down and still find the history of a workflow you
+deleted. Only `run` may auto-start a daemon.
+
+`<ref>` is `category:name`, or a bare `name` when unambiguous. `pm2 workflow`
+has no short alias.
+
+A stage runs **exactly once**; success is exit code 0 and nothing else.
+`max_restarts`, `cron_restart`, `watch` and `instances` do not apply to a
+stage, and a stage never enters the process registry — so it does not appear
+in `pm2 list`, and `pm2 logs <name>` cannot follow it. Use
+`pm2 workflow show --logs`, or `tail -f` the path it prints.
+
+### `pm2 web`
+
+```bash
+pm2 web              # print the dashboard URL and open a browser
+pm2 web --no-open    # print only
+```
+
+The dashboard is served by the daemon itself; this command only finds it. It
+shows the live task table (click a row for that task's trigger history with
+exit codes), the declared workflows, and a merged timeline of workflow and task
+runs.
+
+⚠️ **The dashboard and its webhook bind `0.0.0.0:8301` and check no
+credential.** Anyone who can reach that port can trigger a workflow, and a
+stage runs a shell command. Restrict or disable it at daemon start:
+
+```bash
+pm2 daemon start --web-host 127.0.0.1   # loopback only
+pm2 daemon start --web-port 0           # no web server at all
+```
+
+The same values can come from `APP_WEB_HOST` / `APP_WEB_PORT`. Use the flat
+form — a nested config key such as `web.port` is silently ignored.
+
+Triggering a run over HTTP:
+
+```bash
+curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+     -H 'Content-Type: application/json' \
+     -d '{"params": {"DATE": "2026-08-28"}}'
+```
+
+`Content-Type: application/json` is required. Responses: `202` accepted (with
+`Location` pointing at the run), `400` malformed body, `404` unknown workflow,
+`409` a run is already in flight, `415` wrong content type, `429` more than ten
+triggers a minute. The `202` does not echo the params back.
+
+Every other endpoint is read-only. There is no HTTP route that restarts, stops,
+or deletes a task.
 
 ### `pm2 save` / `pm2 s`
 

@@ -4,8 +4,12 @@
 // paths against the directory of this config file, not the CWD.
 //
 // Supported formats: .js (module.exports = {...}) and .json.
-// The .js format is preferred because it supports comments, __dirname,
-// and expressions.
+// The .js format is preferred because it supports comments.
+//
+// The .js file is evaluated by goja, NOT by Node. There is no `require`,
+// no `__dirname`, and no `process` — paths must be written literally.
+// Relative paths are resolved against this file's directory anyway, so
+// __dirname was never needed.
 //
 // ─── AppConfig fields ──────────────────────────────────────────────
 //
@@ -20,15 +24,36 @@
 //   watch         bool     Restart on file changes via fsnotify (default: false)
 //   max_restarts  int      Crash-restart ceiling (default: 15)
 //   cwd           string   Working directory (default: ecosystem file directory)
-//   config_dir    string   Config root (default: ~/.config/<normalised-name>/)
-//   log_file      string   Stdout path (default: <config_dir>/logs/daemon.log)
-//   out_file      string   Compatibility alias for the stdout path
-//   error_file    string   Stderr path (default: <config_dir>/logs/daemon.err)
 //   optional      bool     Register paused unless selected (default: false)
 //
 // Runtime-managed fields version, config_file, base_env, and paused are
 // intentionally excluded. This Go implementation does not support the
 // Node.js PM2 `autorestart` field.
+//
+// Log paths are NOT configurable. Every task writes to
+// ~/.config/pm2/tasks/logs/<normalised-name>.log and .err, derived from
+// the task name so no user-supplied string can steer a log file out of
+// the directory pm2 owns. The former config_dir / log_file / out_file /
+// error_file fields were removed.
+//
+// ─── WorkflowConfig fields ─────────────────────────────────────────
+//
+//   name       string   Required — there is no filename to derive one from
+//   category   string   Grouping label (default: "default")
+//   stages     []Stage  At least one; run in declaration order
+//   cron       string   Schedule for the whole workflow
+//   env        {}       Merged into every script stage
+//   cwd        string   Default working directory (default: this file's dir)
+//   timeout    string   Go duration, e.g. "30m" — per-stage ceiling
+//
+// Each stage sets EXACTLY ONE of:
+//
+//   script  + args/env/cwd   an inline command
+//   task    "<name>"         run a registered task's command once
+//   workflow "<ref>"         run another workflow inline and wait
+//
+// args/env/cwd on a task or workflow stage is a load error, not a
+// silently ignored field.
 //
 // ─── Conventions ───────────────────────────────────────────────────
 //
@@ -36,7 +61,9 @@
 //   - Use `namespace` to group by concern: "Service", "Local", "Agent", "planner".
 //   - For one-shot cron tasks: set `cron` (not `cron_restart`).
 //   - For long-running daemons that restart on a schedule: set `cron_restart`.
-//   - Log paths default to ~/.config/<normalised-name>/logs/.
+//   - Log paths are derived from the task name; they are not configurable.
+//   - A workflow stage runs exactly once. Auto-restart, cron_restart,
+//     watch and instances do not apply to it.
 //
 
 module.exports = {
@@ -80,15 +107,15 @@ module.exports = {
         },
 
         // ──────────────────────────────────────────────────────────
-        // Pattern 4: AI agent planner with cron + __dirname
+        // Pattern 4: AI agent planner on a schedule
         // ──────────────────────────────────────────────────────────
-        // __dirname is available in .js configs (goja runtime).
+        // Note the literal path: goja provides no __dirname.
         {
             name: "agy-system-planner",
             script: "agy",
             args: [
                 "--add-dir",
-                __dirname,
+                "/Users/me/projects/example",
                 "-p",
                 "run /system-planner for current workspace"
             ],
@@ -150,6 +177,49 @@ module.exports = {
             env: {
                 DEBUG: "true"
             }
+        }
+    ],
+
+    // ─── Workflows ─────────────────────────────────────────────────
+    //
+    // A workflow runs its stages in order and stops at the first
+    // failure. Success is exit code 0 and nothing else; a stage runs
+    // exactly once and never enters `pm2 list`.
+    workflows: [
+        // ──────────────────────────────────────────────────────────
+        // Pattern A: nightly pipeline mixing all three stage kinds
+        // ──────────────────────────────────────────────────────────
+        {
+            name: "nightly",
+            category: "ci",
+            cron: "0 2 * * *",
+            timeout: "30m",
+            env: { CI: "1" },
+            stages: [
+                // inline command
+                { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
+                // run a registered task once — no restart, no schedule
+                { name: "test", task: "Disk Analysis Daily" },
+                // run another workflow inline and wait for it
+                { name: "ship", workflow: "ci:deploy" }
+            ]
+        },
+
+        // ──────────────────────────────────────────────────────────
+        // Pattern B: a workflow triggered only by webhook
+        // ──────────────────────────────────────────────────────────
+        // No cron: it runs when something POSTs
+        //   /api/webhooks/ci:deploy
+        // That endpoint is unauthenticated and reachable from the
+        // network by default.
+        {
+            name: "deploy",
+            category: "ci",
+            cwd: "/srv/app",
+            stages: [
+                { name: "build",  script: "./scripts/build.sh", timeout: "10m" },
+                { name: "release", script: "./scripts/release.sh" }
+            ]
         }
     ]
 };

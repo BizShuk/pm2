@@ -18,6 +18,8 @@ State directory: `~/.config/pm2/` (created automatically on first run)
 
 ### Root command short aliases
 
+`pm2 gpu`, `pm2 workflow`, and `pm2 web` have no short alias.
+
 | Canonical command | Short alias |
 | ----------------- | ----------- |
 | `pm2 wizard` | `pm2 w` |
@@ -502,6 +504,58 @@ you would only invoke it by hand (under `sudo`) to see its output.
 
 ---
 
+### `pm2 workflow`
+
+Runs several tasks in order, stopping at the first failure. Declared in the
+same ecosystem file under a `workflows:` key. A stage runs **exactly once** —
+auto-restart, `cron_restart`, `watch` and `instances` do not apply to it — so
+a stage never appears in `pm2 list`.
+
+```bash
+pm2 workflow list                       # declared workflows + latest outcome
+pm2 workflow run ci:nightly --wait      # trigger one; --wait blocks and prints stages
+pm2 workflow runs [ref] --limit 20      # history, read from disk
+pm2 workflow show <run-id> --logs       # one run, its stages, its output
+```
+
+`runs` and `show` read the run journal directly, so they work with the daemon
+down and still find a deleted workflow's history. Only `run` may auto-start a
+daemon.
+
+A workflow with a run in flight refuses a second trigger. A *cron* fire in that
+state is recorded `skipped` and dropped — the workflow runs late rather than
+being truncated and restarted from its first stage.
+
+`pm2 workflow` has no short alias.
+
+### `pm2 web`
+
+Prints and opens the dashboard URL. The dashboard itself is served by the
+daemon, not by this command.
+
+```bash
+pm2 web              # print the URL and open a browser
+pm2 web --no-open    # print only
+```
+
+⚠️ The dashboard and its webhook bind `0.0.0.0:8301` and **check no
+credential**. Anyone who can reach that port can trigger a workflow, and a
+workflow stage runs a shell command — treat reachability to it as equivalent to
+shell access on the machine. Close it off with
+`pm2 daemon start --web-host 127.0.0.1`, or turn the server off with
+`--web-port 0`.
+
+```bash
+curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+     -H 'Content-Type: application/json' -d '{"params":{"DATE":"2026-08-28"}}'
+# → 202 {"run_id":"...","workflow":"ci:nightly","status":"queued"}
+```
+
+`Content-Type: application/json` is required. `404` means no such workflow,
+`409` a run is already in flight, `429` more than ten triggers a minute.
+Everything else the server exposes is read-only — there is no HTTP route that
+restarts, stops, or deletes a task.
+
 ### `pm2 startup`
 
 Generate an OS startup script so the daemon launches on login/boot.
@@ -585,6 +639,47 @@ module.exports = {
 
 ---
 
+### Workflows in the ecosystem file
+
+```javascript
+module.exports = {
+    apps: [
+        { name: "unit-tests", script: "./scripts/test.sh", optional: true }
+    ],
+    workflows: [
+        {
+            name: "nightly",          // required
+            category: "ci",           // default "default"
+            cron: "0 2 * * *",        // optional schedule
+            timeout: "30m",           // default ceiling per stage
+            env: { CI: "1" },
+            stages: [
+                { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
+                { name: "test", task: "unit-tests" },
+                { name: "ship", workflow: "ci:deploy" }
+            ]
+        },
+        { name: "deploy", category: "ci", stages: [{ name: "push", script: "./scripts/push.sh" }] }
+    ]
+};
+```
+
+Each stage sets **exactly one** of `script`, `task`, or `workflow`. Declaring
+none or several is a load error that names what it found. `args`, `env`, and
+`cwd` belong to a `script` stage only — putting them on a `task` or `workflow`
+stage is rejected rather than ignored, because they would silently do nothing.
+
+A `task:` stage runs the registered task's command once and ignores
+`instances`, `cron`, `cron_restart`, `watch`, `max_restarts`, `paused`, and
+`optional`. Pairing `optional: true` with a `task:` stage is the intended way
+to declare a task that only ever runs as part of a workflow.
+
+A `workflow:` stage runs the child inline and waits for it. Cycles are refused
+three ways: a declared loop fails `pm2 apply` naming the path, a nested
+self-call fails that stage, and a workflow can only have one run in flight —
+that last one is what catches a stage script re-triggering through the CLI or
+the webhook.
+
 ## Auto-restart behaviour
 
 | Exit condition                 | Result                                       |
@@ -656,11 +751,30 @@ launchctl load ~/Library/LaunchAgents/com.shuk.pm2.plist   # macOS
 │   ├── daemon.log
 │   ├── daemon.<YYYY-MM-DD>.log
 │   └── daemon-err.log          raw stderr the supervisor redirects
-└── tasks/logs/         one flat directory for every managed task
-    ├── <task-name>.log                 current stdout
-    ├── <task-name>.err                 current stderr
-    ├── <task-name>.<YYYY-MM-DD>.log    rotated stdout
-    └── <task-name>.<YYYY-MM-DD>.err    rotated stderr
+├── tasks/
+│   ├── logs/           one flat directory for every managed task
+│   │   ├── <task-name>.log                 current stdout
+│   │   ├── <task-name>.err                 current stderr
+│   │   ├── <task-name>.<YYYY-MM-DD>.log    rotated stdout
+│   │   └── <task-name>.<YYYY-MM-DD>.err    rotated stderr
+│   └── runs/           one JSONL line per finished task run
+│       └── <YYYY-MM-DD>.jsonl
+└── workflows/
+    ├── dump.json       registered workflow definitions
+    ├── runs/           one JSONL line per finished workflow run
+    │   └── <YYYY-MM-DD>.jsonl
+    └── logs/           one file per stage of one run
+        └── <workflow>.<run-id>.<stage>.log
+```
+
+The run journals hold **finished** runs only — the daemon reports what is
+running, the journal reports what finished. Files older than 30 days are
+pruned. `exit_code` is `null`, not `0`, when there is none to report: a launch
+that never produced a child, or a process killed by a signal (whose `signal`
+field carries the name).
+
+```bash
+jq -c 'select(.status=="failed")' ~/.config/pm2/tasks/runs/$(date +%F).jsonl
 ```
 
 ---

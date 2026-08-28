@@ -1,10 +1,25 @@
 # 架構計畫 — pm2-workflow
 
 - 日期：2026-08-28
-- 狀態：Draft
+- 狀態：`Completed`（2026-08-28 實作並驗證完畢）
 - 功能名稱：`pm2-workflow`
-- 完成後歸檔至：`docs/specs/2026-08-28-pm2-workflow.md`（本檔同時改名為
-  `plans/2026-08-28-pm2-workflow.md` 以符合 `YYYY-MM-DD-<topic>.md` 命名規範）
+
+> `實作偏離本計畫之處`（以實作為準）：
+>
+> 1. 引擎目錄採 `daemon/wfengine`（package `wfengine`）而非 `daemon/workflow`
+>    ——後者會讓 package `workflow` import 同名套件，每個檔案都得取別名。
+>    沿用 `sysmon/gpuagent` 的作法。
+> 2. 兩本歷史帳本由單一頂層套件 `runhistory` 擁有，`workflow` 不再自帶 store。
+>    計畫中的 append-through 折疊改為`一筆完成的 run 一行`：JSONL 無法更新，
+>    在開始時就寫一行等於要求每次讀取都做折疊。代價已寫進文件——daemon 在
+>    run 進行中掛掉，該 run 不會被索引（stage log 仍在）。
+> 3. `Run` 的 context `在 claim 時`建立而非在 `execute` 內。實作時發現：run
+>    一取得單飛名額就能被 `StopRun` 定址，而當時 cancel 還是 no-op，於是
+>    `StopRun` 靜默無作用並空等到 stage 自然結束。回歸測試
+>    `TestStopRunCancelsARunThatJustStarted`。
+> 4. 曝光面在規劃末期由 loopback 改為 public（`0.0.0.0:8301`），連帶把
+>    webhook 的 Origin / Host / loopback 三道檢查移除——在刻意公開之後它們
+>    是裝飾。保留 `Content-Type` 與速率上限。
 
 ## Context
 

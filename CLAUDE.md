@@ -43,6 +43,17 @@ the daemon down — only the task list goes empty.
 
 Import direction (no cycles):
 
+- `runhistory` -> stdlib only; a sibling of `logfile`, not a child of
+  `daemon`, because the daemon writes it while `daemon/web` and
+  `cmd/workflow` read it — under `daemon/` it would force `cmd` to
+  import `daemon`
+- `workflow` -> `process` + stdlib; leaf domain package, like `sysmon`
+- `config` -> `workflow`; `model` -> `workflow` (both acyclic)
+- `daemon/wfengine` -> `executor`, `logfile`, `workflow`, `runhistory`,
+  `cron`, `process` — never `daemon`; it takes a `TaskLookup` interface
+- `daemon/web` -> `process`, `runhistory` + stdlib — never `daemon`, and
+  never `workflow` either: it declares its own `Backend` interface and
+  view types so it compiles and is httptest-testable on its own
 - `network` -> (Manager interface in `network/manager.go`) — never imports `daemon`
 - `daemon` -> `executor`, `network`, `model`, `process`, `cron`, `logfile`
   (`logfile` only for the daemon's own rotating log — see `daemon/logging.go`)
@@ -50,8 +61,8 @@ Import direction (no cycles):
 - `main` -> `cmd` as the thin executable boundary
 - `cmd` owns every first-layer Cobra command (`cmd/<command>.go`) and imports
   subcommand packages (`cmd/<command>/`) to attach children
-- `cmd` -> `cmd/daemon`, `cmd/task`, `cmd/wizard`, `cmd/taskmanager`, and
-  `cmd/logs` for subcommand nodes
+- `cmd` -> `cmd/daemon`, `cmd/task`, `cmd/workflow`, `cmd/wizard`,
+  `cmd/taskmanager`, and `cmd/logs` for subcommand nodes
 - `cmd`, `cmd/task`, `cmd/daemon`, `cmd/taskmanager`, and `cmd/logs` ->
   `cmd/runtime` for shared CLI paths and the daemon auto-start client
 - `cmd/runtime` -> `model` for daemon RPC transport
@@ -198,6 +209,22 @@ pm2/
 │   │   │                     500ms debounce
 │   │   └── metrics.go        MetricsCollector (3-phase refresh) +
 │   │                         MetricsBackend interface + GetProcessMetrics
+│   ├── wfengine/             daemon/wfengine sub-package — the workflow runtime
+│   │   ├── doc.go            why stages bypass the supervised path, and why
+│   │   │                     single flight is the real cycle guard
+│   │   ├── engine.go         Engine + TaskLookup + claim/release + persist
+│   │   ├── execute.go        the stage loop, ancestry guard, panic containment
+│   │   ├── stage.go          one-shot spawn + Wait + ExitInfo + timeout
+│   │   └── cron.go           its own scheduler; skip records
+│   ├── web/                  daemon/web sub-package — the HTTP plane
+│   │   ├── doc.go            the unauthenticated-public decision, in full
+│   │   ├── backend.go        web.Backend + HistoryReader — import-cycle guard
+│   │   ├── server.go         Bind / Serve / Addr / URL + timeouts
+│   │   ├── routes.go         the whole routing table; no mutating task route
+│   │   ├── view.go           taskView — the secret-stripping boundary
+│   │   ├── guard.go          per-workflow rate limit (an accident guard)
+│   │   ├── webhook.go        the one mutating route
+│   │   └── ui/index.html     the entire dashboard; embedded, no CDN
 │   └── network/              daemon/network sub-package — Unix socket listener
 │       ├── listener.go       Bind(socketPath) — singleton guard + bind;
 │       │                     Serve(ln, m) — accept loop;
@@ -209,6 +236,21 @@ pm2/
 │                             RestartByName, PauseByName, ResumeByName,
 │                             DeleteByName, ListAll, Save, Resurrect, KillAll,
 │                             Ping). Import-cycle guard.
+├── runhistory/               durable run journals; stdlib only
+│   ├── doc.go                boundary + "the journal holds finished runs"
+│   ├── record.go             TaskRecord / WorkflowRecord / StageRecord —
+│   │                         the on-disk contract; ExitCode is a *int so
+│   │                         "unknown" never reads as "exited 0"
+│   ├── runid.go              NewRunID — the date prefix is a query index
+│   ├── store.go              AppendTask / AppendWorkflow + day rollover
+│   ├── query.go              RecentTasks / RecentWorkflows / WorkflowRun
+│   ├── retention.go          Prune — runs on rollover, so no ticker
+│   └── files.go              day-file discovery, newest first
+├── workflow/                 linear-orchestration domain; leaf package
+│   ├── config.go             Config / Stage / StageKind + Normalize/Validate
+│   ├── graph.go              CheckAcyclic (sorted DFS) + Resolve + DanglingRefs
+│   ├── run.go                runtime Run / StageRun / Status + Record()
+│   └── paths.go              Dir / DumpPath
 ├── logfile/                  managed-log domain; no daemon/TUI dependency
 │   ├── entry.go              public Source/Entry/Stream models + output format
 │   ├── escape.go             managed-output byte escaping + trusted line framing
@@ -436,8 +478,9 @@ Daemon startup and task execution use separate namespaces:
 | `pm2 list`             | `pm2 l`     |
 | `pm2 taskmanager`      | `pm2 tm`    |
 
-`pm2 gpu` is a canonical root command with no short alias: the alias
-table above is the product's, not a pattern to extend by default.
+`pm2 gpu`, `pm2 workflow`, and `pm2 web` are canonical root commands with
+no short alias: the alias table above is the product's, not a pattern to
+extend by default.
 
 The namespace aliases retain their child command trees, so `pm2 t restart`
 resolves to `pm2 task restart` and `pm2 d status` resolves to
@@ -452,6 +495,17 @@ resolves to `pm2 task restart` and `pm2 d status` resolves to
 | `pm2 task pause <target>`   | none                 |
 | `pm2 task resume <target>`  | none                 |
 | `pm2 task delete <target>`  | none                 |
+
+`pm2 workflow` owns the workflow verbs (`list`, `run`, `runs`, `show`)
+and `pm2 web` opens the dashboard. Neither takes a short alias, and
+neither promotes a verb to the root.
+
+`pm2 apply` registers the file's `workflows:` **after** its apps, so a
+`task:` stage resolves against a registry that already holds them and
+the dangling-reference warnings are accurate. `--single` skips workflow
+registration entirely — the user asked for one app, not for the file's
+whole workflow graph. `--delete` sweeps the declared workflows too,
+skipping any the daemon does not hold.
 
 Root commands are registered only when the product requirements explicitly
 name an alias. The `cmd/task` sub-package owns the namespaced task handlers;
@@ -530,6 +584,193 @@ go-homedir package-level cache for its duration. Any test that resurrects a
 normalized app expands a `~` log path first, which pins the developer's real
 `HOME` in that cache and makes the test's own `t.Setenv("HOME", ...)` a
 no-op — a test-ordering trap, not a product bug.
+
+### Workflows: linear stages that run exactly once
+
+A workflow (`workflows:` in the ecosystem file) runs stages in order and
+stops at the first failure. Success is exit code 0 and nothing else. A
+stage is one of `script` (inline command), `task` (run a registered
+task's command once), or `workflow` (run another workflow inline).
+
+**Stages bypass the supervised path.** `daemon/wfengine` spawns them with
+`executor.BuildCommand` and waits directly, never through
+`executor.Start`. Restart policy is part of it — a stage that legitimately
+exits 1 would otherwise be resurrected up to `MaxRestarts` times after a
+30 s delay — but the decisive reason is identity:
+
+> A `task:` stage runs an `AppConfig` whose registry key is
+> `namespace:name`, the key of a task that is *already registered*. Going
+> through `StartApp` means `LookupExistingForLaunch` hits, `stopProcess`
+> runs, and the workflow **kills and replaces the user's live service**,
+> then leaves its registry entry pointing at a child that vanishes. A
+> stage is an execution, not a registration.
+
+The cost: a running stage is invisible to `pm2 list` and to
+`pm2 logs <name>`. `pm2 workflow list` shows the run in flight and
+`pm2 workflow show` prints the stage log path, which `tail -f` reads.
+
+A `task:` stage takes only `Script` / `Args` / `Env` / `CWD` / `BaseEnv`
+and **ignores** `Instances`, `Cron`, `CronRestart`, `Watch`,
+`MaxRestarts`, `Paused`, `Optional` — those describe how a task is
+supervised, which has no meaning for one execution. Regression test:
+`TestTaskStageIgnoresSupervisionFields`.
+
+Neither `LookupTask` nor `workflow.Resolve` guesses: an ambiguous bare
+name errors with the candidates rather than picking one.
+
+### Workflow cycles: three guards, one of which does the work
+
+1. **Static.** `workflow.CheckAcyclic` colours an iterative DFS over the
+   declared `stage.workflow` edges and reports the loop itself
+   (`ci:a -> ci:b -> ci:a`). Traversal is key-sorted so the message
+   cannot drift with map iteration order. Two call sites with different
+   authority: `config.postProcess` (one file, fast feedback) and
+   `Engine.Register` over `existing ∪ incoming` — **that one binds**,
+   because a stage may reference a workflow declared elsewhere.
+2. **Ancestry + depth.** Each run carries its chain; a nested call to a
+   key already on it fails that stage. `MaxNestingDepth = 8` bounds a
+   pathological-but-legal chain.
+3. **Single flight.** One run per workflow at a time.
+
+**Only the third one holds.** A stage's shell script calling
+`pm2 workflow run` or the webhook arrives as a brand-new request with an
+empty chain, which the first two cannot see. On a public unauthenticated
+webhook it is also the only thing bounding what a remote caller can
+start. `daemon/wfengine/doc.go` says so, because it otherwise reads as a
+mere overlap nicety and will be "simplified" away.
+
+Single flight answers differently by trigger, deliberately: a **cron**
+fire records `skipped` and returns (identical to `triggerCron`'s overlap
+guard — a workflow that runs longer than its interval should run *late*,
+not be truncated and restarted from stage 1), while a **manual, webhook,
+or nested** trigger gets `ErrRunInProgress` with the live run ID, because
+someone is waiting for the answer. No queue: an in-memory one would
+silently lose work on restart, which is worse than an honest 409.
+
+A run's context is created when it **claims** the slot, not when
+`execute` starts. A run is reachable by `StopRun` the moment it holds the
+slot; a cancel still a no-op at that point made `StopRun` silently do
+nothing and then block until the stage ended on its own.
+
+The engine holds **its own** `cron.Scheduler`. `stopProcess` removes
+scheduler entries by a flat string key, so a task in a namespace
+colliding with a workflow category would let `pm2 task stop` silently
+disarm a workflow's schedule.
+
+### Run history: the journal holds finished runs
+
+`runhistory` keeps two append-only JSONL journals, one line per
+**finished** run, plus a line for a fire that produced no run at all
+(`cron_skip`, `launch_fail`). The invariant: *the journal records what
+finished, the daemon reports what is running.* A JSONL line cannot be
+updated, so recording at start would mean either a fold on every read or
+a file that is not really append-only.
+
+The stated cost: a run in flight when the daemon dies is never indexed.
+Its stage logs still exist; only the index line is lost. That is also
+how "stateless" is implemented — no resume, and no record left claiming
+to be running.
+
+- `ExitCode` is a `*int`. A launch failure has no exit code and a
+  signalled process has none of its own; writing either as `0` would
+  report every killed job as a success. Pinned by
+  `TestExitCodeUnknownIsNotZero`.
+- Journals are `0600`, not `dump.json`'s `0644`: no other process reads
+  them, and the workflow journal stores caller-supplied webhook params.
+- No `fsync`. A per-minute cron task would mean a disk flush every
+  minute forever for an observability artifact. `O_APPEND` + one
+  `write(2)` already survives a process crash, and a record is capped at
+  4 KiB so a concurrent reader is safe against a torn tail.
+- Appends follow the `autoSave` contract: best-effort, logged, never
+  returned — with the log rate-limited so a full disk cannot turn
+  `daemon.log` into a copy of the journal it could not write.
+- A run ID carries its own date (`20260828T030012-a1b2c3`) so
+  `WorkflowRun` opens exactly one day file. Do not "clean it up" into a
+  UUID.
+- Retention is one file per day, pruned when an append rolls over —
+  once a day, needing no ticker and no goroutine.
+
+### `ok` means exited 0
+
+`LastCronStatus` used to be set the moment the child spawned, so a cron
+task that failed every night reported healthy forever. It now reads
+`running` between the fire and the exit, and `onProcessExit` — the one
+point every managed process passes through on its way out — replaces it
+from the real exit code. Only a cron-triggered run may write that field;
+an ordinary process exiting must not overwrite a status belonging to the
+schedule. `UpdateCronOutcome` exists because `UpdateCronStatus` would
+also overwrite `LastCronAt`, reporting when the job *finished* as if it
+were when the schedule *fired*.
+
+`cron_restart` is unaffected: it reboots a long-lived process, so there
+is no later exit to wait for and `ok` already means what it says.
+
+Trigger attribution is stamped on `ManagedProcess` at launch, under the
+write lock that installs the entry. It is deliberately **not** a field on
+`model.AppStartReq`: the trigger is daemon-internal knowledge, and a CLI
+must not be able to claim its start was a cron fire.
+
+Regression test: `TestCronOkMeansExitedZero`, which was impossible to
+write before `executor.ExitInfo` existed.
+
+### The web plane is public and unauthenticated
+
+`daemon/web` binds `0.0.0.0:8301` by default and checks no credential.
+This is an explicit product decision that **overrides** the workspace
+rule keeping unauthenticated interfaces on loopback, and it overrides
+`plans/2026-07-23-pm2-event-stream.md` §1.4's "no built-in public HTTP"
+— and only that clause: there is still no OAuth, no TLS, no credential
+store, and no webhook registry (a workflow definition *is* its
+registration). The two planes stay different in kind: the event socket
+is a push plane for programs, this is a pull plane for a person with a
+browser.
+
+What it means concretely: anyone who can reach the port can trigger a
+workflow, and a stage runs a shell command. Treat reachability to 8301
+as equivalent to shell access. The daemon logs a `WARN` naming the
+address and the absence of authentication on every start, the dashboard
+states it on the page, and `pm2 daemon status` prints it.
+
+Four boundaries hold it in place:
+
+- **No handler serialises `process.ProcessInfo`.** It embeds
+  `AppConfig`, which carries `Env` and — worse — `BaseEnv`, a snapshot of
+  the user's interactive shell environment taken by the CLI at apply
+  time. Marshalling one would publish every exported token in the
+  operator's shell profile to the network. Handlers project into
+  `view.go`'s explicitly-listed fields; `TestTaskViewOmitsEnv` pins it.
+  A struct built by subtraction would go wrong the next time
+  `ProcessInfo` grows a field.
+- **No task-mutating route.** The webhook carries the risk the product
+  asked for; restart or delete would let any reachable host stop the
+  user's services, which nobody asked for.
+- **A bind failure degrades, never fails.** The socket is the daemon's
+  identity and is already claimed; exiting because a UI port is busy
+  would stop every managed process for a dashboard nobody may be
+  watching, and under launchd's `KeepAlive = {SuccessfulExit: false}` a
+  non-zero exit would retry forever against a port it can never own —
+  the same failure mode the singleton guard's exit code documents. The
+  refusal surfaces through `DaemonInfo.WebError` instead of silence.
+- **Polling, not SSE.** SSE would hold a connection per open tab, add a
+  fan-out registry, and be severed by `CmdKill`'s `os.Exit(0)` anyway —
+  and it would pre-empt the event-stream plan's own push plane. The page
+  polls on the TUI's 2 s cadence so both describe the same instants,
+  pauses entirely on `document.hidden`, backs off to 30 s after three
+  failures, and `/api/tasks` carries a weak ETag.
+
+The dashboard is one embedded `ui/index.html`: no npm, no build step, no
+CDN — a CDN `<script>` breaks the page on an offline host and tells a
+third party whenever someone opens their own process dashboard. Its
+colours are hard-coded from `tui/theme/palette.go` and pinned by
+`TestUIPaletteMatchesTheme`, the same idea `tui/views/width_test.go`
+applies to two width engines that must agree.
+
+The bind host is configurable (`--web-host`, `APP_WEB_HOST`) so a machine
+can close it off without a code change; `--web-port 0` disables the
+server. The env prefix is `APP`, set by gosdk, and the keys must stay
+**flat** — gosdk's `AutomaticEnv` silently ignores a nested key, so
+`web.port` would read nothing at all. `cmd/daemon/start.go` is the only
+place in the tree that reads them.
 
 ### Relative path resolution
 
@@ -936,12 +1177,31 @@ caller always picks an explicit verb.
 │   └── daemon-err.log   raw stdout/stderr the supervisor redirects
 │                        (panics, argv errors) — not rotated; nothing
 │                        in-process owns it
-└── tasks/logs/     the supervised programs' logs — they write these
-    ├── <task-name>.log
-    ├── <task-name>.err
-    ├── <task-name>.<YYYY-MM-DD>.log
-    └── <task-name>.<YYYY-MM-DD>.err
+├── tasks/
+│   ├── logs/       the supervised programs' logs — they write these
+│   │   ├── <task-name>.log
+│   │   ├── <task-name>.err
+│   │   ├── <task-name>.<YYYY-MM-DD>.log
+│   │   └── <task-name>.<YYYY-MM-DD>.err
+│   └── runs/       one JSONL line per finished task run
+│       └── <YYYY-MM-DD>.jsonl
+└── workflows/
+    ├── dump.json   []workflow.Config — the registered definitions
+    ├── runs/       one JSONL line per finished workflow run
+    │   └── <YYYY-MM-DD>.jsonl
+    └── logs/       one file per stage of one run
+        └── <workflow>.<run-id>.<stage>.log
 ```
+
+Workflow definitions live in their own dump, not in `dump.json`. Changing
+that file's shape would fire its "format incompatible — run `pm2 delete
+all`" message on every existing installation at upgrade; and a workflow
+definition is not process state, so it needs *loading* at boot to arm
+cron, never *replaying*.
+
+Workflow stage logs sit outside `tasks/logs`, so `logfile.ListTasks` —
+and therefore `pm2 logs monitor` — never offers them for deletion, and
+its stem-grouping rule never tries to read a run ID as a rotation date.
 
 Everything pm2 owns lives under one root. `~/.pm2` is gone: a state
 directory beside `~/.config/pm2` meant two places to look, two places to
@@ -1103,6 +1363,24 @@ supervises, and `pm2 logs monitor` offers only the latter for deletion.
   no other package may shell out to a privileged tool or add a
   `Credential` to a spawned command. If a new reading needs root, it
   publishes through a file the same way the GPU one does.
+- **No HTTP handler serialises `process.ProcessInfo` (or anything
+  embedding `process.AppConfig`) directly.** Project into a view type in
+  `daemon/web/view.go` with its fields listed one by one. `AppConfig`
+  carries `Env` and `BaseEnv`, and `daemon/web` is reachable from the
+  network without authentication.
+- The web bind host is a flag, never a constant a handler can be talked
+  out of, and never something a request can influence.
+- Run-journal appends follow the `autoSave` contract: best-effort,
+  logged, never returned. The run already happened to a real process;
+  failing an RPC because a journal line could not be written would
+  misreport what occurred.
+- Exit status reaches the daemon only as `executor.ExitInfo`. Do not
+  re-derive a code from a bare `error` at a second site, and never read
+  `-1` as an exit status — that is what `Known` is for.
+- A workflow stage never enters the process registry. If a change would
+  route one through `executor.Start` or `StartApp`, it would collide
+  with the key of the very task it is invoking; see the Workflows
+  section.
 - Colour values come from `tui/theme/palette.go` only. The `clXxx`
   re-exports in `tui/theme.go` exist for backwards compatibility inside
   the tui package; new code outside the tui/views subtree should

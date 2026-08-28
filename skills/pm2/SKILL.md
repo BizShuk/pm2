@@ -19,6 +19,10 @@ fields documented here instead of assuming upstream PM2 compatibility.
 - Saving the registered process list or resurrecting it after daemon startup.
 - Inspecting or updating layered PM2 application settings with `pm2 config`.
 - Designing ecosystem files interactively or installing planner agents.
+- Chaining several tasks into an ordered workflow, running one, or reading a
+  workflow's run history.
+- Triggering a workflow from an external system through the HTTP webhook.
+- Reading a task's trigger history: when it fired, what it exited with.
 
 When NOT to use:
 
@@ -37,6 +41,9 @@ When NOT to use:
 | `pm2 daemon`      | `pm2 d`     |
 | `pm2 monitor`     | `pm2 m`     |
 | `pm2 list`        | `pm2 l`     |
+
+`pm2 workflow` and `pm2 web` have no short alias — the alias table above is
+the product's, not a pattern to extend.
 
 Root help renders these as dedicated command, alias, and description columns.
 Namespace aliases retain their subcommands, such as `pm2 t pause` and
@@ -330,6 +337,194 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 
 Multiple apps in one config file. Each gets its own name, schedule, and lifecycle.
 
+## Workflows
+
+A workflow runs several stages in order, stopping at the first failure. It is
+declared in the same `ecosystem.config.js`, under a new top-level `workflows:`
+key beside `apps:`.
+
+A stage runs **exactly once**. Success means exit code 0 and nothing else. None
+of pm2's supervision behaviour applies to a stage — no auto-restart, no
+`cron_restart`, no `watch`, no `instances`. A stage is an execution, not a
+registration, so it never appears in `pm2 list`; use `pm2 workflow list` for a
+run in flight and `pm2 workflow show` for one that finished.
+
+### Commands
+
+| Command | What it does | Needs the daemon |
+| --- | --- | --- |
+| `pm2 workflow list` | Declared workflows and their latest outcome | yes |
+| `pm2 workflow run <ref> [--wait]` | Trigger one run | yes |
+| `pm2 workflow runs [ref] [--limit N]` | Run history, read from disk | no |
+| `pm2 workflow show <run-id> [--logs]` | One run, its stages, its output | no |
+| `pm2 web [--no-open]` | Print and open the dashboard URL | yes |
+
+`runs` and `show` read the journal directly, so history survives the daemon
+being down and outlives a workflow you deleted. Only `run` may auto-start a
+daemon — it is the only one that changes anything.
+
+`<ref>` is `category:name`, or a bare `name` when it is unambiguous.
+
+### Workflow fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string | — | Required; no filename to derive one from |
+| `category` | string | `"default"` | Grouping label, the workflow analogue of `namespace` |
+| `stages` | object[] | — | At least one; run in declaration order |
+| `cron` | string | `""` | Schedule; a fire while a run is in flight is recorded `skipped` |
+| `env` | object | `{}` | Merged into every script stage, under the stage's own `env` |
+| `cwd` | string | ecosystem file directory | Default working directory for stages |
+| `timeout` | string | `""` | Go duration (`30m`); default ceiling for each stage |
+
+### Stage fields
+
+Exactly one of `script`, `task`, or `workflow` per stage. Declaring none or
+several is a load error naming what it actually found.
+
+| Field | Applies to | Description |
+| --- | --- | --- |
+| `name` | all | Defaults to `stage-N` |
+| `script` + `args` + `env` + `cwd` | script stage | An inline command |
+| `task` | task stage | Run a registered task's command once |
+| `workflow` | workflow stage | Run another workflow inline and wait for it |
+| `timeout` | all | Overrides the workflow's |
+
+`args`, `env`, and `cwd` on a task or workflow stage are a **load error**, not
+a field that quietly does nothing: a task stage runs the referenced task's own
+command and environment.
+
+A `task:` stage ignores `instances`, `cron`, `cron_restart`, `watch`,
+`max_restarts`, `paused`, and `optional` — those describe how a task is
+supervised, which has no meaning for a single execution. Pairing
+`optional: true` with a `task:` stage is the intended way to declare a task
+that only ever runs as part of a workflow.
+
+### Example
+
+```javascript
+module.exports = {
+    apps: [
+        { name: "unit-tests", script: "./scripts/test.sh", optional: true }
+    ],
+    workflows: [
+        {
+            name: "nightly",
+            category: "ci",
+            cron: "0 2 * * *",
+            timeout: "30m",
+            env: { CI: "1" },
+            stages: [
+                { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
+                { name: "test", task: "unit-tests" },
+                { name: "ship", workflow: "ci:deploy" }
+            ]
+        },
+        {
+            name: "deploy",
+            category: "ci",
+            stages: [{ name: "push", script: "./scripts/push.sh" }]
+        }
+    ]
+};
+```
+
+### Workflows calling workflows
+
+A `workflow:` stage runs the child inline and waits for it; the child's outcome
+is the stage's outcome. Three guards stop a loop:
+
+1. A cycle among declared `workflow:` stages fails the whole `pm2 apply`,
+   naming the path (`ci:a -> ci:b -> ci:a`).
+2. A nested call to a workflow already on the current chain fails that stage.
+   Nesting is capped at 8 deep.
+3. **A workflow can only have one run in flight.** This is the guard that
+   actually holds, because a stage script calling `pm2 workflow run` or the
+   webhook arrives as a brand-new request the first two cannot see.
+
+A cron fire that lands on a running workflow is recorded `skipped` and dropped
+— the workflow runs late rather than being truncated and restarted. An explicit
+trigger gets an error instead, because somebody is waiting for the answer.
+
+## Webhook
+
+`pm2 daemon start` also starts an HTTP server. `pm2 web` prints and opens
+its URL; `pm2 daemon status` shows the address.
+
+```bash
+curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+     -H 'Content-Type: application/json' \
+     -d '{"params": {"DATE": "2026-08-28"}}'
+# → 202 {"run_id":"20260828T030012-a1b2c3","workflow":"ci:nightly","status":"queued"}
+```
+
+`This endpoint is reachable from the network and checks no credential.`
+Anyone who can reach port 8301 can trigger a workflow, and a workflow stage
+runs a shell command — treat reachability to this port as equivalent to shell
+access on the machine. Restrict it with `pm2 daemon start --web-host 127.0.0.1`,
+or disable the server entirely with `--web-port 0`.
+
+`Content-Type: application/json` is required. This is content negotiation, but
+it also means a cross-origin POST from a page in someone's browser has to clear
+a CORS preflight that pm2 never answers.
+
+| Response | Meaning |
+| --- | --- |
+| `202` | Run started. `Location` points at it; poll rather than waiting on the connection |
+| `400` | Malformed body, unknown field, or an invalid param name |
+| `404` | No such workflow (the error does not list the known ones) |
+| `409` | A run of this workflow is already in flight, with its run id |
+| `415` | Missing or wrong `Content-Type` |
+| `429` | More than 10 triggers for this workflow in a minute |
+| `503` | Too many workflow runs in flight |
+
+The 202 does not echo `params` back.
+
+### HTTP endpoints
+
+Everything else is read-only. `There is no task-mutating endpoint` — nothing
+over HTTP can restart, stop, or delete a task.
+
+```
+GET  /                                            dashboard
+GET  /healthz
+GET  /api/status                                  daemon info
+GET  /api/tasks                                   live task table
+GET  /api/tasks/runs?name=&limit=&status=         task trigger history
+GET  /api/workflows                               declared workflows
+GET  /api/workflows/runs?limit=                   runs, in flight first
+GET  /api/workflows/runs/{runID}                  one run and its stages
+GET  /api/workflows/runs/{runID}/logs/{stage}     stage output (text/plain)
+POST /api/webhooks/{workflow}                     trigger a run
+```
+
+Port `8301` and host `0.0.0.0` are the defaults; override with `--web-host` /
+`--web-port`, or the flat env vars `APP_WEB_HOST` / `APP_WEB_PORT`. Nested
+config keys such as `web.port` are silently ignored — always use the flat form.
+
+## Run history
+
+Both journals are append-only JSONL under the state directory, one line per
+**finished** run:
+
+```
+~/.config/pm2/tasks/runs/YYYY-MM-DD.jsonl        task runs
+~/.config/pm2/workflows/runs/YYYY-MM-DD.jsonl    workflow runs
+~/.config/pm2/workflows/logs/<wf>.<runID>.<stage>.log
+```
+
+A run in flight is not in the journal — the daemon reports what is running, the
+journal reports what finished. Files older than 30 days are pruned.
+
+`exit_code` is `null`, not `0`, when there is no exit code to report — a launch
+that never produced a child, or a process killed by a signal (whose `signal`
+field carries the name). A cron task's `last_cron_status` is `ok` only when it
+actually exited 0; `running` means launched with the outcome not yet known.
+
+```bash
+jq -c 'select(.status=="failed")' ~/.config/pm2/tasks/runs/$(date +%F).jsonl
+```
+
 ## Workflow Examples
 
 ### Run all required apps from an ecosystem file
@@ -479,3 +674,13 @@ active, and cannot be combined with `--all` or `--with`.
 - Using `pm2 config` to change process definitions; it manages application
   settings, not ecosystem tasks.
 - Forgetting that relative `script` paths resolve against the config file's directory, not the shell's CWD when running `pm2 task start`.
+- Putting `args`, `env`, or `cwd` on a `task:` or `workflow:` stage. Those apply
+  only to a `script` stage and are rejected at load rather than ignored.
+- Expecting a workflow stage to appear in `pm2 list`. Stages are one-shot
+  executions and never enter the registry; use `pm2 workflow list` / `show`.
+- Expecting a failing stage to be retried. `max_restarts` does not apply to a
+  stage; exit non-zero and the run stops there.
+- Setting `web.port` in the config file. Nested keys are silently ignored — use
+  the flat `web_port` / `APP_WEB_PORT`.
+- Assuming the webhook is protected because it is "internal". It is bound to
+  every interface and checks no credential by default.

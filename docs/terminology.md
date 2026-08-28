@@ -14,6 +14,32 @@
 | 排程器 | Scheduler | 依 cron 運算式觸發任務的元件 | `cron/scheduler.go`、`robfig/cron` |
 | 命名空間 | Namespace | 命令的分組前綴，例如 `task` / `daemon` / `logs`；別名保留其子命令 | `pm2 t`、`pm2 d` |
 
+## 編排模型 (Orchestration Model)
+
+| 術語 (Term) | 英文 (English) | 定義 (Definition) | 出處 (Source) |
+| --- | --- | --- | --- |
+| 工作流 | Workflow | 一組`依序`執行的階段；前一段成功才跑下一段 | `ecosystem.config.js` 的 `workflows:` |
+| 階段 | Stage | workflow 的一步；`script` / `task` / `workflow` 三選一 | `workflow/config.go` |
+| 分類 | Category | workflow 的分組標籤，等同 app 的 `namespace` | `Config.Category` |
+| 執行 | Run | 一次 workflow 執行；以 `20260828T030012-a1b2c3` 形式的 run ID 標識 | `runhistory/runid.go` |
+| 觸發來源 | Trigger | 這次執行為何開始：`manual` / `cron` / `webhook` / `nested` / `watch` / `autorestart` / `resurrect` / `restart` / `cron_restart` | `runhistory/record.go` |
+| 單飛 | Single Flight | 同一個 workflow 同時只允許一次 run；`環防護的真正防線` | `wfengine.ErrRunInProgress` |
+| 引擎 | Workflow Engine | 持有定義、排程與進行中 run 的元件 | `daemon/wfengine` |
+| 掛鉤 | Webhook | 觸發 workflow 的 HTTP 端點；`對外開放且無認證` | `POST /api/webhooks/<name>` |
+
+> `一次性 (one-shot)`：stage `只執行一次`，成功的唯一定義是 exit code 為 0。
+> auto-restart、`cron_restart`、`watch`、`instances` 一律`不適用`於 stage
+> ——它們描述的是「如何被長期監督」，與一次執行無關。
+
+## 歷史 (Run History)
+
+| 術語 (Term) | 英文 (English) | 定義 (Definition) | 注意事項 |
+| --- | --- | --- | --- |
+| 帳本 | Journal | append-only JSONL；`一筆完成的 run 一行` | `帳本記完成的, daemon 報進行中的` |
+| 落空觸發 | Skipped Fire | cron 觸發時上一輪還在跑，該次被丟棄 | 仍會留下 `cron_skip` 紀錄 |
+| 未知結束碼 | Unknown Exit Code | 落檔為 `null` 而`非 0` | spawn 失敗、或被信號終止時無自己的 code |
+| 對外埠 | Public Port | `0.0.0.0:8301`，dashboard 與 webhook 共用 | `無認證`；可達即等同於 shell 存取 |
+
 ## 執行語意 (Execution Semantics)
 
 | 術語 (Term) | 英文 (English) | 定義 (Definition) | 出處 (Source) |
@@ -42,6 +68,8 @@
 | --- | --- | --- | --- |
 | 精靈 | Wizard | 互動式建立 ecosystem 設定的流程 | `pm2 wizard` / `pm2 w` |
 | 監視器 | Monitor | 系統活動即時儀表 | `pm2 monitor` / `pm2 m` |
+| 工作流命令 | Workflow Command | workflow 的四個動詞 | `pm2 workflow list/run/runs/show`，`無短別名` |
+| 網頁儀表 | Web Dashboard | 瀏覽器介面，隨 daemon 啟動 | `pm2 web` 只負責印出並開啟網址 |
 | 日誌監視 | Log Monitor | 多任務日誌的即時彙整檢視 | `pm2 logs monitor` |
 | 任務管理器 | Task Manager | 任務層級的互動管理介面 | `pm2 taskmanager` / `pm2 tm` |
 
@@ -56,3 +84,7 @@
 
 > `常見誤用`：在 `ecosystem.config.js` 中使用 `require`、`__dirname` 或
 > `process.env`，以及把 `args` 寫成字串而非 `[]string`。兩者都會在載入時失敗。
+>
+> `workflow 的常見誤用`：把 `args` / `env` / `cwd` 寫在 `task:` 或 `workflow:`
+> stage 上（`載入即失敗`，不是靜默忽略）；以為 stage 會出現在 `pm2 list`
+> （不會，它不進 registry）；以為失敗的 stage 會被 `max_restarts` 重試（不會）。

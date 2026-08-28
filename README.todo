@@ -4,6 +4,29 @@
 
 ## Architecture
 
+- [x] [P1] `pm2-workflow`: 把 pm2 從 task management 擴充成 workflow management——
+  `workflows:` 線性編排、兩本 append-only 執行歷史帳本、以及對外的網頁儀表與
+  webhook。 @2026-08-28 @Completed @Architecture
+    - 規格：[docs/specs/2026-08-28-pm2-workflow.md](./docs/specs/2026-08-28-pm2-workflow.md)
+    - 前提修復：全 repo 原本`沒有任何地方取過 exit code`。新增
+      `executor.ExitInfo`（signal 分支必須排在 `ExitCode()` 之前，否則被信號
+      終止一律回 -1），`onProcessExit` 行為不變地改收它。
+    - 語意修正：`LastCronStatus` 的 `ok` 原本只代表子行程 spawn 成功，一個每晚
+      都失敗的 cron task 會永遠回報健康。改為 fire 時記 `running`、由退出路徑
+      依 exit code 寫 `ok`/`failed`；新增 `UpdateCronOutcome` 以免覆蓋
+      `LastCronAt`。回歸測試 `TestCronOkMeansExitedZero` 在此之前根本寫不出來。
+    - 邊界：stage 一次性執行且`不進 registry`——決定性理由不是重啟策略，而是
+      `task:` stage 的 AppConfig 鍵就是那個已註冊 task 的鍵，走 `StartApp`
+      會殺掉並取代使用者正在跑的服務。環防護三層，但`只有單飛那層真的擋得住`
+      stage 腳本經 CLI 或 webhook 的再觸發。
+    - `曝光面`：web 面綁 `0.0.0.0:8301` 且`無認證`，經使用者明確確認，覆寫
+      `port-usage` Hard Rule 8 與 event-stream 計畫 §1.4 的「不內建 public
+      HTTP」。連帶必須修的缺陷：`ProcessInfo` 內嵌的 `BaseEnv` 是使用者
+      shell 的整份環境變數，任何 handler 都不得直接序列化它。
+    - 未處理（沿用既有缺口）：`CmdKill` 的 `os.Exit(0)` 仍在 network handler 內，
+      event-stream 計畫 §2.2 第 6 項的 coordinator 收回尚未做；daemon 至今沒有
+      SIGTERM handler。
+
 - [ ] [P1] `pm2-event-stream`: 以 CloudEvents JSON 建立唯讀事件面，提供 process / cron lifecycle 的 recent + incremental subscription，以及 offset-based log recent + follow。 @2026-07-23 @Architecture
     - 計畫：[plans/2026-07-23-pm2-event-stream.md](./plans/2026-07-23-pm2-event-stream.md)
     - 邊界：既有 `pm2.sock` 保持控制面；新增 `~/.pm2/events.sock`，slow consumer 與 log burst 不得阻塞 process control。

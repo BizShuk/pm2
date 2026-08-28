@@ -6,6 +6,27 @@
 - 主要 producer：PM2 daemon
 - 首個 consumer：msgHub
 
+> `2026-08-28 註記 (Amendment)`
+>
+> `plans/2026-08-28-pm2-workflow.md` 已實作並`推翻本檔 §1.4 的「不在 PM2 內建
+> public HTTP」一條`，且`只推翻那一條`：pm2 現在內建一個綁 `0.0.0.0:8301` 的
+> 唯讀為主 dashboard 與一個 workflow webhook。仍然成立的部分是——沒有 OAuth、
+> 沒有 TLS、沒有 credential store，也`沒有 webhook registry`（workflow 定義本身
+> 就是註冊，寫在 ecosystem 檔裡，與 cron 運算式同層）。
+>
+> 兩個平面`仍是不同種類`：event socket 是給程式訂閱的`推送`面（cursor、
+> at-least-once），`:8301` 是給人用瀏覽器看的`拉取`面。本檔若日後動工，推送面
+> 的設計不受影響。
+>
+> `已實作的底層`：本檔 §1.2 要求的「lifecycle / cron event 先寫入 durable JSONL
+> journal」已由 `runhistory` 落地，並順帶修好 §2.2 的第 1 與第 3 項——
+> `LastCronStatus` 的 `ok` 現在真的代表 exit code 為 0，而 `executor.ExitInfo`
+> 補上了 exit code、signal 與 duration。差異在包裝：本檔用 CloudEvents envelope，
+> `runhistory` 用扁平領域紀錄，因為 envelope 會讓每分鐘一次的 cron 歷史體積約三倍，
+> 換來本機讀者用不到的欄位。事件面真的開建時，在 socket 邊界做投影即可。
+>
+> `§2.2 第 6 項（CmdKill 的 os.Exit 應收回 Server coordinator）尚未處理`。
+
 ## 1. 目標與範圍 (Goal & Scope)
 
 ### 1.1 目標
