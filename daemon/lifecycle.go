@@ -4,19 +4,20 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
 
 // onProcessExit is the callback that runs after executor.Watch observes
 // cmd.Wait returning.
-func (pm *ProcessManager) onProcessExit(mp *ManagedProcess, waitErr error) {
+func (pm *ProcessManager) onProcessExit(mp *ManagedProcess, exit executor.ExitInfo) {
 	key := cronKey(mp.Info.Namespace, mp.Info.Name)
 	shouldRestart := false
 	pm.reg.UpdateInfo(key, func(mp *ManagedProcess) {
 		mp.Info.PID = 0
 		if !mp.stopping {
-			if waitErr != nil {
+			if exit.Err != nil {
 				mp.Info.Status = process.StatusErrored
 			} else {
 				mp.Info.Status = process.StatusStopped

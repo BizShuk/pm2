@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"time"
 
+	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 )
@@ -120,8 +121,8 @@ func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (pr
 	}
 
 	if !isCronTask && !isPaused {
-		go pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(waitErr error) {
-			pm.onProcessExit(mp, waitErr)
+		go pm.executor.Watch(result.Cmd, result.OutF, result.ErrF, result.Watcher, mp.done, func(exit executor.ExitInfo) {
+			pm.onProcessExit(mp, exit)
 		})
 	}
 

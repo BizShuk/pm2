@@ -189,25 +189,26 @@ func resolveWorkDir(req *model.AppStartReq) string {
 //     not stay held open after the process exits.
 //  2. Closes the watcher if non-nil.
 //  3. Closes the done channel so Stop can unblock.
-//  4. Calls onExit(err) so the caller can update state and decide
-//     whether to auto-restart.
+//  4. Calls onExit(ExitInfo) so the caller can update state, record
+//     the outcome, and decide whether to auto-restart.
 //
 // Watch holds NO locks. The onExit callback may take whatever locks
 // the caller wants; Watch does not care.
 //
 // Any of (cmd, outF, errF, watcher, done) may be nil (e.g. cron task
 // where cmd is nil, or when no watch is configured) — Watch tolerates
-// them.
+// them. A nil cmd yields ExitInfo{Known: false}: there was no child,
+// so there is no exit status, which is not the same as exiting 0.
 func (e *Executor) Watch(
 	cmd *exec.Cmd,
 	outF, errF io.Closer,
 	watcher *fsnotify.Watcher,
 	done chan struct{},
-	onExit func(err error),
+	onExit func(ExitInfo),
 ) {
-	var waitErr error
+	var exit ExitInfo
 	if cmd != nil {
-		waitErr = cmd.Wait()
+		exit = ExitInfoFromWait(cmd.Wait())
 	}
 	if outF != nil {
 		outF.Close()
@@ -222,7 +223,7 @@ func (e *Executor) Watch(
 		close(done)
 	}
 	if onExit != nil {
-		onExit(waitErr)
+		onExit(exit)
 	}
 }
 
