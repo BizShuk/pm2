@@ -137,11 +137,11 @@ func (e *Engine) execute(cfg workflow.Config, ar *activeRun) {
 			continue
 		}
 
+		// The run-level error names the stage. A bare "exit status 2"
+		// lifted from the stage is true but useless at the top of a
+		// listing, where the whole question is which stage stopped it.
 		status = result.Status
-		runErr = result.Error
-		if runErr == "" {
-			runErr = fmt.Sprintf("stage %d (%q) failed with exit code %d", i+1, result.Name, result.ExitCode)
-		}
+		runErr = fmt.Sprintf("stage %d (%q) %s", i+1, result.Name, describeStageFailure(result))
 		// Remaining stages are recorded as skipped, not omitted: a
 		// reader has to see the whole declared sequence to know where it
 		// stopped, and an absent stage looks like a config that never
@@ -155,6 +155,21 @@ func (e *Engine) execute(cfg workflow.Config, ar *activeRun) {
 		run.Error = runErr
 		run.EndedAt = timeNow()
 	})
+}
+
+// describeStageFailure renders why a stage stopped the run, preferring
+// the concrete fact (a signal, an exit code) over the wrapped error.
+func describeStageFailure(st workflow.StageRun) string {
+	switch {
+	case st.Signal != "":
+		return "was terminated by " + st.Signal
+	case st.ExitKnown:
+		return fmt.Sprintf("exited %d", st.ExitCode)
+	case st.Error != "":
+		return st.Error
+	default:
+		return string(st.Status)
+	}
 }
 
 func (e *Engine) markRemaining(ar *activeRun, from int, status runhistory.Status) {
