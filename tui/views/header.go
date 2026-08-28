@@ -18,6 +18,10 @@ func RenderHeader(ctx ViewContext) string {
 		info = lipgloss.NewStyle().Foreground(theme.Errored).Render("  ✗ " + ctx.Notice)
 	case ctx.Err != nil:
 		info = lipgloss.NewStyle().Foreground(theme.Errored).Render("  ✗ daemon unreachable")
+	case !ctx.Updated.IsZero() && ctx.WfScope:
+		info = lipgloss.NewStyle().Foreground(theme.Muted).Render(
+			fmt.Sprintf("  %d workflows · %s", len(ctx.Workflows), ctx.Updated.Format("15:04:05")),
+		)
 	case !ctx.Updated.IsZero():
 		info = lipgloss.NewStyle().Foreground(theme.Muted).Render(
 			fmt.Sprintf("  %d processes · %s", len(ctx.Procs), ctx.Updated.Format("15:04:05")),

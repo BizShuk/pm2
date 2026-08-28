@@ -277,6 +277,8 @@ pm2/
 │   ├── protocol.go           Request / Response types; WriteJSON / ReadJSON / SendRequest
 │   ├── list.go               ListProcesses — CmdList + decode; the one path
 │   │                         both cmd/ and tui/ use, never auto-starts a daemon
+│   ├── workflow_list.go      ListWorkflows — CmdWorkflowList + decode; the
+│   │                         same contract, for the monitor's workflow tab
 │   └── protocol_test.go      Unit tests for protocol structures and serialization
 ├── process/
 │   ├── app_config.go         shared static AppConfig and normalization
@@ -318,7 +320,8 @@ pm2/
 │                                       CloudEvents event/log subscription plane
 └── tui/
     ├── model.go              Bubbletea Model — controller: Update event branches,
-    │                         Cmd dispatch, View() delegates to tui/views
+    │                         Cmd dispatch, View() delegates to tui/views;
+    │                         owns the tab strip and the workflow scope
     ├── metrics.go            host-metric message types + re-arm tick; sampling
     │                         itself belongs to sysmon
     ├── theme.go              Re-exports the palette from tui/theme as clXxx vars
@@ -341,6 +344,8 @@ pm2/
     │   ├── footer.go         RenderFooter (key hints) + RenderHostMetricsLines
     │   ├── detail.go         RenderDetail — right-panel param table
     │   ├── logs.go           RenderLogs — right-panel log tail
+    │   ├── workflow.go       RenderWorkflowPane + RenderWorkflowDetail — the
+    │   │                     workflow tab's rows and its stage sequence
     │   ├── log_browser.go    RenderLogBrowser — log manager screens
     │   ├── dashboard.go      DashboardContext + RenderDashboard layout, header,
     │   │                     footer, list rows, scroll window
@@ -619,8 +624,9 @@ exits 1 would otherwise be resurrected up to `MaxRestarts` times after a
 > stage is an execution, not a registration.
 
 The cost: a running stage is invisible to `pm2 list` and to
-`pm2 logs <name>`. `pm2 workflow list` shows the run in flight and
-`pm2 workflow show` prints the stage log path, which `tail -f` reads.
+`pm2 logs <name>`. `pm2 workflow list` shows the run in flight,
+`pm2 monitor`'s workflow tab shows it live, and `pm2 workflow show`
+prints the stage log path, which `tail -f` reads.
 
 A `task:` stage takes only `Script` / `Args` / `Env` / `CWD` / `BaseEnv`
 and **ignores** `Instances`, `Cron`, `CronRestart`, `Watch`,
@@ -875,6 +881,44 @@ its script. The former wide-table presentation is exposed as the one-shot
 list updates without waiting for the next tick. The `p` key is a pause/resume
 toggle (`pauseOrResume()` picks `CmdResume` when the selected row is `paused`,
 else `CmdPause`), so the same key suspends and reactivates a cron task.
+
+#### The workflow tab
+
+The chip strip is a tab strip: the namespaces, then one trailing
+`Workflows` chip that `←`/`→` reaches like any other. A workflow **is**
+a task — a composition of them — but one that runs only when triggered
+or scheduled, so it gets a tab rather than rows in the process table,
+where `pid`, `uptime`, `cpu`, and `mem` would read `—` on every row
+forever. The pane trades uptime for the last outcome, which is the
+number a reader actually wants from something that is idle by design
+between fires.
+
+- **Scope is the cursor's position, never the label.** The workflow tab
+  is always last, so a task namespace that happens to be called
+  `Workflows` stays an ordinary namespace.
+- **The tab empties `Procs` instead of filtering it.** It is not a
+  filter over processes; it replaces the list. That is also what makes
+  `r` / `p` / `d` safe there — there is no selected process to address
+  at all, rather than a stale one left over from the previous tab
+  (`TestWorkflowScopeClearsProcessRows`).
+- **Two cursors, deliberately.** `wfSelected` is separate from
+  `selected`, and the process clamp is skipped while the workflow tab is
+  open — clamping against an intentionally empty list would silently
+  reset the row the user returns to.
+- **The tab observes; it does not trigger.** A stage bypasses the
+  process registry, so the monitor's write keys have nothing to address,
+  and the footer advertises `pm2 workflow run` instead of keys that
+  would do nothing. Triggering from the TUI is a write path that would
+  need the dashboard's `d`-key treatment (a confirmation naming its
+  subject) before it earns a binding.
+- **A failed workflow RPC is an empty tab, not a failed refresh.**
+  `doRefresh` fetches both lists; losing the process list because a
+  second RPC failed would blank the whole screen. It also means an older
+  daemon that does not answer `workflow_list` degrades to an empty tab.
+
+`model.ListWorkflows` sits beside `model.ListProcesses` for the same
+reason: both the CLI and the TUI need it, neither may import the other,
+and neither may auto-start the daemon it is observing.
 
 ### System activity monitor (`pm2 taskmanager`)
 

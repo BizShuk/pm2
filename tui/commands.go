@@ -24,7 +24,22 @@ func doRefresh(socket string) tea.Cmd {
 			return refreshMsg{err: err}
 		}
 		sort.Slice(procs, func(i, j int) bool { return procs[i].ID < procs[j].ID })
-		return refreshMsg{procs: procs}
+
+		// A workflow list that cannot be fetched is an empty tab, never
+		// a failed refresh: the process list is what the rest of the
+		// screen is made of, and losing it because a second RPC failed
+		// would blank the whole monitor.
+		workflows, wfErr := model.ListWorkflows(socket)
+		if wfErr != nil {
+			workflows = nil
+		}
+		sort.Slice(workflows, func(i, j int) bool {
+			if workflows[i].Category != workflows[j].Category {
+				return workflows[i].Category < workflows[j].Category
+			}
+			return workflows[i].Name < workflows[j].Name
+		})
+		return refreshMsg{procs: procs, workflows: workflows}
 	}
 }
 

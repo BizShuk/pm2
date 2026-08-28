@@ -338,7 +338,7 @@ func RenderWideTable(ctx ViewContext) string {
 			RenderHeader(ctx),
 			RenderNamespaceBar(ctx, ctx.Width),
 			body,
-			RenderFooter(ctx.Width, ctx.SortBy))
+			RenderFooter(ctx))
 	}
 
 	lines := strings.Split(
@@ -359,5 +359,5 @@ func RenderWideTable(ctx ViewContext) string {
 		RenderHeader(ctx),
 		RenderNamespaceBar(ctx, ctx.Width),
 		body,
-		RenderFooter(ctx.Width, ctx.SortBy))
+		RenderFooter(ctx))
 }

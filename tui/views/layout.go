@@ -25,8 +25,11 @@ func RenderLayout(ctx ViewContext) string {
 	leftW := leftColumnWidth(ctx)
 	rw := ctx.Width - leftW - 1
 
-	left := lipgloss.NewStyle().Width(leftW).Height(contentH).
-		Render(RenderLeftPane(ctx, leftW, contentH))
+	leftBody := RenderLeftPane(ctx, leftW, contentH)
+	if ctx.WfScope {
+		leftBody = RenderWorkflowPane(ctx, leftW, contentH)
+	}
+	left := lipgloss.NewStyle().Width(leftW).Height(contentH).Render(leftBody)
 
 	div := lipgloss.NewStyle().Width(1).Height(contentH).Foreground(theme.Border).
 		Render(strings.Repeat("│\n", contentH-1) + "│")
@@ -39,12 +42,19 @@ func RenderLayout(ctx ViewContext) string {
 		RenderHeader(ctx),
 		RenderNamespaceBar(ctx, ctx.Width),
 		body,
-		RenderFooter(ctx.Width, ctx.SortBy))
+		RenderFooter(ctx))
 }
 
 // RenderRightPane renders the right panel: detail + logs (when height
 // allows). Pure function — see ViewContext.
 func RenderRightPane(ctx ViewContext, w, h int) string {
+	if ctx.WfScope {
+		if len(ctx.Workflows) == 0 {
+			return lipgloss.NewStyle().Width(w).Padding(1, 2).Foreground(theme.Muted).
+				Render("no workflows\ndeclare them in the workflows: block, then: pm2 apply")
+		}
+		return RenderWorkflowDetail(ctx.Workflows[min(ctx.WfSelected, len(ctx.Workflows)-1)], w)
+	}
 	if len(ctx.Procs) == 0 {
 		return lipgloss.NewStyle().Width(w).Padding(1, 2).Foreground(theme.Muted).
 			Render("no tasks\nrun config: pm2 task start [ecosystem.config.js]")
@@ -72,6 +82,13 @@ func RenderRightPane(ctx ViewContext, w, h int) string {
 func leftColumnWidth(ctx ViewContext) int {
 	w := 34
 
+	if ctx.WfScope {
+		for _, wf := range ctx.Workflows {
+			if ideal := len(workflowLabel(wf)) + len(workflowState(wf)) + 5; ideal > w {
+				w = ideal
+			}
+		}
+	}
 	if len(ctx.Procs) > 0 {
 		maxNameLen := 0
 		maxUpLen := 0

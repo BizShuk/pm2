@@ -10,17 +10,29 @@ import (
 	"github.com/bizshuk/pm2/tui/theme"
 )
 
-// RenderFooter renders the bottom key-binding legend.
-func RenderFooter(w int, sortBy string) string {
+// RenderFooter renders the bottom key-binding legend for the active
+// tab. The workflow tab lists a different set because it has a
+// different one: its rows have no process to restart, pause, or delete,
+// and advertising keys that do nothing is worse than offering fewer.
+func RenderFooter(ctx ViewContext) string {
+	w := ctx.Width
 	keys := [][2]string{
 		{"↑↓ / jk", "navigate"},
-		{"←/→", "ns"},
+		{"←/→", "tab"},
 		{"r", "restart"},
 		{"p", "pause/resume"},
 		{"d", "delete"},
-		{"s", "sort: " + sortBy},
+		{"s", "sort: " + ctx.SortBy},
 		{"⏎/esc", "logs only"},
 		{"q", "quit"},
+	}
+	if ctx.WfScope {
+		keys = [][2]string{
+			{"↑↓ / jk", "navigate"},
+			{"←/→", "tab"},
+			{"run", "pm2 workflow run <name>"},
+			{"q", "quit"},
+		}
 	}
 	ks := lipgloss.NewStyle().Foreground(theme.Text)
 	ds := lipgloss.NewStyle().Foreground(theme.Muted)

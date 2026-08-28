@@ -30,6 +30,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cycleNamespace(+1)
 		return m, nil
 	}
+	// The workflow tab observes only. A workflow's stages bypass the
+	// process registry, so restart/pause/delete have nothing to address
+	// there; triggering one is `pm2 workflow run`, which is a write the
+	// monitor deliberately does not own.
+	if m.inWorkflowScope() {
+		return m.handleWorkflowKey(msg)
+	}
 	if len(m.procs) == 0 {
 		return m, nil
 	}
@@ -94,4 +101,21 @@ func pauseOrResume(s process.Status) model.CommandType {
 		return model.CmdResume
 	}
 	return model.CmdPause
+}
+
+// handleWorkflowKey owns navigation inside the workflow tab. It moves a
+// cursor of its own — the process selection stays where the user left
+// it, so switching tabs back does not silently re-target a task action.
+func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.wfSelected > 0 {
+			m.wfSelected--
+		}
+	case "down", "j":
+		if m.wfSelected < len(m.workflows)-1 {
+			m.wfSelected++
+		}
+	}
+	return m, nil
 }

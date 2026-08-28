@@ -403,7 +403,9 @@ func TestRecomputeNamespaces(t *testing.T) {
 	}
 	m.recomputeNamespaces()
 
-	want := []string{"All", "default", "dev", "prod", "staging"}
+	// The trailing "Workflows" chip is part of the strip: it is a tab,
+	// not a namespace, and it is always last.
+	want := []string{"All", "default", "dev", "prod", "staging", workflowTab}
 	if len(m.namespaces) != len(want) {
 		t.Fatalf("namespaces = %v, want %v", m.namespaces, want)
 	}
@@ -475,9 +477,9 @@ func TestCycleNamespaceWraps(t *testing.T) {
 		{AppConfig: process.AppConfig{Name: "a", Namespace: "prod"}, ID: 1},
 		{AppConfig: process.AppConfig{Name: "b", Namespace: "dev"}, ID: 2},
 	}
-	m.recomputeNamespaces() // ["All", "dev", "prod"]
-	if len(m.namespaces) != 3 {
-		t.Fatalf("setup: namespaces = %v, want 3 entries", m.namespaces)
+	m.recomputeNamespaces() // ["All", "dev", "prod", "Workflows"]
+	if len(m.namespaces) != 4 {
+		t.Fatalf("setup: namespaces = %v, want 4 entries", m.namespaces)
 	}
 
 	m.cycleNamespace(+1)
@@ -487,6 +489,10 @@ func TestCycleNamespaceWraps(t *testing.T) {
 	m.cycleNamespace(+1)
 	if m.nsCursor != 2 || m.namespaces[m.nsCursor] != "prod" {
 		t.Errorf("right 2: cursor=%d (%q), want 2 (prod)", m.nsCursor, m.namespaces[m.nsCursor])
+	}
+	m.cycleNamespace(+1)
+	if m.nsCursor != 3 || m.namespaces[m.nsCursor] != workflowTab {
+		t.Errorf("right 3: cursor=%d (%q), want 3 (%s)", m.nsCursor, m.namespaces[m.nsCursor], workflowTab)
 	}
 	m.cycleNamespace(+1)
 	if m.nsCursor != 0 {
@@ -692,7 +698,7 @@ func TestRenderRightPaneLogFocusHidesDetail(t *testing.T) {
 // TestFooterIncludesLogFocusHint confirms the footer advertises the
 // new Enter/Esc binding so the user can discover it.
 func TestFooterIncludesLogFocusHint(t *testing.T) {
-	out := views.RenderFooter(120, "name")
+	out := views.RenderFooter(views.ViewContext{Width: 120, SortBy: "name"})
 	if !strings.Contains(out, "⏎/esc") {
 		t.Errorf("footer missing '⏎/esc' hint, got: %q", out)
 	}

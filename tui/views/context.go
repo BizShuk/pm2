@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/workflow"
 )
 
 // ViewContext encapsulates every piece of state that the view layer
@@ -27,8 +28,11 @@ type ViewContext struct {
 	Height     int                   // total terminal height
 	Selected   int                   // index of the highlighted row
 	Procs      []process.ProcessInfo // current process snapshot (already filtered by namespace)
-	Namespaces []string              // ["All"] + unique sorted namespaces; index 0 == All
-	NsCursor   int                   // index into Namespaces for the active filter chip
+	Namespaces []string              // ["All"] + namespaces + the trailing workflow tab
+	NsCursor   int                   // index into Namespaces for the active chip
+	Workflows  []workflow.Status     // declared workflows + their latest run
+	WfSelected int                   // index of the highlighted workflow row
+	WfScope    bool                  // the workflow tab is active; Procs is empty by design
 	Logs       []string              // tail of the selected process's log
 	Updated    time.Time             // last successful refresh
 	HostCPU    float64               // host CPU % (latest sample)

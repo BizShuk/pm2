@@ -9,11 +9,23 @@ import (
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/sysmon"
 	"github.com/bizshuk/pm2/tui/views"
+	"github.com/bizshuk/pm2/workflow"
 )
 
 const (
 	refreshDur = 2 * time.Second
 	maxLogTail = 14
+
+	// workflowTab is the trailing chip of the tab strip. A workflow is
+	// a task too — a composition of them — but one that runs only when
+	// triggered or scheduled, so it has no PID, no uptime, and no log
+	// tail to sit beside a process row. It gets its own tab rather than
+	// rows in a table whose every column would read "—".
+	//
+	// Scope is decided by cursor position (the last chip), never by
+	// this label, so a task namespace that happens to be called
+	// "Workflows" stays an ordinary namespace.
+	workflowTab = "Workflows"
 )
 
 type SortField string
@@ -31,8 +43,9 @@ const (
 type (
 	tickMsg    time.Time
 	refreshMsg struct {
-		procs []process.ProcessInfo
-		err   error
+		procs     []process.ProcessInfo
+		workflows []workflow.Status
+		err       error
 	}
 )
 
@@ -55,9 +68,11 @@ type Model struct {
 	socket     string
 	procs      []process.ProcessInfo
 	allProcs   []process.ProcessInfo // unfiltered list — drives the namespace strip
-	namespaces []string              // ["All"] + unique sorted namespaces from allProcs
-	nsCursor   int                   // index into namespaces; 0 == All
+	workflows  []workflow.Status     // declared workflows + their latest run
+	namespaces []string              // ["All"] + namespaces + the trailing workflow tab
+	nsCursor   int                   // index into namespaces; 0 == All, last == workflows
 	selected   int
+	wfSelected int // index into workflows; kept apart from selected
 	logs       []string
 	width      int
 	height     int
@@ -165,14 +180,19 @@ func (m Model) applyRefresh(msg refreshMsg) (tea.Model, tea.Cmd) {
 			selectedID = m.procs[m.selected].ID
 		}
 		m.allProcs = msg.procs
+		m.workflows = msg.workflows
+		m.wfSelected = max(0, min(m.wfSelected, len(m.workflows)-1))
 		m.recomputeNamespaces()
 		m.applyNamespaceFilter()
 		m.sortProcs(selectedID)
 		m.updated = time.Now()
-		if m.selected >= len(m.procs) {
+		// The task selection is left alone while the workflow tab is
+		// open: Procs is empty there by design, and clamping against
+		// it would quietly reset the row the user goes back to.
+		if !m.inWorkflowScope() && m.selected >= len(m.procs) {
 			m.selected = max(0, len(m.procs)-1)
 		}
-		if len(m.procs) > 0 && m.Detail {
+		if len(m.procs) > 0 && m.Detail && !m.inWorkflowScope() {
 			return m, readLogs(m.procs[m.selected].LogFile)
 		}
 	}
@@ -189,6 +209,7 @@ func (m Model) applyRefresh(msg refreshMsg) (tea.Model, tea.Cmd) {
 // Normalize behaviour and tests don't end up with a blank chip.
 func (m *Model) recomputeNamespaces() {
 	prev := ""
+	wasWorkflowScope := m.inWorkflowScope()
 	if m.nsCursor >= 0 && m.nsCursor < len(m.namespaces) {
 		prev = m.namespaces[m.nsCursor]
 	}
@@ -205,19 +226,31 @@ func (m *Model) recomputeNamespaces() {
 		rest = append(rest, k)
 	}
 	sort.Strings(rest)
-	m.namespaces = append([]string{"All"}, rest...)
+	m.namespaces = append(append([]string{"All"}, rest...), workflowTab)
 
+	if wasWorkflowScope {
+		m.nsCursor = len(m.namespaces) - 1
+		return
+	}
 	if prev == "" {
 		m.nsCursor = 0
 		return
 	}
-	for i, n := range m.namespaces {
+	for i, n := range m.namespaces[:len(m.namespaces)-1] {
 		if n == prev {
 			m.nsCursor = i
 			return
 		}
 	}
 	m.nsCursor = 0
+}
+
+// inWorkflowScope reports whether the tab cursor sits on the trailing
+// workflow chip. It is the one predicate the whole feature branches on:
+// the process list, the detail pane, the footer hints, and every write
+// key read it.
+func (m Model) inWorkflowScope() bool {
+	return len(m.namespaces) > 0 && m.nsCursor == len(m.namespaces)-1
 }
 
 // applyNamespaceFilter rewrites m.procs as the subset of m.allProcs
@@ -232,6 +265,13 @@ func (m *Model) applyNamespaceFilter() {
 	}
 	if m.nsCursor < 0 || m.nsCursor >= len(m.namespaces) {
 		m.nsCursor = 0
+	}
+	// The workflow tab is not a filter over processes: it replaces the
+	// list entirely, so the process rows go away rather than being
+	// filtered to nothing.
+	if m.inWorkflowScope() {
+		m.procs = nil
+		return
 	}
 	if m.namespaces[m.nsCursor] == "All" {
 		m.procs = make([]process.ProcessInfo, len(m.allProcs))
@@ -360,6 +400,9 @@ func (m Model) View() string {
 		Procs:      m.procs,
 		Namespaces: m.namespaces,
 		NsCursor:   m.nsCursor,
+		Workflows:  m.workflows,
+		WfSelected: m.wfSelected,
+		WfScope:    m.inWorkflowScope(),
 		Logs:       m.logs,
 		Updated:    m.updated,
 		HostCPU:    m.hostCPU,
