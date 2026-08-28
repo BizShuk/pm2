@@ -257,7 +257,7 @@ async function refresh() {
 
     var bar = document.getElementById("warnbar");
     bar.hidden = false;
-    bar.textContent = "This dashboard and its webhook are reachable without authentication. " +
+    bar.textContent = "This dashboard and its webhook are reachable from the local network without authentication. " +
       "Anyone who can reach " + (status.web_addr || "this port") + " can trigger a workflow, which runs shell commands on this machine.";
 
     state.tasks = await get("/api/tasks");

@@ -1,6 +1,9 @@
 package web
 
 import (
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,4 +53,49 @@ func (l *rateLimiter) allow(key string) bool {
 	}
 	l.hits[key] = append(kept, l.now())
 	return true
+}
+
+// The guard below exists because "reachable only from the LAN" is not a
+// boundary a browser respects.
+//
+// A page on evil.com, opened by anyone on this network, can POST to this
+// server from their own browser. The attacker cannot read the response,
+// but the workflow runs anyway — and a workflow stage runs a shell
+// command. The bind address does nothing about that, which is why this
+// check is load-bearing rather than decorative.
+//
+// It is not authentication and does not pretend to be. It is transparent
+// to every real client: curl, CI runners, and scripts send no Origin at
+// all, and the dashboard sends one that matches its own Host.
+
+// sameOrigin reports whether a request may proceed.
+//
+// A request with no Origin is accepted — that is every non-browser
+// client. A request carrying an Origin must have it match the Host the
+// request was actually addressed to, which works for a LAN name, a LAN
+// IP, or localhost without any of them having to be enumerated. A page
+// on another site fails it by construction.
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
+// guard applies the check to every route, not just the webhook: the read
+// endpoints expose the task table, its configuration, and the run
+// history, which a page on another origin has no business pulling either.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !sameOrigin(r) {
+			writeErr(w, http.StatusForbidden, "cross-origin requests are not accepted")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

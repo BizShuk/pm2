@@ -538,15 +538,21 @@ pm2 web              # print the URL and open a browser
 pm2 web --no-open    # print only
 ```
 
-⚠️ The dashboard and its webhook bind `0.0.0.0:8301` and **check no
-credential**. Anyone who can reach that port can trigger a workflow, and a
-workflow stage runs a shell command — treat reachability to it as equivalent to
-shell access on the machine. Close it off with
-`pm2 daemon start --web-host 127.0.0.1`, or turn the server off with
-`--web-port 0`.
+⚠️ The dashboard and its webhook bind `0.0.0.0:8502`, so they open from any
+machine on your local network, and they **check no credential**. There is no
+tunnel and no internet exposure — the LAN is the boundary. Anyone on it who can
+reach that port can trigger a workflow, and a workflow stage runs a shell
+command; treat reachability as equivalent to shell access on the machine.
+Restrict it to this machine with `pm2 daemon start --web-host 127.0.0.1`, or
+turn the server off with `--web-port 0`.
+
+Requests carrying a browser `Origin` that does not match the address they were
+sent to are refused, so a page on another site cannot trigger a workflow from a
+visitor's browser. A client that sends no `Origin` — curl, CI, a script — is
+unaffected.
 
 ```bash
-curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+curl -X POST http://<host>:8502/api/webhooks/ci:nightly \
      -H 'Content-Type: application/json' -d '{"params":{"DATE":"2026-08-28"}}'
 # → 202 {"run_id":"...","workflow":"ci:nightly","status":"queued"}
 ```

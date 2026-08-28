@@ -58,7 +58,7 @@ func runWeb(cmd *cobra.Command, _ []string) error {
 	url := browsableURL(info.WebAddr)
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, url)
-	fmt.Fprintln(out, "This dashboard and its webhook accept requests without authentication.")
+	fmt.Fprintln(out, "Reachable from the local network; no authentication.")
 
 	if noOpen {
 		return nil

@@ -462,9 +462,11 @@ shows the live task table (click a row for that task's trigger history with
 exit codes), the declared workflows, and a merged timeline of workflow and task
 runs.
 
-⚠️ **The dashboard and its webhook bind `0.0.0.0:8301` and check no
-credential.** Anyone who can reach that port can trigger a workflow, and a
-stage runs a shell command. Restrict or disable it at daemon start:
+⚠️ **The dashboard and its webhook bind `0.0.0.0:8502` and check no
+credential.** They open from any machine on your local network; there is no
+tunnel and no internet exposure. Anyone on the LAN who can reach that port can
+trigger a workflow, and a stage runs a shell command. Restrict or disable it at
+daemon start:
 
 ```bash
 pm2 daemon start --web-host 127.0.0.1   # loopback only
@@ -477,7 +479,7 @@ form — a nested config key such as `web.port` is silently ignored.
 Triggering a run over HTTP:
 
 ```bash
-curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+curl -X POST http://<host>:8502/api/webhooks/ci:nightly \
      -H 'Content-Type: application/json' \
      -d '{"params": {"DATE": "2026-08-28"}}'
 ```
@@ -486,6 +488,11 @@ curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
 `Location` pointing at the run), `400` malformed body, `404` unknown workflow,
 `409` a run is already in flight, `415` wrong content type, `429` more than ten
 triggers a minute. The `202` does not echo the params back.
+
+A request carrying a browser `Origin` that does not match the address it was
+sent to is refused with `403`, so a page on another site cannot trigger a
+workflow from a visitor's browser. Clients that send no `Origin` — curl, CI, a
+script — are unaffected.
 
 Every other endpoint is read-only. There is no HTTP route that restarts, stops,
 or deletes a task.

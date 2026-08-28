@@ -124,7 +124,51 @@ func TestTaskViewOmitsEnv(t *testing.T) {
 
 // --- binding ---------------------------------------------------------
 
-func TestDefaultBindIsAllInterfaces(t *testing.T) {
+// TestSameOriginGuardBlocksAnotherSite: the bind is LAN-wide, so nothing
+// about the address stops a page on another site from POSTing here from
+// a visitor's browser. This check is what does.
+func TestSameOriginGuardBlocksAnotherSite(t *testing.T) {
+	s := newTestServer(nil, nil)
+
+	blocked := do(t, s, http.MethodPost, "/api/webhooks/nightly", `{}`, map[string]string{
+		"Content-Type": "application/json",
+		"Origin":       "https://evil.example",
+	})
+	if blocked.Code != http.StatusForbidden {
+		t.Errorf("cross-origin POST: want 403, got %d", blocked.Code)
+	}
+
+	// Read routes are guarded too: they expose the task table and config.
+	read := do(t, s, http.MethodGet, "/api/tasks", "", map[string]string{"Origin": "https://evil.example"})
+	if read.Code != http.StatusForbidden {
+		t.Errorf("cross-origin GET: want 403, got %d", read.Code)
+	}
+}
+
+// TestSameOriginGuardIsTransparentToRealClients: curl, CI runners, and
+// scripts send no Origin, and the dashboard sends one matching its Host.
+// Neither may be inconvenienced by the guard.
+func TestSameOriginGuardIsTransparentToRealClients(t *testing.T) {
+	s := newTestServer(nil, nil)
+
+	noOrigin := do(t, s, http.MethodPost, "/api/webhooks/nightly", `{}`,
+		map[string]string{"Content-Type": "application/json"})
+	if noOrigin.Code != http.StatusAccepted {
+		t.Errorf("a client sending no Origin must be accepted, got %d", noOrigin.Code)
+	}
+
+	// httptest.NewRequest puts "example.com" in Host; the dashboard's own
+	// Origin always matches whatever host it was reached on, LAN name or IP.
+	sameHost := do(t, s, http.MethodGet, "/api/tasks", "", map[string]string{"Origin": "http://example.com"})
+	if sameHost.Code != http.StatusOK {
+		t.Errorf("the dashboard's own origin must be accepted, got %d", sameHost.Code)
+	}
+}
+
+// TestDefaultBindIsReachableFromTheLAN pins the product decision: the
+// dashboard opens from another machine on the network. There is no
+// tunnel and no internet exposure — the LAN is the boundary.
+func TestDefaultBindIsReachableFromTheLAN(t *testing.T) {
 	s := New(&stubBackend{}, &stubHistory{}, DefaultHost, 0)
 	s.port = freePort(t)
 	if err := s.Bind(); err != nil {
@@ -137,7 +181,15 @@ func TestDefaultBindIsAllInterfaces(t *testing.T) {
 		t.Fatalf("want a TCP listener, got %T", s.listener.Addr())
 	}
 	if !addr.IP.IsUnspecified() {
-		t.Errorf("default bind should be every interface, got %s", addr.IP)
+		t.Errorf("default bind must accept LAN connections, got %s", addr.IP)
+	}
+}
+
+// TestDefaultPortIsInternalSegment: 85xx declares an admin console, not
+// a product surface.
+func TestDefaultPortIsInternalSegment(t *testing.T) {
+	if DefaultPort < 8500 || DefaultPort > 8599 {
+		t.Errorf("admin interfaces belong in 8500-8599, got %d", DefaultPort)
 	}
 }
 

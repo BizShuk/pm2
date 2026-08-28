@@ -713,25 +713,33 @@ must not be able to claim its start was a cron fire.
 Regression test: `TestCronOkMeansExitedZero`, which was impossible to
 write before `executor.ExitInfo` existed.
 
-### The web plane is public and unauthenticated
+### The web plane: an admin console on the LAN, unauthenticated
 
-`daemon/web` binds `0.0.0.0:8301` by default and checks no credential.
-This is an explicit product decision that **overrides** the workspace
-rule keeping unauthenticated interfaces on loopback, and it overrides
+`daemon/web` binds `0.0.0.0:8502` by default and checks no credential.
+It opens from any machine on the local network; there is deliberately
+**no tunnel and no internet exposure** — the LAN is the boundary.
+
+That combination deviates from the workspace port rule twice, and the
+deviations are the decision rather than an oversight: the rule reads
+"LAN reachable → public segment" and "internal → bind `127.0.0.1`".
+This service is numbered internal (`85xx`) because it is an admin
+console rather than a product surface, and bound LAN-wide because it is
+meant to be opened from a phone or a second machine. It also overrides
 `plans/2026-07-23-pm2-event-stream.md` §1.4's "no built-in public HTTP"
-— and only that clause: there is still no OAuth, no TLS, no credential
-store, and no webhook registry (a workflow definition *is* its
-registration). The two planes stay different in kind: the event socket
-is a push plane for programs, this is a pull plane for a person with a
-browser.
+clause, and only that clause, and only as far as the LAN: there is still
+no OAuth, no TLS, no credential store, and no webhook registry (a
+workflow definition *is* its registration). The two planes stay
+different in kind: the event socket is a push plane for programs, this
+is a pull plane for a person with a browser.
 
-What it means concretely: anyone who can reach the port can trigger a
-workflow, and a stage runs a shell command. Treat reachability to 8301
-as equivalent to shell access. The daemon logs a `WARN` naming the
-address and the absence of authentication on every start, the dashboard
-states it on the page, and `pm2 daemon status` prints it.
+What it means concretely: anyone on the network who can reach the port
+can trigger a workflow, and a stage runs a shell command. Treat
+reachability to 8502 as equivalent to shell access. The daemon logs a
+`WARN` naming the address and the absence of authentication on every
+start, the dashboard states it on the page, and `pm2 daemon status`
+prints it.
 
-Four boundaries hold it in place:
+Five boundaries hold it in place:
 
 - **No handler serialises `process.ProcessInfo`.** It embeds
   `AppConfig`, which carries `Env` and — worse — `BaseEnv`, a snapshot of
@@ -741,6 +749,15 @@ Four boundaries hold it in place:
   `view.go`'s explicitly-listed fields; `TestTaskViewOmitsEnv` pins it.
   A struct built by subtraction would go wrong the next time
   `ProcessInfo` grows a field.
+- **The bind address is not the boundary, so `guard.go` is not
+  decoration.** A page on another site, opened by anyone on this
+  network, can POST here from their own browser — the attacker cannot
+  read the reply, but the workflow runs. Every route (not just the
+  webhook: the read routes expose the task table and its configuration)
+  requires either no `Origin` at all, which is every non-browser client,
+  or one matching the `Host` the request was addressed to. That works
+  for a LAN name, a LAN IP, or localhost without enumerating any of
+  them, and costs curl and CI nothing.
 - **No task-mutating route.** The webhook carries the risk the product
   asked for; restart or delete would let any reachable host stop the
   user's services, which nobody asked for.

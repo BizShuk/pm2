@@ -17,9 +17,21 @@
 >    一取得單飛名額就能被 `StopRun` 定址，而當時 cancel 還是 no-op，於是
 >    `StopRun` 靜默無作用並空等到 stage 自然結束。回歸測試
 >    `TestStopRunCancelsARunThatJustStarted`。
-> 4. 曝光面在規劃末期由 loopback 改為 public（`0.0.0.0:8301`），連帶把
->    webhook 的 Origin / Host / loopback 三道檢查移除——在刻意公開之後它們
->    是裝飾。保留 `Content-Type` 與速率上限。
+> 4. 曝光面經兩次修訂後定案為 `0.0.0.0:8502`：`號碼取 internal 段
+>    （8500-8599）因為它是管理介面`，`綁定放 LAN-wide 因為要能從手機或
+>    另一台機器打開`，且`不架 tunnel、不對外網曝光`。這同時偏離 port 規則的
+>    兩條（「LAN 可達→public 段」與「internal→綁 127.0.0.1」），偏離本身
+>    即是決策，已寫入 `daemon/web/doc.go` 與 CLAUDE.md。
+>
+>    連帶結論：`綁定位址不是安全邊界`。LAN 上任何人的瀏覽器開到惡意頁面，
+>    該頁就能對這個埠發跨站 POST——攻擊者讀不到回應，但 workflow 真的會跑。
+>    因此保留一道`同源檢查`：帶 `Origin` 且與 `Host` 不符者一律 403，覆蓋
+>    `所有路由`而不只 webhook（唯讀端點會吐出 task 表與設定）。它對真實
+>    client 完全透明——curl / CI / script 不送 `Origin`。原計畫的 `Host`
+>    白名單與 loopback `RemoteAddr` 檢查`不適用`於 LAN 綁定，已捨棄。
+>    `Content-Type` 與每 workflow 速率上限保留。
+>
+> 5. Port 由 `8301` 改為 `8502`；`8301` 從未實際上線，登記表中已撤回。
 
 ## Context
 

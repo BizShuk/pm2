@@ -28,5 +28,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/webhooks/{workflow}", s.handleWebhook)
 
-	return mux
+	// Every route goes through the guard, not just the webhook: the read
+	// endpoints expose the task table, its configuration, and the run
+	// history, which a page on another origin has no business pulling.
+	return s.guard(mux)
 }

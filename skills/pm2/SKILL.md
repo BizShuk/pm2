@@ -452,17 +452,23 @@ trigger gets an error instead, because somebody is waiting for the answer.
 its URL; `pm2 daemon status` shows the address.
 
 ```bash
-curl -X POST http://<host>:8301/api/webhooks/ci:nightly \
+curl -X POST http://<host>:8502/api/webhooks/ci:nightly \
      -H 'Content-Type: application/json' \
      -d '{"params": {"DATE": "2026-08-28"}}'
 # → 202 {"run_id":"20260828T030012-a1b2c3","workflow":"ci:nightly","status":"queued"}
 ```
 
-`This endpoint is reachable from the network and checks no credential.`
-Anyone who can reach port 8301 can trigger a workflow, and a workflow stage
-runs a shell command — treat reachability to this port as equivalent to shell
-access on the machine. Restrict it with `pm2 daemon start --web-host 127.0.0.1`,
-or disable the server entirely with `--web-port 0`.
+`This endpoint is reachable from the local network and checks no credential.`
+There is no tunnel and no internet exposure — the LAN is the boundary. Anyone
+on it who can reach port 8502 can trigger a workflow, and a workflow stage runs
+a shell command; treat reachability as equivalent to shell access on the
+machine. Restrict it with `pm2 daemon start --web-host 127.0.0.1`, or disable
+the server entirely with `--web-port 0`.
+
+A request carrying a browser `Origin` that does not match the address it was
+sent to is refused with `403` — that is what stops a page on another site
+triggering a workflow from a visitor's browser. A client sending no `Origin`
+(curl, CI, a script) is unaffected.
 
 `Content-Type: application/json` is required. This is content negotiation, but
 it also means a cross-origin POST from a page in someone's browser has to clear
@@ -475,6 +481,7 @@ a CORS preflight that pm2 never answers.
 | `404` | No such workflow (the error does not list the known ones) |
 | `409` | A run of this workflow is already in flight, with its run id |
 | `415` | Missing or wrong `Content-Type` |
+| `403` | A browser `Origin` that does not match the address requested |
 | `429` | More than 10 triggers for this workflow in a minute |
 | `503` | Too many workflow runs in flight |
 
@@ -498,7 +505,7 @@ GET  /api/workflows/runs/{runID}/logs/{stage}     stage output (text/plain)
 POST /api/webhooks/{workflow}                     trigger a run
 ```
 
-Port `8301` and host `0.0.0.0` are the defaults; override with `--web-host` /
+Port `8502` (internal admin segment) and host `0.0.0.0` are the defaults; override with `--web-host` /
 `--web-port`, or the flat env vars `APP_WEB_HOST` / `APP_WEB_PORT`. Nested
 config keys such as `web.port` are silently ignored — always use the flat form.
 
@@ -682,5 +689,6 @@ active, and cannot be combined with `--all` or `--with`.
   stage; exit non-zero and the run stops there.
 - Setting `web.port` in the config file. Nested keys are silently ignored — use
   the flat `web_port` / `APP_WEB_PORT`.
-- Assuming the webhook is protected because it is "internal". It is bound to
-  every interface and checks no credential by default.
+- Assuming the webhook is protected because its port number is in the internal
+  segment. The number says "admin console"; the bind is LAN-wide and there is
+  no credential check.

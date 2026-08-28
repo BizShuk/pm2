@@ -67,7 +67,7 @@ func (s *Server) startWeb() {
 	// webhook that runs shell commands.
 	slog.Warn("web server listening WITHOUT AUTHENTICATION",
 		"addr", srv.Addr(), "url", srv.URL(),
-		"note", "anyone who can reach this address can trigger a workflow, which runs shell commands on this machine")
+		"note", "anyone on the local network can trigger a workflow, which runs shell commands on this machine")
 
 	go func() {
 		if err := srv.Serve(); err != nil {

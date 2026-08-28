@@ -84,7 +84,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	case info.WebError != "":
 		fmt.Printf("  web:         unavailable (%s)\n", info.WebError)
 	case info.WebAddr != "":
-		fmt.Printf("  web:         %s (no authentication)\n", info.WebAddr)
+		fmt.Printf("  web:         %s (LAN, no authentication)\n", info.WebAddr)
 	default:
 		fmt.Printf("  web:         disabled\n")
 	}

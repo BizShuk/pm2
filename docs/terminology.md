@@ -38,7 +38,8 @@
 | 帳本 | Journal | append-only JSONL；`一筆完成的 run 一行` | `帳本記完成的, daemon 報進行中的` |
 | 落空觸發 | Skipped Fire | cron 觸發時上一輪還在跑，該次被丟棄 | 仍會留下 `cron_skip` 紀錄 |
 | 未知結束碼 | Unknown Exit Code | 落檔為 `null` 而`非 0` | spawn 失敗、或被信號終止時無自己的 code |
-| 對外埠 | Public Port | `0.0.0.0:8301`，dashboard 與 webhook 共用 | `無認證`；可達即等同於 shell 存取 |
+| 管理埠 | Admin Port | `0.0.0.0:8502`，dashboard 與 webhook 共用；號碼取 internal 段 | `無認證`；`LAN 可達`但無 tunnel，可達即等同於 shell 存取 |
+| 同源檢查 | Same-Origin Guard | 帶 `Origin` 且與 `Host` 不符者一律 403 | 綁定位址不是邊界；這才是擋瀏覽器跨站觸發的東西 |
 
 ## 執行語意 (Execution Semantics)
 

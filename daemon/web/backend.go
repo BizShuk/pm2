@@ -8,14 +8,22 @@ import (
 )
 
 const (
-	// DefaultHost is every interface. The product asked for a publicly
-	// reachable dashboard and webhook; see the package doc for what that
-	// implies.
+	// DefaultHost is every interface, so other machines on the local
+	// network can open the dashboard. There is deliberately no tunnel and
+	// no internet exposure: the LAN is the boundary.
+	//
+	// Note the deviation this records. The workspace port rule reads
+	// "LAN reachable -> public segment" and "internal -> 127.0.0.1
+	// prefix"; this service is an admin console numbered internal but
+	// bound LAN-wide. That is an explicit choice, and the reason the
+	// same-origin guard in guard.go is load-bearing rather than
+	// decorative — the bind is not doing the work here.
 	DefaultHost = "0.0.0.0"
 
-	// DefaultPort sits in the workspace's public segment (8300-8399),
-	// taking its smallest unused number.
-	DefaultPort = 8301
+	// DefaultPort sits in the workspace's internal segment (8500-8599),
+	// taking its smallest unused number. This is an admin interface, not
+	// a product surface.
+	DefaultPort = 8502
 )
 
 // Backend is the only contract the HTTP layer gets from the daemon. It
