@@ -302,6 +302,24 @@ func (r *ProcessRegistry) UpdateCronStatus(key string, firedAt time.Time, status
 	return true
 }
 
+// UpdateCronOutcome sets LastCronStatus alone, leaving LastCronAt at the
+// moment the fire happened.
+//
+// The outcome of a one-shot cron task is only known when its child
+// exits, which is long after the fire. UpdateCronStatus would overwrite
+// LastCronAt with that later time, so `pm2 monitor` would report when
+// the job finished as if it were when the schedule fired.
+func (r *ProcessRegistry) UpdateCronOutcome(key, status string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mp, ok := r.processes[key]
+	if !ok {
+		return false
+	}
+	mp.Info.LastCronStatus = status
+	return true
+}
+
 // LookupExistingForLaunch is the launch-time duplicate detector used by
 // Server.startApp / Server.launchProcess. It mirrors the original
 // s.processes[k] + by-(Name,ConfigFile) scan in one atomic read-locked

@@ -16,6 +16,7 @@ import (
 	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/runhistory"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -38,6 +39,17 @@ type ManagedProcess struct {
 	stopping bool // true when deliberately stopped, suppresses auto-restart
 	paused   bool // true when suspended via CmdPause; resume re-registers cron
 	Watcher  *fsnotify.Watcher
+
+	// runID and trigger are stamped at launch, under the same write
+	// lock that installs the entry, and read back when the process
+	// exits. onProcessExit has no other way to know why this run
+	// started, and the answer belongs in the run journal.
+	//
+	// Deliberately not part of model.AppStartReq: the trigger is
+	// daemon-internal knowledge, and a CLI must not be able to claim
+	// its start was a cron fire.
+	runID   string
+	trigger string
 }
 
 // ProcessManager owns the core process coordination and control logic:
@@ -50,6 +62,7 @@ type ProcessManager struct {
 	nextID       int
 	homeDir      string
 	scheduler    *cron.Scheduler
+	history      *runhistory.Store
 	startedAt    time.Time
 	RestartDelay time.Duration
 
@@ -69,6 +82,7 @@ func NewProcessManager(homeDir string) *ProcessManager {
 		homeDir:      homeDir,
 		executor:     executor.NewExecutor(homeDir),
 		scheduler:    cron.New(),
+		history:      runhistory.NewStore(homeDir),
 		startedAt:    time.Now(),
 		RestartDelay: 30 * time.Second,
 	}
@@ -171,14 +185,17 @@ func (pm *ProcessManager) StopByName(name string) error {
 //
 // Satisfies network.Manager (CmdRestart).
 func (pm *ProcessManager) RestartByName(name string) error {
-	if err := pm.restartTargets(name); err != nil {
+	if err := pm.restartTargets(name, runhistory.TriggerRestart); err != nil {
 		return err
 	}
 	pm.autoSave("restart")
 	return nil
 }
 
-func (pm *ProcessManager) restartTargets(name string) error {
+// restartTargets is the shared body. trigger records why the relaunch
+// happened so the run journal can tell a user-requested restart from a
+// file-watch trigger from a cron reboot.
+func (pm *ProcessManager) restartTargets(name, trigger string) error {
 	targets := pm.findProcesses(name)
 	if len(targets) == 0 {
 		return processNotFoundError(name)
@@ -200,7 +217,7 @@ func (pm *ProcessManager) restartTargets(name string) error {
 			CronTriggered: true,
 		}
 		_ = pm.stopProcess(mp)
-		_, _ = pm.launchProcess(pname, req)
+		_, _ = pm.launchProcessWith(pname, req, trigger)
 	}
 	return nil
 }
@@ -254,7 +271,7 @@ func (pm *ProcessManager) ResumeByName(name string) error {
 			continue
 		}
 		req := &model.AppStartReq{AppConfig: appCfg}
-		if _, err := pm.launchProcess(appCfg.Name, req); err != nil {
+		if _, err := pm.launchProcessWith(appCfg.Name, req, runhistory.TriggerResurrect); err != nil {
 			return fmt.Errorf("resume %s: %w", appCfg.Name, err)
 		}
 	}

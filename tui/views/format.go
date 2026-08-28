@@ -128,6 +128,11 @@ func cronLastRunStyled(t time.Time, status string, maxStatusLen int) string {
 		badge = lipgloss.NewStyle().Foreground(theme.Errored).Render("  failed")
 	case "skipped":
 		badge = lipgloss.NewStyle().Foreground(theme.Warn).Render("  skipped")
+	case "running":
+		// Launched, outcome not yet known. It shares the warning slot
+		// with "skipped" because both mean "not a success yet" without
+		// meaning "failed".
+		badge = lipgloss.NewStyle().Foreground(theme.Warn).Render("  running")
 	default:
 		badge = lipgloss.NewStyle().Foreground(theme.Muted).Render("  " + status)
 	}

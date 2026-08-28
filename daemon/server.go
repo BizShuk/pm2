@@ -55,6 +55,7 @@ func (s *Server) Listen(socketPath string) error {
 	slog.Info("daemon listening", "socketPath", socketPath)
 
 	s.StartMetricsCollector()
+	s.pruneHistory()
 
 	go s.startAutoResurrect()
 	go s.startAutoSave()

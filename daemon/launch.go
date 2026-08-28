@@ -9,17 +9,27 @@ import (
 	"github.com/bizshuk/pm2/daemon/executor"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/runhistory"
 )
 
-// launchProcess is the ProcessManager-side wrapper around executor.Start. It
-// owns the registry-state side of a launch (id assignment, mp
-// construction, registry write, cron registration) and delegates all
-// OS operations to the Executor.
+// launchProcess launches a process the user asked for directly.
 func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (process.ProcessInfo, error) {
+	return pm.launchProcessWith(name, req, runhistory.TriggerManual)
+}
+
+// launchProcessWith is the ProcessManager-side wrapper around
+// executor.Start. It owns the registry-state side of a launch (id
+// assignment, mp construction, registry write, cron registration) and
+// delegates all OS operations to the Executor.
+//
+// trigger records why this run started. It is stamped onto the entry
+// under the same write lock that installs it, because onProcessExit —
+// which is where the run journal is written — has no other way to know.
+func (pm *ProcessManager) launchProcessWith(name string, req *model.AppStartReq, trigger string) (process.ProcessInfo, error) {
 	onFileChanged := func() {
 		// restartTargets, not RestartByName: a watch-triggered restart is
 		// not a user operation and changes nothing that dump.json stores.
-		_ = pm.restartTargets(name)
+		_ = pm.restartTargets(name, runhistory.TriggerWatch)
 	}
 
 	result, err := pm.executor.Start(req, name, onFileChanged)
@@ -114,6 +124,8 @@ func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (pr
 		Cmd:     result.Cmd,
 		done:    make(chan struct{}),
 		Watcher: result.Watcher,
+		runID:   runhistory.NewRunID(time.Now()),
+		trigger: trigger,
 	}
 	pm.reg.processes[cronKey(ns, name)] = mp
 	if oldKey != "" && oldKey != cronKey(ns, name) {
@@ -134,11 +146,16 @@ func (pm *ProcessManager) launchProcess(name string, req *model.AppStartReq) (pr
 			firedAt := time.Now()
 			// restartTargets: a cron fire persists nothing new, so it must
 			// not rewrite dump.json on every tick.
-			restartErr := pm.restartTargets(ck)
+			restartErr := pm.restartTargets(ck, runhistory.TriggerCronRestart)
 			cronStatus := "ok"
 			if restartErr != nil {
 				cronStatus = "failed"
+				pm.recordLaunchFailure(ns, name, runhistory.TriggerCronRestart, restartErr)
 			}
+			// Unlike a one-shot cron task, cron_restart reboots a
+			// long-lived process: "the child is still running" is its
+			// normal state, so there is no later exit to wait for and
+			// "ok" already means what it says.
 			pm.reg.UpdateCronStatus(ck, firedAt, cronStatus)
 		}); err != nil {
 			slog.Info("cron_restart parse error", "name", ck, "err", err)

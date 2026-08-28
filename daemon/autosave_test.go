@@ -176,7 +176,7 @@ func TestInternalRestartDoesNotAutoSave(t *testing.T) {
 		t.Fatalf("remove dump.json: %v", err)
 	}
 
-	if err := pm.restartTargets("default:autosave-a"); err != nil {
+	if err := pm.restartTargets("default:autosave-a", "test"); err != nil {
 		t.Fatalf("restartTargets: %v", err)
 	}
 
