@@ -23,18 +23,24 @@ import (
 type CommandType string
 
 const (
-	CmdStart    CommandType = "start"
-	CmdStop     CommandType = "stop"
-	CmdRestart  CommandType = "restart"
-	CmdPause    CommandType = "pause"
-	CmdResume   CommandType = "resume"
-	CmdDelete   CommandType = "delete"
-	CmdList     CommandType = "list"
-	CmdSave     CommandType = "save"
+	CmdStart     CommandType = "start"
+	CmdStop      CommandType = "stop"
+	CmdRestart   CommandType = "restart"
+	CmdPause     CommandType = "pause"
+	CmdResume    CommandType = "resume"
+	CmdDelete    CommandType = "delete"
+	CmdList      CommandType = "list"
+	CmdSave      CommandType = "save"
 	CmdResurrect CommandType = "resurrect"
-	CmdKill     CommandType = "kill"
-	CmdPing     CommandType = "ping"
-	CmdStatus   CommandType = "status"
+	CmdKill      CommandType = "kill"
+	CmdPing      CommandType = "ping"
+	CmdStatus    CommandType = "status"
+
+	CmdWorkflowRegister CommandType = "workflow_register"
+	CmdWorkflowList     CommandType = "workflow_list"
+	CmdWorkflowRun      CommandType = "workflow_run"
+	CmdWorkflowDelete   CommandType = "workflow_delete"
+	CmdWorkflowStop     CommandType = "workflow_stop"
 )
 
 // PM2Version is the version string both the CLI (`pm2 --version`)
@@ -44,10 +50,11 @@ const PM2Version = "1.0.0"
 
 // Request is a CLI → daemon message
 type Request struct {
-	Command CommandType `json:"command"`
-	Name    string      `json:"name,omitempty"` // process name or "all"
-	ID      int         `json:"id,omitempty"`
-	App     *AppStartReq `json:"app,omitempty"`
+	Command  CommandType  `json:"command"`
+	Name     string       `json:"name,omitempty"` // process name or "all"
+	ID       int          `json:"id,omitempty"`
+	App      *AppStartReq `json:"app,omitempty"`
+	Workflow *WorkflowReq `json:"workflow,omitempty"`
 }
 
 // AppStartReq carries the config for a new process. The static
