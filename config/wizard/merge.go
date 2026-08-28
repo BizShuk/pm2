@@ -8,51 +8,91 @@ import (
 
 	"github.com/bizshuk/pm2/config"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/workflow"
 )
 
-func loadExistingApps(path string) ([]process.AppConfig, error) {
+// mergeCounts reports what the merge kept and what it dropped, per block.
+type mergeCounts struct {
+	appsSkipped      int
+	workflowsSkipped int
+}
+
+func loadExisting(path string) (Ecosystem, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return Ecosystem{}, nil
 		}
-		return nil, fmt.Errorf("stat %s: %w", path, err)
+		return Ecosystem{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".json" && ext != ".js" && ext != ".cjs" && ext != ".mjs" {
-		return nil, fmt.Errorf("unsupported existing file format %q (want .js or .json)", ext)
+		return Ecosystem{}, fmt.Errorf("unsupported existing file format %q (want .js or .json)", ext)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		return nil, fmt.Errorf("parse existing %s: %w", path, err)
+		return Ecosystem{}, fmt.Errorf("parse existing %s: %w", path, err)
 	}
-	return cfg.Apps, nil
+	return Ecosystem{Apps: cfg.Apps, Workflows: cfg.Workflows}, nil
 }
 
-func mergeAppsByName(existing, newApps []process.AppConfig) (merged []process.AppConfig, skipped int) {
-	seen := make(map[string]struct{}, len(existing))
-	merged = make([]process.AppConfig, 0, len(existing)+len(newApps))
+// mergeDocuments keeps every existing declaration and appends the new
+// ones that do not collide. Identity is the app name for an app and the
+// "<category>:<name>" key for a workflow — the same identities the
+// daemon registers under, so a merge that looks clean here cannot
+// produce a file the daemon rejects as a duplicate.
+func mergeDocuments(existing, incoming Ecosystem) (Ecosystem, mergeCounts) {
+	var (
+		merged Ecosystem
+		counts mergeCounts
+	)
 
-	for _, app := range existing {
+	seenApps := make(map[string]struct{}, len(existing.Apps))
+	merged.Apps = make([]process.AppConfig, 0, len(existing.Apps)+len(incoming.Apps))
+	for _, app := range existing.Apps {
 		app.Normalize("")
 		if app.Name == "" {
 			continue
 		}
-		seen[app.Name] = struct{}{}
-		merged = append(merged, app)
+		seenApps[app.Name] = struct{}{}
+		merged.Apps = append(merged.Apps, app)
 	}
-	for _, app := range newApps {
+	for _, app := range incoming.Apps {
 		app.Normalize("")
 		if app.Name == "" {
 			continue
 		}
-		if _, duplicate := seen[app.Name]; duplicate {
-			skipped++
+		if _, duplicate := seenApps[app.Name]; duplicate {
+			counts.appsSkipped++
 			continue
 		}
-		seen[app.Name] = struct{}{}
-		merged = append(merged, app)
+		seenApps[app.Name] = struct{}{}
+		merged.Apps = append(merged.Apps, app)
 	}
-	return merged, skipped
+
+	seenWorkflows := make(map[string]struct{}, len(existing.Workflows))
+	merged.Workflows = make([]workflow.Config, 0, len(existing.Workflows)+len(incoming.Workflows))
+	for _, wf := range existing.Workflows {
+		wf.Normalize("")
+		if wf.Name == "" {
+			continue
+		}
+		seenWorkflows[wf.Key()] = struct{}{}
+		merged.Workflows = append(merged.Workflows, wf)
+	}
+	for _, wf := range incoming.Workflows {
+		wf.Normalize("")
+		if wf.Name == "" {
+			continue
+		}
+		if _, duplicate := seenWorkflows[wf.Key()]; duplicate {
+			counts.workflowsSkipped++
+			continue
+		}
+		seenWorkflows[wf.Key()] = struct{}{}
+		merged.Workflows = append(merged.Workflows, wf)
+	}
+
+	return merged, counts
 }
 
 func detectFormatFromExt(path string) (string, bool) {

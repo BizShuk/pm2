@@ -44,14 +44,20 @@ var WizardCmd = &cobra.Command{
 	Short:   "Interactively build an ecosystem.config.js (or .json) (short alias: pm2 w)",
 	Long: "Walks through a series of questions and writes a valid ecosystem.config.js " +
 		"in the current directory that `pm2 task start` can load directly. " +
-		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, then write to file. " +
+		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, " +
+		"then an optional workflows block, then write to file. " +
 		"Namespace choices: " + strings.Join(corewizard.Namespaces(), ", ") + ". " +
 		"Generated names use uppercase NAMESPACE SCRIPT - NAME. " +
 		"Enter r for a random daily time between 2am and 8am. " +
 		"Defaults: max restarts 15; cwd uses the ecosystem file directory; config and log paths follow PM2 defaults. " +
 		"Optional choice 1 registers the app paused. " +
-		"If the output file already exists, wizard merges the new apps into it " +
-		"by default; pass --force to replace, or --no-merge to abort.",
+		"A workflow runs stages in order and stops at the first failure; each stage is " +
+		"a shell script, a registered task run once, or another workflow. A task or " +
+		"workflow stage is picked from the apps and workflows this session declared, " +
+		"so no key has to be typed from memory. " +
+		"If the output file already exists, wizard merges the new apps and workflows " +
+		"into it by default (apps by name, workflows by category:name); pass --force " +
+		"to replace, or --no-merge to abort.",
 	Args: cobra.NoArgs,
 	RunE: runEcoInteractive,
 }

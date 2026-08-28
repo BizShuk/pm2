@@ -1,19 +1,20 @@
 package wizard
 
-import (
-	"encoding/json"
+import "encoding/json"
 
-	"github.com/bizshuk/pm2/process"
-)
-
-func renderEcosystemJSON(apps []process.AppConfig) (string, error) {
-	renderedApps := make([]renderedApp, len(apps))
-	for i, app := range apps {
+func renderEcosystemJSON(doc Ecosystem) (string, error) {
+	renderedApps := make([]renderedApp, len(doc.Apps))
+	for i, app := range doc.Apps {
 		renderedApps[i] = appForRender(app)
 	}
+	var renderedWorkflows []renderedWorkflow
+	for _, wf := range doc.Workflows {
+		renderedWorkflows = append(renderedWorkflows, workflowForRender(wf))
+	}
 	document := struct {
-		Apps []renderedApp `json:"apps"`
-	}{Apps: renderedApps}
+		Apps      []renderedApp      `json:"apps"`
+		Workflows []renderedWorkflow `json:"workflows,omitempty"`
+	}{Apps: renderedApps, Workflows: renderedWorkflows}
 
 	data, err := json.MarshalIndent(document, "", "    ")
 	if err != nil {

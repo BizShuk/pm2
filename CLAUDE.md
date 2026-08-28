@@ -163,18 +163,31 @@ pm2/
 │       ├── defaults.go       wizard-only output, name, script, and count defaults
 │       ├── format.go         format validation and default output selection
 │       ├── options.go        shared output/merge options for all wizard entry points
-│       ├── prompt.go         reusable line, choice, numeric, env, and cron prompts
+│       ├── prompt.go         reusable line, choice, numeric, duration, env,
+│       │                     required-line, and cron prompts
+│       ├── document.go       Ecosystem — the apps + workflows document the
+│       │                     whole pipeline carries; TaskKeys / WorkflowKeys
+│       │                     feed the stage pickers
 │       ├── app_options.go    cron-restart, max-restart, and CWD prompt block
 │       ├── app.go            AppConfig defaults and one-app prompt sequence
-│       ├── collection.go     multi-app collection loop and summaries
+│       ├── workflow.go       one-workflow prompt sequence + stage prompts;
+│       │                     promptRef picks a task or workflow from what the
+│       │                     document already declares
+│       ├── collection.go     app and workflow collection loops and summaries
 │       ├── name.go           generated wizard name derivation
 │       ├── interactive.go    RunInteractive entry point
 │       ├── install.go        RunInstall entry point
-│       ├── merge.go          existing-file loading, merge, and format detection
-│       ├── render_app.go     shared JS/JSON ecosystem projection
+│       ├── validate.go       pre-write workflow validation + dangling-ref
+│       │                     warnings
+│       ├── merge.go          existing-file loading, per-block merge, and
+│       │                     format detection
+│       ├── render_app.go     shared JS/JSON app projection
+│       ├── render_workflow.go  shared JS/JSON workflow projection
 │       ├── render_javascript.go  JavaScript renderer
 │       ├── render_json.go    JSON renderer
 │       ├── writer.go         preview, confirmation, and file persistence
+│       ├── workflow_test.go  workflow prompts, render round trip, merge,
+│       │                     and the refusal to write an invalid document
 │       └── wizard_test.go    Unit tests for prompts, rendering, merge, and public API
 ├── daemon/
 │   ├── autosave.go           autoSave hook — persists dump.json after every
@@ -656,6 +669,53 @@ The engine holds **its own** `cron.Scheduler`. `stopProcess` removes
 scheduler entries by a flat string key, so a task in a namespace
 colliding with a workflow category would let `pm2 task stop` silently
 disarm a workflow's schedule.
+
+### The wizard authors the whole file, workflows included
+
+`pm2 wizard` collects a `workflows:` block after the apps and writes
+both into one document. The collect -> merge -> render -> write pipeline
+carries a single `wizard.Ecosystem` value rather than a widening
+parameter list, because the two blocks are not independent: a `task:`
+stage names an app declared a few questions earlier.
+
+Five boundaries:
+
+- **Workflows are asked last, and that is the feature.** The stage
+  pickers offer the apps and workflows the document already holds —
+  `Ecosystem.TaskKeys()` returns the exact `namespace:name` strings
+  `LookupTask` resolves against, so the common case never asks anyone to
+  recall a key. Asking first would leave both pickers empty. A menu is
+  offered only when there is something to offer; otherwise the prompt
+  degrades to a required line, since a reference may legitimately name a
+  task registered from another file.
+- **The wizard refuses to write a document it knows `pm2 apply` will
+  reject.** `validateDocument` runs `workflow.ValidateAll` *before* the
+  preview, so a cycle or a nameless workflow fails with nothing written
+  (regression test: `TestWriteEcosystemFileRejectsCycle`). A dangling
+  task or workflow reference is only a warning, for the same reason the
+  daemon's registration check is the binding one: the target may live in
+  another file.
+- **Structural answers are required where they are asked.** A stage with
+  no script and no reference is not a stage, so `promptRequiredLine`
+  refuses it in the loop; deferring to `Validate` would discard every
+  other answer the user had already given. `promptDuration` rejects an
+  unparseable timeout the same way.
+- **Only script stages are asked for args, env, and CWD.** `Validate`
+  rejects those keys on a task or workflow stage, so prompting for them
+  would invite an answer the file cannot legally carry.
+- **The renderers project, never marshal.** `renderedWorkflow` lists its
+  fields one by one exactly as `renderedApp` does, so `ConfigFile` and
+  `BaseEnv` — the CLI's snapshot of the operator's shell environment —
+  cannot reach a file people commit (`TestRenderedWorkflowOmitsRuntimeFields`).
+  The `workflows:` key is omitted entirely when none are declared, and a
+  stage CWD equal to its workflow's is dropped rather than written back
+  as a pin, because `Normalize` re-derives it.
+
+Merging follows the daemon's identities: apps by name, workflows by
+`category:name`. Two workflows sharing a name in different categories
+both survive, exactly as they would in the registry. `--yes` synthesizes
+no workflow — a default app is a runnable placeholder, but a workflow
+with an invented stage would be a command nobody asked to run.
 
 ### Run history: the journal holds finished runs
 
@@ -1380,6 +1440,12 @@ supervises, and `pm2 logs monitor` offers only the latter for deletion.
   no other package may shell out to a privileged tool or add a
   `Credential` to a spawned command. If a new reading needs root, it
   publishes through a file the same way the GPU one does.
+- The wizard never marshals a `process.AppConfig` or a
+  `workflow.Config` into an ecosystem file. Both go through the
+  `renderedApp` / `renderedWorkflow` projections in `config/wizard`,
+  whose fields are listed one by one — the same subtraction-versus-
+  enumeration argument `daemon/web`'s `taskView` makes, and for the same
+  reason: `BaseEnv` is a snapshot of the operator's shell.
 - **No HTTP handler serialises `process.ProcessInfo` (or anything
   embedding `process.AppConfig`) directly.** Project into a view type in
   `daemon/web/view.go` with its fields listed one by one. `AppConfig`

@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bizshuk/pm2/process"
 )
@@ -175,4 +176,45 @@ func resolveCronSchedule(raw string) string {
 	minuteOfDay := randomCronStartMinute +
 		rand.IntN(randomCronEndMinute-randomCronStartMinute+1)
 	return fmt.Sprintf("%d %d * * *", minuteOfDay%60, minuteOfDay/60)
+}
+
+// promptDuration reads an optional Go duration (30s, 15m, 2h). Blank
+// means "no limit". An unparseable answer is rejected in the loop rather
+// than at write time, because Validate rejects the whole document and
+// the user would lose every answer already given.
+func promptDuration(rdr *bufio.Reader, out io.Writer, label string) (string, error) {
+	for i := 0; i < 3; i++ {
+		raw, err := promptLine(rdr, out, label, "")
+		if err != nil {
+			return "", err
+		}
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return "", nil
+		}
+		d, parseErr := time.ParseDuration(value)
+		if parseErr == nil && d >= 0 {
+			return value, nil
+		}
+		fmt.Fprintln(out, "  (invalid duration, try again — e.g. 45s, 30m, 2h)")
+	}
+	return "", nil
+}
+
+// promptRequiredLine repeats a prompt until the answer is non-empty.
+// It exists for the fields Validate treats as structural — a stage with
+// no script and no reference is not a stage — so the refusal happens
+// where the user can still fix it, not after every other answer is in.
+func promptRequiredLine(rdr *bufio.Reader, out io.Writer, label string) (string, error) {
+	for i := 0; i < maxChoiceAttempts; i++ {
+		raw, err := promptLine(rdr, out, label, "")
+		if err != nil {
+			return "", err
+		}
+		if value := strings.TrimSpace(raw); value != "" {
+			return value, nil
+		}
+		fmt.Fprintf(out, "  (%s is required)\n", strings.ToLower(label))
+	}
+	return "", fmt.Errorf("%s is required", strings.ToLower(label))
 }

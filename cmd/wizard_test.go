@@ -73,7 +73,8 @@ func resetCommandForTest(t *testing.T, command *cobra.Command) {
 
 func TestWizardPromptCopy(t *testing.T) {
 	for _, want := range []string{
-		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, then write to file.",
+		"Prompts in order: namespace, name, script, args, instances, watch mode, env, cron schedule, cron restart, max restarts, cwd, optional, add another app, then an optional workflows block, then write to file.",
+		"each stage is a shell script, a registered task run once, or another workflow.",
 		"Namespace choices: Agent, Backup, Local, Service, AutoP.",
 		"Generated names use uppercase NAMESPACE SCRIPT - NAME.",
 		"Enter r for a random daily time between 2am and 8am.",
@@ -120,6 +121,7 @@ func TestWizardFinalWritePrompt(t *testing.T) {
 	root.SetIn(strings.NewReader(
 		strings.Repeat("\n", 12) +
 			"n\n" + // add another app
+			"n\n" + // add a workflow
 			"n\n", // write to file
 	))
 	var stdout, stderr bytes.Buffer
@@ -164,6 +166,7 @@ func TestWizardEndToEndMerge(t *testing.T) {
 		"",          // cwd
 		"2",         // optional → no
 		"n",         // add another? → no
+		"n",         // add a workflow? → no
 		"y",         // write to file → yes
 	}, "\n") + "\n"
 
@@ -475,3 +478,75 @@ func TestInstallMergesIntoExisting(t *testing.T) {
 
 // strconvQuote is a tiny wrapper to keep test expectations readable.
 func strconvQuote(s string) string { return fmt.Sprintf("%q", s) }
+
+// TestWizardEndToEndWorkflow drives the full CLI path — prompts to file
+// to config.Load — for a file whose workflow references the app the same
+// session declared. It is the check that the picker's key format and the
+// loader's expectation agree.
+func TestWizardEndToEndWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	stdin := strings.Join([]string{
+		"3",         // namespace → Local
+		"worker",    // name
+		"worker.js", // script
+		"",          // args
+		"",          // instances
+		"",          // watch
+		"",          // env
+		"",          // cron
+		"",          // cron restart
+		"",          // max restarts
+		"",          // cwd
+		"2",         // optional → no
+		"n",         // add another app? → no
+		"y",         // add a workflow? → yes
+		"ci",        // category
+		"nightly",   // name
+		"0 3 * * *", // cron
+		"",          // timeout
+		"",          // cwd
+		"",          // env
+		"1",         // stage type → script
+		"unit",      // stage name
+		"make",      // script
+		"test",      // args
+		"",          // stage env
+		"",          // stage cwd
+		"",          // stage timeout
+		"y",         // add another stage? → yes
+		"2",         // stage type → task
+		"bounce",    // stage name
+		"1",         // task → the worker declared above
+		"",          // stage timeout
+		"n",         // add another stage? → no
+		"n",         // add another workflow? → no
+		"y",         // write to file → yes
+	}, "\n") + "\n"
+
+	got, err := runWizard(t, dir, stdin,
+		"--output "+filepath.Join(dir, "ecosystem.config.js"))
+	if err != nil {
+		t.Fatalf("wizard: %v", err)
+	}
+	if !strings.Contains(got, `workflows: [`) {
+		t.Fatalf("generated file has no workflows block:\n%s", got)
+	}
+
+	cfg, err := config.Load(filepath.Join(dir, "ecosystem.config.js"))
+	if err != nil {
+		t.Fatalf("reload generated file: %v\n%s", err, got)
+	}
+	if len(cfg.Workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d\n%s", len(cfg.Workflows), got)
+	}
+	wf := cfg.Workflows[0]
+	if wf.Key() != "ci:nightly" || wf.Cron != "0 3 * * *" {
+		t.Errorf("workflow = %q cron %q, want ci:nightly at 0 3 * * *", wf.Key(), wf.Cron)
+	}
+	if len(wf.Stages) != 2 {
+		t.Fatalf("expected 2 stages, got %d\n%s", len(wf.Stages), got)
+	}
+	if want := "Local:LOCAL WORKER - WORKER"; wf.Stages[1].Task != want {
+		t.Errorf("task stage = %q, want %q", wf.Stages[1].Task, want)
+	}
+}

@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/bizshuk/pm2/process"
 )
 
 // WriteEcosystemFile merges or replaces an ecosystem file, previews the
 // result, confirms interactive writes, and persists the selected format.
-func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, opts WriteOptions) error {
+func WriteEcosystemFile(ctx WizardContext, doc Ecosystem, opts WriteOptions) error {
 	format, err := normalizeFormat(opts.Format)
 	if err != nil {
 		return err
@@ -27,9 +25,9 @@ func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, opts WriteO
 		return fmt.Errorf("stat %s: %w", output, statErr)
 	}
 
-	appsToWrite := apps
+	toWrite := doc
 	writeFormat := format
-	skipped := 0
+	var counts mergeCounts
 
 	if exists && !opts.Force {
 		if opts.NoMerge {
@@ -38,22 +36,26 @@ func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, opts WriteO
 				output,
 			)
 		}
-		existing, err := loadExistingApps(output)
+		existing, err := loadExisting(output)
 		if err != nil {
 			return fmt.Errorf("%w (use --force to overwrite a broken file)", err)
 		}
 		if detected, ok := detectFormatFromExt(output); ok {
 			writeFormat = detected
 		}
-		appsToWrite, skipped = mergeAppsByName(existing, apps)
+		toWrite, counts = mergeDocuments(existing, doc)
 	}
 
-	data, err := renderEcosystem(appsToWrite, writeFormat)
+	if err := validateDocument(toWrite); err != nil {
+		return err
+	}
+
+	data, err := renderEcosystem(toWrite, writeFormat)
 	if err != nil {
 		return err
 	}
 
-	summary := writeSummary(exists, opts.Force, len(apps), len(appsToWrite), skipped)
+	summary := writeSummary(exists, opts.Force, doc, toWrite, counts)
 	fmt.Fprintf(
 		ctx.ErrOut,
 		"\n--- preview of %s ---\n%s\n--- end preview (%s) ---\n",
@@ -61,6 +63,7 @@ func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, opts WriteO
 		data,
 		summary,
 	)
+	warnDanglingRefs(ctx.ErrOut, toWrite)
 
 	if !ctx.YesAll {
 		ok, err := promptYesNo(
@@ -86,28 +89,45 @@ func WriteEcosystemFile(ctx WizardContext, apps []process.AppConfig, opts WriteO
 	return nil
 }
 
-func renderEcosystem(apps []process.AppConfig, format string) ([]byte, error) {
+func renderEcosystem(doc Ecosystem, format string) ([]byte, error) {
 	if format == FormatJSON {
-		data, err := renderEcosystemJSON(apps)
+		data, err := renderEcosystemJSON(doc)
 		return []byte(data), err
 	}
-	return []byte(renderEcosystemJS(apps)), nil
+	return []byte(renderEcosystemJS(doc)), nil
 }
 
-func writeSummary(exists, force bool, newCount, mergedCount, skipped int) string {
+func writeSummary(exists, force bool, collected, merged Ecosystem, counts mergeCounts) string {
+	apps := fmt.Sprintf("%d app(s)", len(merged.Apps))
+	if len(merged.Workflows) > 0 {
+		apps += fmt.Sprintf(" + %d workflow(s)", len(merged.Workflows))
+	}
+
 	switch {
 	case force:
-		return fmt.Sprintf("replace with %d app(s)", mergedCount)
+		return "replace with " + apps
 	case exists:
-		existingCount := mergedCount - newCount + skipped
-		return fmt.Sprintf(
-			"merged %d existing + %d new = %d (skipped %d duplicate name(s))",
-			existingCount,
-			newCount-skipped,
-			mergedCount,
-			skipped,
+		existingApps := len(merged.Apps) - len(collected.Apps) + counts.appsSkipped
+		summary := fmt.Sprintf(
+			"merged %d existing + %d new = %d app(s) (skipped %d duplicate name(s))",
+			existingApps,
+			len(collected.Apps)-counts.appsSkipped,
+			len(merged.Apps),
+			counts.appsSkipped,
 		)
+		if len(merged.Workflows) > 0 || len(collected.Workflows) > 0 {
+			existingWorkflows := len(merged.Workflows) -
+				len(collected.Workflows) + counts.workflowsSkipped
+			summary += fmt.Sprintf(
+				"; merged %d existing + %d new = %d workflow(s) (skipped %d duplicate key(s))",
+				existingWorkflows,
+				len(collected.Workflows)-counts.workflowsSkipped,
+				len(merged.Workflows),
+				counts.workflowsSkipped,
+			)
+		}
+		return summary
 	default:
-		return fmt.Sprintf("%d app(s) to write", mergedCount)
+		return apps + " to write"
 	}
 }

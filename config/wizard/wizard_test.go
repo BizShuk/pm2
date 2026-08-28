@@ -18,7 +18,7 @@ import (
 // ---------- renderEcosystemJS ----------
 
 func TestRenderEcosystemJSEmpty(t *testing.T) {
-	out := renderEcosystemJS(nil)
+	out := renderEcosystemJS(Ecosystem{})
 	if !strings.Contains(out, "module.exports = {") {
 		t.Errorf("Expected module.exports header, got %q", out)
 	}
@@ -38,7 +38,7 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 	}
 	app.Normalize("")
 
-	got := renderEcosystemJS([]process.AppConfig{app})
+	got := renderEcosystemJS(Ecosystem{Apps: []process.AppConfig{app}})
 
 	// Spot-check key lines (don't lock the entire template to ease future tweaks).
 	mustContain := []string{
@@ -76,7 +76,7 @@ func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 		Optional:    true,
 	}
 
-	got := renderEcosystemJS([]process.AppConfig{app})
+	got := renderEcosystemJS(Ecosystem{Apps: []process.AppConfig{app}})
 
 	for _, want := range []string{
 		`name: "worker"`,
@@ -105,7 +105,7 @@ func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
 	}
 	app.Normalize("")
 
-	got := renderEcosystemJS([]process.AppConfig{app})
+	got := renderEcosystemJS(Ecosystem{Apps: []process.AppConfig{app}})
 
 	skip := []string{
 		"args:",
@@ -135,7 +135,7 @@ func TestRenderEcosystemJSON(t *testing.T) {
 	}
 	app.Normalize("")
 
-	out, err := renderEcosystemJSON([]process.AppConfig{app})
+	out, err := renderEcosystemJSON(Ecosystem{Apps: []process.AppConfig{app}})
 	if err != nil {
 		t.Fatalf("renderEcosystemJSON: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestRenderEcosystemJSONOmitsRuntimeManagedFields(t *testing.T) {
 	}
 	app.Normalize("")
 
-	out, err := renderEcosystemJSON([]process.AppConfig{app})
+	out, err := renderEcosystemJSON(Ecosystem{Apps: []process.AppConfig{app}})
 	if err != nil {
 		t.Fatalf("renderEcosystemJSON: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestRenderRoundTrip(t *testing.T) {
 			tc.apps[i].Normalize("")
 		}
 
-		js := renderEcosystemJS(tc.apps)
+		js := renderEcosystemJS(Ecosystem{Apps: tc.apps})
 		path := filepath.Join(tempDir, "eco.js")
 		if err := os.WriteFile(path, []byte(js), 0o644); err != nil {
 			t.Fatalf("%s: write: %v", tc.name, err)
@@ -292,7 +292,7 @@ func TestRenderEscapes(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	js := renderEcosystemJS([]process.AppConfig{app})
+	js := renderEcosystemJS(Ecosystem{Apps: []process.AppConfig{app}})
 	path := filepath.Join(tempDir, "eco.js")
 	if err := os.WriteFile(path, []byte(js), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -342,10 +342,11 @@ func TestCollectAnswersSingle(t *testing.T) {
 	in := strings.NewReader(strings.Join(lines, "\n") + "\n")
 	var out bytes.Buffer
 
-	apps, err := collectAnswers(in, &out)
+	doc, err := collectAnswers(in, &out)
 	if err != nil {
 		t.Fatalf("collectAnswers: %v", err)
 	}
+	apps := doc.Apps
 	if len(apps) != 1 {
 		t.Fatalf("Expected 1 app, got %d (out:\n%s)", len(apps), out.String())
 	}
@@ -399,10 +400,11 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 	}, "\n") + "\n"
 	var out bytes.Buffer
 
-	apps, err := collectAnswers(strings.NewReader(input), &out)
+	doc, err := collectAnswers(strings.NewReader(input), &out)
 	if err != nil {
 		t.Fatalf("collectAnswers: %v", err)
 	}
+	apps := doc.Apps
 	if len(apps) != 1 {
 		t.Fatalf("len(apps) = %d, want 1", len(apps))
 	}
@@ -484,10 +486,11 @@ func TestWizardChoiceMenus(t *testing.T) {
 	input := strings.Repeat("\n", 12) + "n\n"
 	var out bytes.Buffer
 
-	apps, err := collectAnswers(strings.NewReader(input), &out)
+	doc, err := collectAnswers(strings.NewReader(input), &out)
 	if err != nil {
 		t.Fatalf("collectAnswers: %v", err)
 	}
+	apps := doc.Apps
 	if len(apps) != 1 {
 		t.Fatalf("len(apps) = %d, want 1", len(apps))
 	}
@@ -582,10 +585,11 @@ func TestCollectAnswersMulti(t *testing.T) {
 	in := strings.NewReader(input + "\n")
 	var out bytes.Buffer
 
-	apps, err := collectAnswers(in, &out)
+	doc, err := collectAnswers(in, &out)
 	if err != nil {
 		t.Fatalf("collectAnswers: %v", err)
 	}
+	apps := doc.Apps
 	if len(apps) != 2 {
 		t.Fatalf("Expected 2 apps, got %d (out:\n%s)", len(apps), out.String())
 	}
@@ -677,30 +681,31 @@ func TestDeriveName(t *testing.T) {
 	}
 }
 
-// ---------- loadExistingApps ----------
+// ---------- loadExisting ----------
 
-func TestLoadExistingAppsNotFound(t *testing.T) {
+func TestLoadExistingNotFound(t *testing.T) {
 	dir := t.TempDir()
-	apps, err := loadExistingApps(filepath.Join(dir, "absent.js"))
+	existing, err := loadExisting(filepath.Join(dir, "absent.js"))
 	if err != nil {
 		t.Fatalf("expected nil err for missing file, got %v", err)
 	}
-	if apps != nil {
-		t.Errorf("expected nil apps for missing file, got %v", apps)
+	if existing.Apps != nil || existing.Workflows != nil {
+		t.Errorf("expected empty document for missing file, got %+v", existing)
 	}
 }
 
-func TestLoadExistingAppsJS(t *testing.T) {
+func TestLoadExistingJS(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.js")
 	src := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	apps, err := loadExistingApps(path)
+	existing, err := loadExisting(path)
 	if err != nil {
-		t.Fatalf("loadExistingApps: %v", err)
+		t.Fatalf("loadExisting: %v", err)
 	}
+	apps := existing.Apps
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
@@ -709,47 +714,48 @@ func TestLoadExistingAppsJS(t *testing.T) {
 	}
 }
 
-func TestLoadExistingAppsJSON(t *testing.T) {
+func TestLoadExistingJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.json")
 	src := `{ "apps": [ { "name": "worker", "script": "./w.js" } ] }`
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	apps, err := loadExistingApps(path)
+	existing, err := loadExisting(path)
 	if err != nil {
-		t.Fatalf("loadExistingApps: %v", err)
+		t.Fatalf("loadExisting: %v", err)
 	}
+	apps := existing.Apps
 	if len(apps) != 1 || apps[0].Name != "worker" {
 		t.Errorf("unexpected apps: %+v", apps)
 	}
 }
 
-func TestLoadExistingAppsMalformed(t *testing.T) {
+func TestLoadExistingMalformed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.js")
 	if err := os.WriteFile(path, []byte("module.exports = { apps: ["), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := loadExistingApps(path)
+	_, err := loadExisting(path)
 	if err == nil {
 		t.Fatal("expected error for malformed file, got nil")
 	}
 }
 
-func TestLoadExistingAppsBadExt(t *testing.T) {
+func TestLoadExistingBadExt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.txt")
 	if err := os.WriteFile(path, []byte("not a config"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := loadExistingApps(path)
+	_, err := loadExisting(path)
 	if err == nil {
 		t.Fatal("expected error for unsupported extension, got nil")
 	}
 }
 
-// ---------- mergeAppsByName ----------
+// ---------- mergeDocuments ----------
 
 func mkApp(name, script string) process.AppConfig {
 	a := process.AppConfig{Name: name, Script: script}
@@ -760,7 +766,8 @@ func mkApp(name, script string) process.AppConfig {
 func TestMergeAppsByNameNoCollision(t *testing.T) {
 	existing := []process.AppConfig{mkApp("api", "a.js"), mkApp("worker", "w.js")}
 	newApps := []process.AppConfig{mkApp("cron", "c.js")}
-	merged, skipped := mergeAppsByName(existing, newApps)
+	mergedDoc, counts := mergeDocuments(Ecosystem{Apps: existing}, Ecosystem{Apps: newApps})
+	merged, skipped := mergedDoc.Apps, counts.appsSkipped
 	if skipped != 0 {
 		t.Errorf("skipped = %d, want 0", skipped)
 	}
@@ -782,7 +789,8 @@ func TestMergeAppsByNameSkipDuplicate(t *testing.T) {
 		mkApp("worker", "different.js"),
 		mkApp("cron", "c.js"),
 	}
-	merged, skipped := mergeAppsByName(existing, newApps)
+	mergedDoc, counts := mergeDocuments(Ecosystem{Apps: existing}, Ecosystem{Apps: newApps})
+	merged, skipped := mergedDoc.Apps, counts.appsSkipped
 	if skipped != 1 {
 		t.Errorf("skipped = %d, want 1", skipped)
 	}
@@ -813,7 +821,8 @@ func TestMergeAppsByNameSkipDuplicate(t *testing.T) {
 func TestMergeAppsByNameAllDuplicates(t *testing.T) {
 	existing := []process.AppConfig{mkApp("api", "a.js")}
 	newApps := []process.AppConfig{mkApp("api", "a2.js"), mkApp("api", "a3.js")}
-	merged, skipped := mergeAppsByName(existing, newApps)
+	mergedDoc, counts := mergeDocuments(Ecosystem{Apps: existing}, Ecosystem{Apps: newApps})
+	merged, skipped := mergedDoc.Apps, counts.appsSkipped
 	if skipped != 2 {
 		t.Errorf("skipped = %d, want 2", skipped)
 	}
@@ -909,6 +918,7 @@ func TestRunInteractiveHonorsFinalWriteAnswer(t *testing.T) {
 	output := filepath.Join(dir, "ecosystem.config.js")
 	input := strings.Repeat("\n", 12) +
 		"n\n" + // add another app
+		"n\n" + // add a workflow
 		"n\n" // write to file
 	var stdout bytes.Buffer
 	ctx := WizardContext{
@@ -969,7 +979,7 @@ func TestWriteEcosystemFilePromptsToWriteToFile(t *testing.T) {
 
 	opts := DefaultWriteOptions()
 	opts.Output = output
-	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts); err != nil {
+	if err := WriteEcosystemFile(ctx, Ecosystem{Apps: []process.AppConfig{DefaultApp()}}, opts); err != nil {
 		t.Fatalf("WriteEcosystemFile: %v", err)
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
@@ -997,7 +1007,7 @@ func TestWriteEcosystemFilePreviewGoesToErrOut(t *testing.T) {
 	}
 	opts := DefaultWriteOptions()
 	opts.Output = out
-	if err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts); err != nil {
+	if err := WriteEcosystemFile(ctx, Ecosystem{Apps: []process.AppConfig{DefaultApp()}}, opts); err != nil {
 		t.Fatalf("WriteEcosystemFile: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "preview of") {
@@ -1020,7 +1030,7 @@ func TestWriteEcosystemFileNoMergeAborts(t *testing.T) {
 	}
 
 	ctx := WizardContext{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, YesAll: true}
-	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, WriteOptions{
+	err := WriteEcosystemFile(ctx, Ecosystem{Apps: []process.AppConfig{DefaultApp()}}, WriteOptions{
 		Output:  out,
 		NoMerge: true,
 	})
@@ -1044,7 +1054,7 @@ func TestWriteEcosystemFileMalformedExistingSurfacesForceHint(t *testing.T) {
 	ctx := WizardContext{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, YesAll: true}
 	opts := DefaultWriteOptions()
 	opts.Output = out
-	err := WriteEcosystemFile(ctx, []process.AppConfig{DefaultApp()}, opts)
+	err := WriteEcosystemFile(ctx, Ecosystem{Apps: []process.AppConfig{DefaultApp()}}, opts)
 	if err == nil {
 		t.Fatal("expected abort on malformed existing file")
 	}
