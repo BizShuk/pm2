@@ -56,6 +56,7 @@ func (s *Server) Listen(socketPath string) error {
 
 	s.StartMetricsCollector()
 	s.pruneHistory()
+	s.startWorkflows()
 
 	go s.startAutoResurrect()
 	go s.startAutoSave()

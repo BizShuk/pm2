@@ -14,6 +14,7 @@ import (
 
 	"github.com/bizshuk/pm2/cron"
 	"github.com/bizshuk/pm2/daemon/executor"
+	"github.com/bizshuk/pm2/daemon/wfengine"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/runhistory"
@@ -63,6 +64,7 @@ type ProcessManager struct {
 	homeDir      string
 	scheduler    *cron.Scheduler
 	history      *runhistory.Store
+	workflows    *wfengine.Engine
 	startedAt    time.Time
 	RestartDelay time.Duration
 
@@ -77,15 +79,21 @@ type ProcessManager struct {
 // manage processes. It does not bind any network listener — that is
 // the caller's responsibility (typically via Server.Listen).
 func NewProcessManager(homeDir string) *ProcessManager {
-	return &ProcessManager{
+	history := runhistory.NewStore(homeDir)
+	pm := &ProcessManager{
 		reg:          NewProcessRegistry(),
 		homeDir:      homeDir,
 		executor:     executor.NewExecutor(homeDir),
 		scheduler:    cron.New(),
-		history:      runhistory.NewStore(homeDir),
+		history:      history,
 		startedAt:    time.Now(),
 		RestartDelay: 30 * time.Second,
 	}
+	// The engine reaches back for `task:` stage definitions through
+	// TaskLookup, so it is constructed with pm rather than holding a
+	// registry reference of its own.
+	pm.workflows = wfengine.New(homeDir, pm, history)
+	return pm
 }
 
 // Lock / Unlock / RLock / RUnlock are escape-hatch delegates to the

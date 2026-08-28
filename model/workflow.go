@@ -1,6 +1,9 @@
 package model
 
-import "github.com/bizshuk/pm2/workflow"
+import (
+	"github.com/bizshuk/pm2/runhistory"
+	"github.com/bizshuk/pm2/workflow"
+)
 
 // WorkflowReq is the payload for every workflow command, mirroring how
 // App carries the payload for CmdStart.
@@ -13,6 +16,14 @@ type WorkflowReq struct {
 	RunID   string            `json:"run_id,omitempty"`
 	Wait    bool              `json:"wait,omitempty"`
 }
+
+// Trigger is always "manual" for a request that arrived over the socket.
+//
+// It is deliberately not a field: cron and webhook triggers originate
+// inside the daemon, and letting a CLI name its own trigger would let it
+// forge history. The web layer calls the manager directly and supplies
+// its own.
+func (r *WorkflowReq) Trigger() string { return runhistory.TriggerManual }
 
 // RegisterResult is the CmdWorkflowRegister payload.
 //

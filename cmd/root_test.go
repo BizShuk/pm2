@@ -186,3 +186,29 @@ func TestExecutePrintsVersionAliases(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkflowCommandTree pins the command's shape: no short alias (the
+// alias table is the product's, not a pattern to extend), a verb
+// required, and all four subcommands attached.
+func TestWorkflowCommandTree(t *testing.T) {
+	found, _, err := Cmd.Find([]string{"workflow"})
+	if err != nil || found.Name() != "workflow" {
+		t.Fatalf("pm2 workflow not registered: %v", err)
+	}
+	if len(found.Aliases) != 0 {
+		t.Errorf("pm2 workflow must have no short alias, got %v", found.Aliases)
+	}
+	if found.RunE == nil {
+		t.Fatal("bare pm2 workflow must error rather than do nothing")
+	}
+	if err := found.RunE(found, nil); err == nil {
+		t.Error("bare pm2 workflow should demand a subcommand")
+	}
+
+	for _, sub := range []string{"list", "run", "runs", "show"} {
+		cmd, _, err := Cmd.Find([]string{"workflow", sub})
+		if err != nil || cmd.Name() != sub {
+			t.Errorf("pm2 workflow %s not attached: %v", sub, err)
+		}
+	}
+}

@@ -120,6 +120,55 @@ func dispatch(req model.Request, m Manager) model.Response {
 		m.KillAll()
 		return model.Response{OK: true}
 
+	case model.CmdWorkflowRegister:
+		if req.Workflow == nil {
+			return model.Response{Error: "missing workflow payload"}
+		}
+		registered, warnings, err := m.RegisterWorkflows(req.Workflow.Configs)
+		if err != nil {
+			return model.Response{Error: err.Error()}
+		}
+		payload, _ := json.Marshal(model.RegisterResult{Registered: registered, Warnings: warnings})
+		return model.Response{OK: true, Payload: payload}
+
+	case model.CmdWorkflowList:
+		payload, _ := json.Marshal(m.ListWorkflows())
+		return model.Response{OK: true, Payload: payload}
+
+	case model.CmdWorkflowRun:
+		if req.Workflow == nil {
+			return model.Response{Error: "missing workflow payload"}
+		}
+		// With Wait set this holds the connection open for the whole
+		// run, which can be hours. That is safe — Serve handles each
+		// connection on its own goroutine and SendRequest's read is
+		// already unbounded — but do not add a read deadline here, or
+		// long workflows will be silently capped by it.
+		run, err := m.RunWorkflow(req.Workflow.Ref, req.Workflow.Trigger(), req.Workflow.Wait)
+		if err != nil {
+			return model.Response{Error: err.Error()}
+		}
+		payload, _ := json.Marshal(run)
+		return model.Response{OK: true, Payload: payload}
+
+	case model.CmdWorkflowDelete:
+		if req.Workflow == nil {
+			return model.Response{Error: "missing workflow payload"}
+		}
+		if err := m.DeleteWorkflow(req.Workflow.Ref); err != nil {
+			return model.Response{Error: err.Error()}
+		}
+		return model.Response{OK: true}
+
+	case model.CmdWorkflowStop:
+		if req.Workflow == nil {
+			return model.Response{Error: "missing workflow payload"}
+		}
+		if err := m.StopWorkflowRun(req.Workflow.RunID); err != nil {
+			return model.Response{Error: err.Error()}
+		}
+		return model.Response{OK: true}
+
 	default:
 		return model.Response{Error: fmt.Sprintf("unknown command: %s", req.Command)}
 	}

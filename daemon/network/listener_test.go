@@ -10,6 +10,7 @@ import (
 
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/workflow"
 )
 
 // pingManager is the smallest Manager that answers CmdPing, which is
@@ -30,6 +31,16 @@ func (pingManager) Resurrect() error               { return nil }
 func (pingManager) KillAll()                       {}
 func (pingManager) Ping()                          {}
 func (pingManager) Status() process.DaemonInfo     { return process.DaemonInfo{} }
+
+func (pingManager) RegisterWorkflows(_ []workflow.Config) ([]string, []string, error) {
+	return nil, nil, nil
+}
+func (pingManager) ListWorkflows() []workflow.Status { return nil }
+func (pingManager) RunWorkflow(_, _ string, _ bool) (workflow.Run, error) {
+	return workflow.Run{}, nil
+}
+func (pingManager) DeleteWorkflow(_ string) error  { return nil }
+func (pingManager) StopWorkflowRun(_ string) error { return nil }
 
 // TestListenRefusesSecondDaemon is the regression guard for the
 // split-brain bug: two daemons ran against one ~/.pm2 because Listen

@@ -3,6 +3,7 @@ package task
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/bizshuk/pm2/config"
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -93,6 +95,7 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if runDeleteAll {
+		deleteEcosystemWorkflows(cfg.Workflows, cmd.OutOrStdout())
 		return deleteEcosystemApps(cfg.Apps, cmd.OutOrStdout())
 	}
 	if err := validateSelectionFlags(runSingle, runAll, runWith); err != nil {
@@ -167,6 +170,58 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	}
+
+	// Workflows are registered after the apps, for two reasons: a
+	// `task:` stage resolves against a registry that already holds them,
+	// and the dangling-reference warnings are therefore accurate.
+	//
+	// --single is skipped deliberately: the user asked for one app, not
+	// for the file's whole workflow graph.
+	if !runSingle {
+		if err := registerWorkflows(cfg.Workflows, cmd.OutOrStdout()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// registerWorkflows sends the file's workflow definitions to the daemon
+// and prints back any non-fatal warnings.
+func registerWorkflows(workflows []workflow.Config, out io.Writer) error {
+	if len(workflows) == 0 {
+		return nil
+	}
+
+	// The CLI environment snapshot travels with the definition for the
+	// same reason it does for an app: without it a stage script runs
+	// with the daemon's minimal PATH instead of the user's.
+	baseEnv := os.Environ()
+	for i := range workflows {
+		workflows[i].BaseEnv = baseEnv
+	}
+
+	client := cliruntime.NewCLIClient(cliruntime.SocketPath())
+	resp, err := client.Send(model.Request{
+		Command:  model.CmdWorkflowRegister,
+		Workflow: &model.WorkflowReq{Configs: workflows},
+	})
+	if err != nil {
+		return err
+	}
+	if !resp.OK {
+		return fmt.Errorf("daemon error: %s", resp.Error)
+	}
+
+	var result model.RegisterResult
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		return fmt.Errorf("decode workflow registration: %w", err)
+	}
+	for _, key := range result.Registered {
+		fmt.Fprintf(out, "workflow %s registered\n", key)
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "pm2: %s\n", warning)
 	}
 	return nil
 }

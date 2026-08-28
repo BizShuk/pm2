@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/runhistory"
+	"github.com/bizshuk/pm2/workflow"
 )
 
 const daemonStopMarkerFile = "daemon.stopped"
@@ -67,6 +69,23 @@ func TaskLogsDir() string {
 // one is written by pm2, the others by the programs pm2 supervises.
 func DaemonLogsDir() string {
 	return filepath.Join(pm2Home(), "logs")
+}
+
+// WorkflowsDir returns ~/.config/pm2/workflows, holding the registered
+// workflow definitions and every run's per-stage logs.
+func WorkflowsDir() string {
+	return workflow.Dir(pm2Home())
+}
+
+// RunHistoryStore opens the run journals for reading.
+//
+// `pm2 workflow runs` and `pm2 workflow show` read them directly rather
+// than asking the daemon, for the same reason `pm2 logs monitor` reads
+// the filesystem: making something happen needs the daemon, but what
+// already happened is a file. History therefore survives the daemon
+// being down and outlives the workflow that produced it.
+func RunHistoryStore() *runhistory.Store {
+	return runhistory.NewStore(pm2Home())
 }
 
 // DaemonStopMarkerPath returns the durable marker that disables silent

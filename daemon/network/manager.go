@@ -14,6 +14,7 @@ package network
 import (
 	"github.com/bizshuk/pm2/model"
 	"github.com/bizshuk/pm2/process"
+	"github.com/bizshuk/pm2/workflow"
 )
 
 // Manager is the surface the RPC dispatcher needs from the daemon
@@ -63,4 +64,23 @@ type Manager interface {
 	// CmdStatus — daemon identity + light runtime snapshot (PID,
 	// started_at, version, home_dir, process_count)
 	Status() process.DaemonInfo
+
+	// CmdWorkflowRegister — upsert workflow definitions. Returns the
+	// keys registered plus non-fatal warnings (a stage referencing a
+	// workflow not registered yet, a cron expression the scheduler
+	// rejected). A declared cycle is an error and rejects the batch.
+	RegisterWorkflows(cfgs []workflow.Config) ([]string, []string, error)
+
+	// CmdWorkflowList — declared workflows plus their latest outcome
+	ListWorkflows() []workflow.Status
+
+	// CmdWorkflowRun — trigger one run. wait blocks until terminal.
+	RunWorkflow(ref, trigger string, wait bool) (workflow.Run, error)
+
+	// CmdWorkflowDelete — unregister and disarm. Does not cancel a run
+	// in flight (that is CmdWorkflowStop) and does not touch history.
+	DeleteWorkflow(ref string) error
+
+	// CmdWorkflowStop — cancel one run in flight by ID
+	StopWorkflowRun(runID string) error
 }
