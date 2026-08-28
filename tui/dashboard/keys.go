@@ -46,9 +46,11 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "home", "g":
 		m.selected = 0
+		m.rememberSelection()
 
 	case "end", "G":
 		m.selected = max(0, m.rowCount()-1)
+		m.rememberSelection()
 
 	case "a":
 		// Toggling scope resets the cursor: row 3 of the pm2 task list and
@@ -56,11 +58,12 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// and carrying the index over would look like a random jump.
 		m.scope = m.otherScope()
 		m.selected = 0
+		m.rememberSelection()
 
 	case "s":
 		m.cycleSort()
 		m.applySort()
-		m.clampSelection()
+		m.restoreSelection()
 
 	case "d":
 		// Arm the confirmation rather than acting: the same keystroke
@@ -79,6 +82,7 @@ func (m Model) handleKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) move(delta int) {
 	m.selected += delta
 	m.clampSelection()
+	m.rememberSelection()
 }
 
 func (m Model) otherScope() Scope {

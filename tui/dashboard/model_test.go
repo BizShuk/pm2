@@ -350,3 +350,106 @@ func TestNarrowTerminalDegradesGracefully(t *testing.T) {
 		t.Errorf("frame = %q, want the narrow-terminal notice", frame)
 	}
 }
+
+// advance feeds one more collection into a loaded model, the way the
+// refresh tick does.
+func advance(t *testing.T, model Model, observation sysmon.Observation) Model {
+	t.Helper()
+	next, _ := model.Update(observationMsg{observation: observation})
+	updated, ok := next.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want dashboard.Model", next)
+	}
+	return updated
+}
+
+// The list is re-ranked on every collection, so a cursor that is only a
+// row number silently changes subject underneath a reader.
+func TestSelectionFollowsProcessAcrossReRank(t *testing.T) {
+	model := press(t, press(t, loaded(t), "a"), "j") // system scope, second row
+	want := model.ranked[model.selected].PID
+
+	demoted := observationFixture()
+	for i := range demoted.Procs {
+		if demoted.Procs[i].PID == want {
+			demoted.Procs[i].CPUPercent = 0 // now the least busy process
+		}
+	}
+	model = advance(t, model, demoted)
+
+	if got := model.ranked[model.selected].PID; got != want {
+		t.Errorf("selected pid = %d after re-rank, want %d", got, want)
+	}
+	if model.selected != len(model.ranked)-1 {
+		t.Errorf("selected row = %d, want the last row %d", model.selected, len(model.ranked)-1)
+	}
+}
+
+func TestSelectionFollowsTaskAcrossReRank(t *testing.T) {
+	model := press(t, loaded(t), "j")
+	want := model.observation.Snapshot.Tasks[model.selected].Name
+
+	promoted := observationFixture()
+	for i := range promoted.Snapshot.Tasks {
+		if promoted.Snapshot.Tasks[i].Name == want {
+			promoted.Snapshot.Tasks[i].TreeCPUPercent = 99 // now the busiest task
+		}
+	}
+	model = advance(t, model, promoted)
+
+	if got := model.observation.Snapshot.Tasks[model.selected].Name; got != want {
+		t.Errorf("selected task = %q after re-rank, want %q", got, want)
+	}
+}
+
+// Cycling the sort order re-ranks too, and the row the user was reading
+// is exactly the one they want to keep looking at.
+func TestSortCycleKeepsTheSelectedTask(t *testing.T) {
+	model := press(t, loaded(t), "j")
+	want := model.observation.Snapshot.Tasks[model.selected].Name
+
+	model = press(t, model, "s")
+
+	if got := model.observation.Snapshot.Tasks[model.selected].Name; got != want {
+		t.Errorf("selected task = %q after sort cycle, want %q", got, want)
+	}
+}
+
+// A subject that exits leaves the cursor where it is on screen rather
+// than throwing it back to the top of the list.
+func TestSelectionFallsBackWhenSubjectDisappears(t *testing.T) {
+	model := press(t, press(t, loaded(t), "a"), "j")
+	gone := model.ranked[model.selected].PID
+
+	shrunk := observationFixture()
+	remaining := shrunk.Procs[:0]
+	for _, proc := range shrunk.Procs {
+		if proc.PID != gone {
+			remaining = append(remaining, proc)
+		}
+	}
+	shrunk.Procs = remaining
+	model = advance(t, model, shrunk)
+
+	if model.selected != 1 {
+		t.Errorf("selected row = %d after the subject exited, want 1", model.selected)
+	}
+}
+
+func TestRefreshDelayHonoursIntervalAndFloor(t *testing.T) {
+	model := New("/tmp/does-not-exist.sock")
+	if model.Interval != DefaultInterval {
+		t.Errorf("Interval = %s, want %s", model.Interval, DefaultInterval)
+	}
+
+	model.Interval = 5 * time.Second
+	if got := model.refreshDelay(); got != 5*time.Second {
+		t.Errorf("refreshDelay = %s, want 5s", got)
+	}
+
+	// Below the floor a collection would queue behind the previous one.
+	model.Interval = 100 * time.Millisecond
+	if got := model.refreshDelay(); got != DefaultInterval {
+		t.Errorf("refreshDelay = %s for a sub-second interval, want %s", got, DefaultInterval)
+	}
+}

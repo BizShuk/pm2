@@ -17,11 +17,22 @@ import (
 	"github.com/bizshuk/pm2/tui/views"
 )
 
-// refreshDelay is the pause between the end of one collection and the
+// DefaultInterval is the pause between the end of one collection and the
 // start of the next, not a fixed period. A darwin sample already blocks
 // for a second inside iostat, so re-arming on completion keeps the
 // cadence honest instead of queueing ticks behind a slow sampler.
-const refreshDelay = time.Second
+//
+// It is deliberately long. Every sample re-ranks the list, so a fast
+// cadence means rows sliding past a reader who is trying to read one of
+// them; the cursor is anchored to its subject for the same reason. A
+// shorter period is available through Interval when the question is
+// "what is spiking right now" rather than "what is this machine doing".
+const DefaultInterval = 30 * time.Second
+
+// MinInterval floors the configurable period. A darwin collection blocks
+// for about a second inside iostat, so anything below this queues the
+// next pass behind the one still running.
+const MinInterval = time.Second
 
 // actionTTL is how long the result of a kill/stop stays on the footer.
 // Long enough to read after a keystroke, short enough that it cannot be
@@ -49,6 +60,10 @@ const (
 
 // Model is the Bubble Tea model behind `pm2 dashboard`.
 type Model struct {
+	// Interval is the pause between collections. Set it before handing
+	// the model to Bubble Tea; zero means DefaultInterval.
+	Interval time.Duration
+
 	socket    string
 	collector *sysmon.Collector
 
@@ -63,6 +78,13 @@ type Model struct {
 	updated  time.Time
 	notice   string
 
+	// anchorPID / anchorTask identify the highlighted subject rather than
+	// its row number. Every collection re-ranks the list, so an index
+	// alone would leave the cursor — and the detail pane under it — on
+	// whichever process happened to inherit that position.
+	anchorPID  int
+	anchorTask string
+
 	confirm  *killTarget // pending `d` confirmation, nil when none
 	action   string      // result of the last kill/stop
 	actionAt time.Time
@@ -74,6 +96,7 @@ type Model struct {
 // monitor.
 func New(socket string) Model {
 	return Model{
+		Interval:  DefaultInterval,
 		socket:    socket,
 		collector: sysmon.New(),
 		scope:     ScopeTasks,
@@ -98,8 +121,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = message.notice
 		m.expireAction()
 		m.applySort()
-		m.clampSelection()
-		return m, tea.Tick(refreshDelay, func(t time.Time) tea.Msg { return tickMsg(t) })
+		m.restoreSelection()
+		return m, tea.Tick(m.refreshDelay(), func(t time.Time) tea.Msg { return tickMsg(t) })
 
 	case killResultMsg:
 		m.action, m.actionAt = message.notice, time.Now()
@@ -153,6 +176,55 @@ func (m *Model) applySort() {
 		return ranked[i].PID < ranked[j].PID
 	})
 	m.ranked = ranked
+}
+
+// refreshDelay clamps the configured period to something a collection
+// can actually keep up with.
+func (m Model) refreshDelay() time.Duration {
+	if m.Interval < MinInterval {
+		return DefaultInterval
+	}
+	return m.Interval
+}
+
+// rememberSelection records what the cursor is pointing at, so the next
+// re-ranking can put it back on the same subject.
+func (m *Model) rememberSelection() {
+	m.anchorPID, m.anchorTask = 0, ""
+	if m.scope == ScopeSystem {
+		if m.selected >= 0 && m.selected < len(m.ranked) {
+			m.anchorPID = m.ranked[m.selected].PID
+		}
+		return
+	}
+	tasks := m.observation.Snapshot.Tasks
+	if m.selected >= 0 && m.selected < len(tasks) {
+		m.anchorTask = tasks[m.selected].Name
+	}
+}
+
+// restoreSelection re-finds the anchored subject after a re-rank. A
+// subject that has gone away falls back to the clamped row index: the
+// cursor stays where it is on screen rather than jumping to the top,
+// which is what a reader expects when a neighbouring process exits.
+func (m *Model) restoreSelection() {
+	switch {
+	case m.scope == ScopeSystem && m.anchorPID != 0:
+		for i, proc := range m.ranked {
+			if proc.PID == m.anchorPID {
+				m.selected = i
+				return
+			}
+		}
+	case m.scope == ScopeTasks && m.anchorTask != "":
+		for i, task := range m.observation.Snapshot.Tasks {
+			if task.Name == m.anchorTask {
+				m.selected = i
+				return
+			}
+		}
+	}
+	m.clampSelection()
 }
 
 // rowCount is the number of selectable rows in the active scope.

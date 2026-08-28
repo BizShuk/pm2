@@ -1016,6 +1016,22 @@ execs the real worker shows near-zero usage on its own row, so `Task.Tree*`
 sums the task with every descendant, and `Ports` is collected across the
 whole tree — the listening socket almost always belongs to a child.
 
+The list is re-ranked on every pass, so two things keep it readable
+rather than a slideshow:
+
+- **The cursor is anchored to its subject, not to a row number.** A PID
+  in system scope, a task name in task scope. Without it, a row that
+  slid one place between samples took the detail pane with it and the
+  user was reading a different process than the one they picked; a
+  subject that exits falls back to the same row index rather than
+  jumping the cursor to the top (regression tests:
+  `TestSelectionFollowsProcessAcrossReRank`,
+  `TestSelectionFallsBackWhenSubjectDisappears`).
+- **The default cadence is 30 s** (`dashboard.DefaultInterval`), set by
+  `--interval` and floored at `MinInterval` — a darwin collection blocks
+  about a second inside `iostat`, so a shorter period only queues passes
+  behind each other. It is a delay between passes, never a fixed period.
+
 One collection pass feeds every pane (`Collector.Observe`): the host panel,
 the task list and the detail pane must describe the same instant, and
 separate tickers would put a task's CPU from one second beside the machine's
