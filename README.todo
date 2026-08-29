@@ -193,5 +193,3 @@
 - [x] analyze pre-existing race — server.go:499 的 return mp.Info 與 watchProcess 在鎖內的 mp.Info.Restarts++ 競爭，建議另開 todo 處理（解法：在持鎖下做一次值 copy 再回傳、或把 watchProcess 改為 channel 通知而非共享 struct 寫入）。 @2026-07-06_20:06:36 @Completed
 - [x] pasued cron job is not resurrect @2026-07-06_20:06:34 @Completed
 - [x] implmenet daemon start and combine kill into daemon kill @2026-07-06_20:06:32 @Completed
-- [ ] `擴充性介面契約 (Extensibility Interface Contracts)` — 來源 `docs/specs/architecture-pm2.md` 第 5 節
-    - `daemon.Logger` 與 `daemon.MetricsCollector` 介面尚未落地（解耦重構本體已完成，此為未來擴充點的預留設計，非必要）。
