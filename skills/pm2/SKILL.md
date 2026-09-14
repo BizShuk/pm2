@@ -150,6 +150,14 @@ or more applications. Relative `script` paths resolve against the config
 file's directory. When `cwd` is omitted, that directory also becomes the
 task's working directory.
 
+### Task Documentation Convention
+
+Every task declared under `apps:` MUST include a one-line comment directly above
+its object declaration explaining its purpose or what it does (e.g.
+`// Long-running LLM proxy service routing incoming requests.`). When authoring,
+modifying, or generating ecosystem configurations, ensure each task has this
+one-line explanation.
+
 ### User-Facing AppConfig Fields
 
 | Field          | Type     | Default                           | Description                                           |
@@ -184,6 +192,7 @@ not ecosystem choices. The wizard neither prompts for nor emits them.
 #### Pattern 1 — Long-running daemon (always-on service)
 
 ```javascript
+// Long-running LLM proxy service routing incoming requests.
 {
     name: "LLM Proxy",
     namespace: "Service",
@@ -198,6 +207,7 @@ Start and forget. pm2 auto-restarts on crash up to `max_restarts`.
 #### Pattern 2 — One-shot cron task (daily scan)
 
 ```javascript
+// Daily disk usage analysis scan executed at 06:00.
 {
     name: "Disk Analysis Daily",
     namespace: "Local",
@@ -212,6 +222,7 @@ Runs once at 06:00 daily, exits, waits for the next schedule. Use `pm2 task paus
 #### Pattern 3 — Shell script with weekly schedule
 
 ```javascript
+// Weekly launch audit script executed every Friday at 05:00.
 {
     name: "Launch Audit",
     namespace: "Local",
@@ -222,13 +233,14 @@ Runs once at 06:00 daily, exits, waits for the next schedule. Use `pm2 task paus
 
 Relative paths resolve against the ecosystem config file's directory, not the CWD.
 
-#### Pattern 4 — AI agent planner with `__dirname`
+#### Pattern 4 — AI agent planner on a schedule
 
 ```javascript
+// Scheduled AI system-planner agent running hourly from 00:00 to 09:00.
 {
     name: "agy-system-planner",
     script: "agy",
-    args: ["--add-dir", __dirname, "-p", "run /system-planner for current workspace"],
+    args: ["--add-dir", "/Users/me/projects/example", "-p", "run /system-planner for current workspace"],
     namespace: "planner",
     instances: 1,
     cron: "10 0-9 * * *",
@@ -236,12 +248,13 @@ Relative paths resolve against the ecosystem config file's directory, not the CW
 }
 ```
 
-`__dirname` is available in `.js` configs through the embedded goja runtime.
+Paths must be written literally or relative to the config file (goja provides no `__dirname`).
 The task remains idle between `cron` fires.
 
 #### Pattern 5 — CLI tool with arguments (Go binary via `$PATH`)
 
 ```javascript
+// Weekly Go build cache cleanup running every Friday at 10:00.
 {
     name: "Golang Clean Cache",
     namespace: "Local",
@@ -256,6 +269,7 @@ Bare command names are resolved via `$PATH`. No path prefix needed for globally-
 #### Pattern 6 — Always-on service with arguments
 
 ```javascript
+// Local Ollama LLM server instance running as a background service.
 {
     name: "Ollama",
     script: "ollama",
@@ -270,6 +284,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 #### Pattern 7 — Node.js app with env + `cron_restart`
 
 ```javascript
+// Node.js API server cluster running 3 instances with daily 04:00 memory-reset restart.
 {
     name: "api-server",
     namespace: "Service",
@@ -285,6 +300,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 #### Pattern 8 — File watcher (restart on source changes)
 
 ```javascript
+// Local development server with auto-restart on file changes.
 {
     name: "dev-server",
     namespace: "Local",
@@ -299,6 +315,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 #### Pattern 9 — Custom working directory
 
 ```javascript
+// Scheduled AI system-planner agent running hourly in a custom working directory.
 {
     name: "agy-gosdk-system",
     script: "agy",
@@ -317,6 +334,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 ```javascript
 {
     apps: [
+        // Clean Go build cache every Friday at 10:00.
         {
             name: "Golang Clean Cache",
             namespace: "Local",
@@ -324,6 +342,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
             args: ["clean", "-cache"],
             cron: "0 10 * * 5"
         },
+        // Clean Go module download cache every Friday at 10:00.
         {
             name: "Golang Clean ModCache",
             namespace: "Local",
@@ -405,6 +424,7 @@ that only ever runs as part of a workflow.
 ```javascript
 module.exports = {
     apps: [
+        // Run unit test suite once on demand as a workflow stage.
         { name: "unit-tests", script: "./scripts/test.sh", optional: true }
     ],
     workflows: [
@@ -415,15 +435,21 @@ module.exports = {
             timeout: "30m",
             env: { CI: "1" },
             stages: [
+                // Inline command to fast-forward pull the latest code
                 { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
+                // Run registered task once without supervisor restart or schedule
                 { name: "test", task: "unit-tests" },
+                // Run deployment workflow inline and wait for it
                 { name: "ship", workflow: "ci:deploy" }
             ]
         },
         {
             name: "deploy",
             category: "ci",
-            stages: [{ name: "push", script: "./scripts/push.sh" }]
+            stages: [
+                // Deploy application release artifacts
+                { name: "push", script: "./scripts/push.sh" }
+            ]
         }
     ]
 };
@@ -647,7 +673,9 @@ report) and tasks a given machine may not want (a planner agent).
 ```javascript
 module.exports = {
     apps: [
+        // Daily report generator running at 09:00.
         { name: "daily-report", script: "./report.sh", cron: "0 9 * * *" },
+        // Optional AI planner agent registered paused by default.
         { name: "planner", script: "./planner.sh", optional: true }
     ]
 };
@@ -668,6 +696,7 @@ active, and cannot be combined with `--all` or `--with`.
 
 ## Common Mistakes
 
+- Omitting the required one-line comment explaining the purpose of each task defined under `apps:` in an ecosystem file.
 - Using `pm2 start ecosystem.config.js`. Root `pm2 start` starts the daemon;
   use `pm2 task start` or `pm2 apply` for ecosystem files.
 - Calling removed root task verbs such as `pm2 restart` or `pm2 pause`. Put

@@ -58,6 +58,7 @@
 // ─── Conventions ───────────────────────────────────────────────────
 //
 //   - One ecosystem.config.js per repo root.
+//   - Each task under `apps` MUST have a one-line comment explaining its purpose.
 //   - Use `namespace` to group by concern: "Service", "Local", "Agent", "planner".
 //   - For one-shot cron tasks: set `cron` (not `cron_restart`).
 //   - For long-running daemons that restart on a schedule: set `cron_restart`.
@@ -71,6 +72,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Pattern 1: Long-running daemon (always-on service)
         // ──────────────────────────────────────────────────────────
+        // Long-running LLM proxy service routing incoming requests.
         {
             name: "LLM Proxy",
             namespace: "Service",
@@ -87,6 +89,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // `cron` fires the script once per schedule; the process
         // exits naturally after each run.
+        // Daily disk usage analysis scan executed at 06:00.
         {
             name: "Disk Analysis Daily",
             namespace: "Local",
@@ -99,6 +102,7 @@ module.exports = {
         // Pattern 3: Shell script with weekly schedule
         // ──────────────────────────────────────────────────────────
         // Relative paths resolve against this config file's directory.
+        // Weekly launch audit script executed every Friday at 05:00.
         {
             name: "Launch Audit",
             namespace: "Local",
@@ -110,6 +114,7 @@ module.exports = {
         // Pattern 4: AI agent planner on a schedule
         // ──────────────────────────────────────────────────────────
         // Note the literal path: goja provides no __dirname.
+        // Scheduled AI system-planner agent running hourly from 00:00 to 09:00.
         {
             name: "agy-system-planner",
             script: "agy",
@@ -129,6 +134,7 @@ module.exports = {
         // Pattern 5: CLI tool with arguments (Go binary)
         // ──────────────────────────────────────────────────────────
         // Bare command names are resolved via $PATH.
+        // Weekly Go build cache cleanup running every Friday at 10:00.
         {
             name: "Golang Clean Cache",
             namespace: "Local",
@@ -140,6 +146,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Pattern 6: Always-on service with custom working directory
         // ──────────────────────────────────────────────────────────
+        // Local Ollama LLM server instance running as a background service.
         {
             name: "Ollama",
             script: "ollama",
@@ -154,6 +161,7 @@ module.exports = {
         // `cron_restart` restarts a long-running process on schedule
         // (e.g., daily memory reset). The process stays online
         // between restarts.
+        // Node.js API server cluster running 3 instances with daily 04:00 memory-reset restart.
         {
             name: "api-server",
             namespace: "Service",
@@ -169,6 +177,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Pattern 8: File watcher (restart on source changes)
         // ──────────────────────────────────────────────────────────
+        // Local development server with auto-restart on source file changes.
         {
             name: "dev-server",
             namespace: "Local",
@@ -196,11 +205,11 @@ module.exports = {
             timeout: "30m",
             env: { CI: "1" },
             stages: [
-                // inline command
+                // Inline command to fast-forward pull the latest code
                 { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
-                // run a registered task once — no restart, no schedule
+                // Run registered task once without supervisor restart or schedule
                 { name: "test", task: "Disk Analysis Daily" },
-                // run another workflow inline and wait for it
+                // Run deployment workflow inline and wait for it
                 { name: "ship", workflow: "ci:deploy" }
             ]
         },
@@ -217,7 +226,9 @@ module.exports = {
             category: "ci",
             cwd: "/srv/app",
             stages: [
+                // Build application assets with a 10-minute timeout ceiling
                 { name: "build",  script: "./scripts/build.sh", timeout: "10m" },
+                // Deploy application release artifacts
                 { name: "release", script: "./scripts/release.sh" }
             ]
         }
