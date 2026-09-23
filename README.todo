@@ -4,6 +4,13 @@
 
 ## Architecture
 
+- [ ] [P1] `pm2-event-stream`: 以 CloudEvents JSON 建立唯讀事件面，提供 process / cron lifecycle 的 recent + incremental subscription，以及 offset-based log recent + follow。 @2026-07-23 @Architecture
+    - 計畫：[plans/2026-07-23-pm2-event-stream.md](./plans/2026-07-23-pm2-event-stream.md)
+    - 邊界：既有 `pm2.sock` 保持控制面；新增 `~/.pm2/events.sock`，slow consumer 與 log burst 不得阻塞 process control。
+    - 首個 consumer：msgHub `@msgHub/channel-pm2`；PM2 不反向依賴 msgHub。
+
+## Archive
+
 - [x] [P1] `pm2-workflow`: 把 pm2 從 task management 擴充成 workflow management——
   `workflows:` 線性編排、兩本 append-only 執行歷史帳本、以及對外的網頁儀表與
   webhook。 @2026-08-28 @Completed @Architecture
@@ -26,12 +33,6 @@
     - 未處理（沿用既有缺口）：`CmdKill` 的 `os.Exit(0)` 仍在 network handler 內，
       event-stream 計畫 §2.2 第 6 項的 coordinator 收回尚未做；daemon 至今沒有
       SIGTERM handler。
-
-- [ ] [P1] `pm2-event-stream`: 以 CloudEvents JSON 建立唯讀事件面，提供 process / cron lifecycle 的 recent + incremental subscription，以及 offset-based log recent + follow。 @2026-07-23 @Architecture
-    - 計畫：[plans/2026-07-23-pm2-event-stream.md](./plans/2026-07-23-pm2-event-stream.md)
-    - 邊界：既有 `pm2.sock` 保持控制面；新增 `~/.pm2/events.sock`，slow consumer 與 log burst 不得阻塞 process control。
-    - 首個 consumer：msgHub `@msgHub/channel-pm2`；PM2 不反向依賴 msgHub。
-
 - [x] `test-direct-info-read-fix`: 修正 `daemon/server_test.go` 79 處直接 `mp.Info.*` 讀取違反 CLAUDE.md §Conventions 問題，並新增 `ProcessRegistry.SnapshotOne` API 提供安全的值副本讀取。 @2026-07-10 @Completed @Architecture
     - 來源：[docs/specs/2026-07-10-test-direct-info-read-fix.md](./docs/specs/2026-07-10-test-direct-info-read-fix.md)
     - 目標：消除 `go test -race -count=3 ./...` 中必觸發的 race warning（`TestPauseResumeRunningProcess` 在 `daemon/server_test.go:1648` 直接讀 `mp.Info.PID` 與 `onProcessExit` 寫 `PID=0` 競爭）。
@@ -39,7 +40,6 @@
     - 結果（2026-07-10）：`daemon/process_registry.go` 新增 `SnapshotOne` 方法（`Get` 之後，RLock 下回傳 `mp.Info` 值副本，缺席回 `(zero, false)`），doc comment 點明其為 `UpdateInfo` 的讀側對應、CLAUDE.md §Conventions 認可的讀取路徑。`daemon/process_registry_test.go` 新增 `TestRegistrySnapshotOne`：涵蓋缺席 key、值副本隔離 live mutation、`BaseEnv` slice / `Env` map 深拷貝、並發讀寫 1000×1000 `-race` 通過。`daemon/server_test.go` 79 處 `mp.Info.*` 直接讀取全數替換：Category A（單純讀快照）改 `pm.reg.SnapshotOne(key)`，Category B（pause/resume 需與 `onProcessExit` 背景 goroutine 同步）改 `pm.reg.UpdateInfo(key, fn)` 閉包讀取；`TestFindProcesses` / `TestKillAllStopsEveryProcess` / `TestHighConcurrencyStartup` 改走 `Snapshot()` 值副本迭代。新增測試 helper `pauseState(pm, key)` 原子讀 `(Status, paused)` 供 pause/resume 測試使用。`TestRefreshMetricsSkipsRestartedProcess` 的 stub 由 `pm.RLock()` 下裸寫 `mp.Info.PID` 改為 `UpdateInfo`（寫側亦合規）。CLAUDE.md §Conventions 加註「讀取亦同」段落並把 `SnapshotOne` 列入高階方法清單。`go test -race -count=3 ./...`（cmd/config/daemon/tui/model 全部）全綠，無任何 race warning；`go list -deps ./daemon` 無新增 import cycle。
     - 工時：0.5 天。
     - 觸發時機：CI 引入 `go test -race -count=3 ./...` 之前。
-
 - [x] [P1] `system-activity-dashboard`: 把 `dashboard` 從 `monitor` 的 alias 改成獨立的
   system activity monitor，並新增週期性完整快照輸出。 @2026-08-03 @Completed @Architecture
     - 目標：`pm2 dashboard` 回答「這台機器在做什麼、哪一部分是我的」——host CPU /
@@ -60,13 +60,6 @@
     - 後續可考慮：`pm2 dashboard` 的 emit 與 `plans/2026-07-23-pm2-event-stream.md`
       的 CloudEvents envelope 對齊（目前 snapshot 是狀態不是 occurrence，刻意不包成
       CloudEvent，與該計畫 §4.6 一致）。
-
-## Bug
-
-## Wizard
-
-## Daemon
-
 - [x] [P1] `log-streaming-navigation`: 為 managed CLI output 加入 timestamp、
   daily rotation、channel streaming API 與可確認刪除檔案的 Interactive
   Tree Explorer。 @2026-07-30 @Completed @Daemon
@@ -94,8 +87,6 @@
       partial-line buffering、cancellation 與 stdout/stderr routing。既有
       Custom Unix socket PTY smoke 已驗證 file open、PageUp/PageDown、
       Left back、`n` 保留與 `y` 刪除。
-
-## Archive
 
 - [x] [P1] `architecture-manager-decoupling`: 將進程管理的核心協調與控制邏輯從 `daemon.Server` 中解耦，抽離成獨立的 `ProcessManager` 結構體。 @2026-07-08_23:39:42 @Completed @Architecture
     - 來源：[plans/architecture-manager-decoupling.md](./plans/architecture-manager-decoupling.md)
