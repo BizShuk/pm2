@@ -1,6 +1,8 @@
 ---
 name: pm2
 description: Use when managing background processes, daemon lifecycle, cron schedules, ecosystem files, logs, saved process state, or PM2 application configuration through the pm2 command-line tool.
+metadata:
+    source: https://github.com/BizShuk/pm2
 ---
 
 # pm2 Commands
