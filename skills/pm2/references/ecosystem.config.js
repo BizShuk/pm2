@@ -74,7 +74,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Long-running LLM proxy service routing incoming requests.
         {
-            name: "LLM Proxy",
+            name: "LLM Proxy - Always",
             namespace: "Service",
             script: "proxy",
             instances: 1,
@@ -91,7 +91,7 @@ module.exports = {
         // exits naturally after each run.
         // Daily disk usage analysis scan executed at 06:00.
         {
-            name: "Disk Analysis Daily",
+            name: "Disk Analysis - Daily",
             namespace: "Local",
             script: "dux",
             args: ["scan"],
@@ -104,7 +104,7 @@ module.exports = {
         // Relative paths resolve against this config file's directory.
         // Weekly launch audit script executed every Friday at 05:00.
         {
-            name: "Launch Audit",
+            name: "Launch Audit - Weekly",
             namespace: "Local",
             script: "./bin/mac/launch_audit-mac.sh",
             cron: "0 5 * * 5"
@@ -116,7 +116,7 @@ module.exports = {
         // Note the literal path: goja provides no __dirname.
         // Scheduled AI system-planner agent running hourly from 00:00 to 09:00.
         {
-            name: "agy-system-planner",
+            name: "System Planner - Hourly",
             script: "agy",
             args: [
                 "--add-dir",
@@ -136,7 +136,7 @@ module.exports = {
         // Bare command names are resolved via $PATH.
         // Weekly Go build cache cleanup running every Friday at 10:00.
         {
-            name: "Golang Clean Cache",
+            name: "Clean Cache - Weekly",
             namespace: "Local",
             script: "go",
             args: ["clean", "-cache"],
@@ -148,7 +148,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Local Ollama LLM server instance running as a background service.
         {
-            name: "Ollama",
+            name: "Ollama Server - Always",
             script: "ollama",
             namespace: "Agent",
             args: ["serve"],
@@ -163,7 +163,7 @@ module.exports = {
         // between restarts.
         // Node.js API server cluster running 3 instances with daily 04:00 memory-reset restart.
         {
-            name: "api-server",
+            name: "API Server - Always",
             namespace: "Service",
             script: "./server.js",
             instances: 3,
@@ -179,7 +179,7 @@ module.exports = {
         // ──────────────────────────────────────────────────────────
         // Local development server with auto-restart on source file changes.
         {
-            name: "dev-server",
+            name: "Dev Server - Always",
             namespace: "Local",
             script: "./main.go",
             watch: true,
@@ -208,7 +208,7 @@ module.exports = {
                 // Inline command to fast-forward pull the latest code
                 { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
                 // Run registered task once without supervisor restart or schedule
-                { name: "test", task: "Disk Analysis Daily" },
+                { name: "test", task: "Disk Analysis - Daily" },
                 // Run deployment workflow inline and wait for it
                 { name: "ship", workflow: "ci:deploy" }
             ]

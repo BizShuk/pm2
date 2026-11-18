@@ -90,7 +90,7 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 The interactive wizard asks for each app in this order:
 
 1. Namespace — choose `Agent`, `Backup`, `Cloud`, `Local`, `Service`, or `AutoP`
-2. Name
+2. Purpose — Capital Case words become the task name's Purpose
 3. Script
 4. Args
 5. Instances
@@ -115,10 +115,31 @@ task writes to `~/.config/pm2/tasks/logs/<task-name>.log` and `<task-name>.err`,
 derived from the task name. `config_dir`, `log_file`, `out_file`, and
 `error_file` no longer exist as ecosystem fields and are ignored if present.
 
-The generated `name` field uses the uppercase convention
-`NAMESPACE SCRIPT - NAME`. `SCRIPT` is the script filename without its path or
-extension. For example, namespace `AutoP`, script `./worker.js`, and name
-`daily sync` produce `AUTOP WORKER - DAILY SYNC`.
+The wizard asks for a `Purpose` instead of a name and generates the `name`
+field as `<Purpose> - <Frequency>` (see below), with `Frequency` derived from
+the cron schedule. For example, purpose `daily sync` and cron `0 6 * * *`
+produce `Daily Sync - Daily`.
+
+### Task naming convention
+
+Task `name` values follow `<Purpose> - <Frequency>`, every term Capital Case.
+Purpose says what the task does (name the tool in it when it helps, e.g.
+`Vidnote Fetch`); Frequency is derived from the schedule — `Hourly`, `Daily`,
+`Weekly`, `Monthly`, `Always` for long-running services, `On Demand` for
+optional or manually triggered tasks.
+
+| Example                  | Purpose        | Frequency |
+| ------------------------ | -------------- | --------- |
+| `Classify Photo - Daily` | Classify Photo | Daily     |
+| `Clean Cache - Weekly`   | Clean Cache    | Weekly    |
+| `LLM Proxy - Always`     | LLM Proxy      | Always    |
+
+The format is enforced: `pm2 apply` / `pm2 task start` reject an ecosystem
+file with any app name outside it, and `pm2 wizard` / `pm2 wizard install`
+refuse to write one (including names merged from an existing file).
+
+Names contain spaces, so quote them on the command line
+(`pm2 logs "Clean Cache - Weekly"`) and in `task:` stage references.
 
 ## Key Differences
 
@@ -196,7 +217,7 @@ not ecosystem choices. The wizard neither prompts for nor emits them.
 ```javascript
 // Long-running LLM proxy service routing incoming requests.
 {
-    name: "LLM Proxy",
+    name: "LLM Proxy - Always",
     namespace: "Service",
     script: "proxy",
     instances: 1,
@@ -211,7 +232,7 @@ Start and forget. pm2 auto-restarts on crash up to `max_restarts`.
 ```javascript
 // Daily disk usage analysis scan executed at 06:00.
 {
-    name: "Disk Analysis Daily",
+    name: "Disk Analysis - Daily",
     namespace: "Local",
     script: "dux",
     args: ["scan"],
@@ -226,7 +247,7 @@ Runs once at 06:00 daily, exits, waits for the next schedule. Use `pm2 task paus
 ```javascript
 // Weekly launch audit script executed every Friday at 05:00.
 {
-    name: "Launch Audit",
+    name: "Launch Audit - Weekly",
     namespace: "Local",
     script: "./bin/mac/launch_audit-mac.sh",
     cron: "0 5 * * 5"
@@ -240,7 +261,7 @@ Relative paths resolve against the ecosystem config file's directory, not the CW
 ```javascript
 // Scheduled AI system-planner agent running hourly from 00:00 to 09:00.
 {
-    name: "agy-system-planner",
+    name: "System Planner - Hourly",
     script: "agy",
     args: ["--add-dir", "/Users/me/projects/example", "-p", "run /system-planner for current workspace"],
     namespace: "planner",
@@ -258,7 +279,7 @@ The task remains idle between `cron` fires.
 ```javascript
 // Weekly Go build cache cleanup running every Friday at 10:00.
 {
-    name: "Golang Clean Cache",
+    name: "Clean Cache - Weekly",
     namespace: "Local",
     script: "go",
     args: ["clean", "-cache"],
@@ -273,7 +294,7 @@ Bare command names are resolved via `$PATH`. No path prefix needed for globally-
 ```javascript
 // Local Ollama LLM server instance running as a background service.
 {
-    name: "Ollama",
+    name: "Ollama Server - Always",
     script: "ollama",
     namespace: "Agent",
     args: ["serve"],
@@ -288,7 +309,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 ```javascript
 // Node.js API server cluster running 3 instances with daily 04:00 memory-reset restart.
 {
-    name: "api-server",
+    name: "API Server - Always",
     namespace: "Service",
     script: "./server.js",
     instances: 3,
@@ -304,7 +325,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 ```javascript
 // Local development server with auto-restart on file changes.
 {
-    name: "dev-server",
+    name: "Dev Server - Always",
     namespace: "Local",
     script: "./main.go",
     watch: true,
@@ -319,7 +340,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
 ```javascript
 // Scheduled AI system-planner agent running hourly in a custom working directory.
 {
-    name: "agy-gosdk-system",
+    name: "Gosdk System Planner - Hourly",
     script: "agy",
     args: ["--add-dir", "/Users/shuk/projects/tmp/gosdk", "-p", "'run /system-planner'"],
     namespace: "planner",
@@ -338,7 +359,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
     apps: [
         // Clean Go build cache every Friday at 10:00.
         {
-            name: "Golang Clean Cache",
+            name: "Clean Cache - Weekly",
             namespace: "Local",
             script: "go",
             args: ["clean", "-cache"],
@@ -346,7 +367,7 @@ Background services that accept subcommands. Grouped under the `Agent` namespace
         },
         // Clean Go module download cache every Friday at 10:00.
         {
-            name: "Golang Clean ModCache",
+            name: "Clean ModCache - Weekly",
             namespace: "Local",
             script: "go",
             args: ["clean", "-modcache"],
@@ -427,7 +448,7 @@ that only ever runs as part of a workflow.
 module.exports = {
     apps: [
         // Run unit test suite once on demand as a workflow stage.
-        { name: "unit-tests", script: "./scripts/test.sh", optional: true }
+        { name: "Unit Tests - On Demand", script: "./scripts/test.sh", optional: true }
     ],
     workflows: [
         {
@@ -440,7 +461,7 @@ module.exports = {
                 // Inline command to fast-forward pull the latest code
                 { name: "pull", script: "./scripts/pull.sh", args: ["--ff-only"] },
                 // Run registered task once without supervisor restart or schedule
-                { name: "test", task: "unit-tests" },
+                { name: "test", task: "Unit Tests - On Demand" },
                 // Run deployment workflow inline and wait for it
                 { name: "ship", workflow: "ci:deploy" }
             ]
@@ -577,9 +598,9 @@ registered app untouched.
 ### Suspend a cron task temporarily
 
 ```bash
-pm2 task pause "Disk Analysis Daily"
+pm2 task pause "Disk Analysis - Daily"
 # ... later ...
-pm2 task resume "Disk Analysis Daily"
+pm2 task resume "Disk Analysis - Daily"
 ```
 
 ### Check what is running
@@ -634,7 +655,7 @@ pm2 resurrect         # reload saved processes
 
 ```bash
 pm2 logs             # continuously stream every managed application
-pm2 logs "LLM Proxy" # continuously stream one application
+pm2 logs "LLM Proxy - Always" # continuously stream one application
 ```
 
 Streamed stdout stays on command stdout and streamed stderr stays on command
@@ -643,7 +664,7 @@ stderr. Each line renders as `[YYYY-MM-DD HH:MM:SS] app_name | log` until
 
 ```bash
 pm2 logs monitor             # interactive Tree Explorer
-pm2 logs m "LLM Proxy"       # same mode through the logs child alias
+pm2 logs m "LLM Proxy - Always"       # same mode through the logs child alias
 ```
 
 The application/log-file Tree stays on the left and the selected log stays on
@@ -676,14 +697,14 @@ report) and tasks a given machine may not want (a planner agent).
 module.exports = {
     apps: [
         // Daily report generator running at 09:00.
-        { name: "daily-report", script: "./report.sh", cron: "0 9 * * *" },
+        { name: "Daily Report - Daily", script: "./report.sh", cron: "0 9 * * *" },
         // Optional AI planner agent registered paused by default.
-        { name: "planner", script: "./planner.sh", optional: true }
+        { name: "Planner - On Demand", script: "./planner.sh", optional: true }
     ]
 };
 ```
 
-- `pm2 task start ./ecosystem.config.js` — starts `daily-report` and registers `planner` paused
+- `pm2 task start ./ecosystem.config.js` — starts `Daily Report - Daily` and registers `Planner - On Demand` paused
 - `pm2 task start ./ecosystem.config.js --with planner` — also starts `planner`
 - `pm2 task start ./ecosystem.config.js --all` — starts every app
 - `pm2 apply --single` — choose one app from `./ecosystem.config.js`; leave every other app untouched

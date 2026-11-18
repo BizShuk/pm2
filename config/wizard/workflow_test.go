@@ -138,7 +138,7 @@ func TestRenderedWorkflowReloads(t *testing.T) {
 			Env:      map[string]string{"CI": "1"},
 			Stages: []workflow.Stage{
 				{Name: "unit", Script: "npm", Args: []string{"test"}, Timeout: "5m"},
-				{Name: "bounce", Task: "Agent:AGENT APP - APP"},
+				{Name: "bounce", Task: "Agent:App - On Demand"},
 			},
 		}},
 	}
@@ -175,7 +175,7 @@ func TestRenderedWorkflowReloads(t *testing.T) {
 		if got.Stages[0].Kind() != workflow.StageScript {
 			t.Errorf("%s: stage 1 kind = %q", tc.format, got.Stages[0].Kind())
 		}
-		if got.Stages[1].Task != "Agent:AGENT APP - APP" {
+		if got.Stages[1].Task != "Agent:App - On Demand" {
 			t.Errorf("%s: stage 2 task = %q", tc.format, got.Stages[1].Task)
 		}
 	}

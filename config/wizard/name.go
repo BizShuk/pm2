@@ -1,18 +1,16 @@
 package wizard
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/bizshuk/pm2/process"
 )
 
-func formatWizardName(namespace, script, name string) string {
-	return strings.ToUpper(fmt.Sprintf(
-		"%s %s - %s",
-		strings.TrimSpace(namespace),
-		DeriveName(strings.TrimSpace(script)),
-		strings.TrimSpace(name),
-	))
+// formatWizardName turns the prompted purpose into a valid task name
+// `<Purpose> - <Frequency>`, the frequency read from app's schedule.
+func formatWizardName(purpose string, app process.AppConfig) string {
+	return process.FormatTaskName(purpose, app)
 }
 
 // DeriveName produces a process name from a script path.

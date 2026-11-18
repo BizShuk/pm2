@@ -77,8 +77,8 @@ func TestLoadOptionalField(t *testing.T) {
 
 	jsPath := filepath.Join(dir, "ecosystem.config.js")
 	js := `module.exports = { apps: [
-    { name: "daily-report", script: "/bin/echo" },
-    { name: "planner", script: "/bin/echo", optional: true }
+    { name: "Daily Report - Daily", script: "/bin/echo" },
+    { name: "Planner - On Demand", script: "/bin/echo", optional: true }
 ] };`
 	if err := os.WriteFile(jsPath, []byte(js), 0o644); err != nil {
 		t.Fatal(err)
@@ -86,8 +86,8 @@ func TestLoadOptionalField(t *testing.T) {
 
 	jsonPath := filepath.Join(dir, "ecosystem.config.json")
 	jsonSrc := `{"apps":[
-    {"name":"daily-report","script":"/bin/echo"},
-    {"name":"planner","script":"/bin/echo","optional":true}
+    {"name":"Daily Report - Daily","script":"/bin/echo"},
+    {"name":"Planner - On Demand","script":"/bin/echo","optional":true}
 ]}`
 	if err := os.WriteFile(jsonPath, []byte(jsonSrc), 0o644); err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestLoadOptionalField(t *testing.T) {
 
 const workflowFixtureJS = `module.exports = {
     apps: [
-        { name: "api", script: "./bin/api" }
+        { name: "Api - Always", script: "./bin/api" }
     ],
     workflows: [
         {
@@ -145,7 +145,7 @@ const workflowFixtureJS = `module.exports = {
 
 const workflowFixtureJSON = `{
     "apps": [
-        { "name": "api", "script": "./bin/api" }
+        { "name": "Api - Always", "script": "./bin/api" }
     ],
     "workflows": [
         {
@@ -278,13 +278,13 @@ func TestCyclicWorkflowFailsAtLoad(t *testing.T) {
 func TestAppsOnlyConfigUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFixture(t, dir, "ecosystem.config.js",
-		`module.exports = { apps: [{ name: "api", script: "./bin/api" }] };`)
+		`module.exports = { apps: [{ name: "Api - Always", script: "./bin/api" }] };`)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(cfg.Apps) != 1 || cfg.Apps[0].Name != "api" {
+	if len(cfg.Apps) != 1 || cfg.Apps[0].Name != "Api - Always" {
 		t.Errorf("apps: got %#v", cfg.Apps)
 	}
 	if cfg.Workflows != nil {

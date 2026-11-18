@@ -5,6 +5,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/bizshuk/pm2/process"
 	"github.com/bizshuk/pm2/workflow"
 )
 
@@ -14,6 +15,11 @@ import (
 // before the preview, so the user is never shown a file that
 // `pm2 apply` cannot load.
 func validateDocument(doc Ecosystem) error {
+	for _, app := range doc.Apps {
+		if err := process.ValidateTaskName(app.Name); err != nil {
+			return err
+		}
+	}
 	return workflow.ValidateAll(doc.Workflows)
 }
 

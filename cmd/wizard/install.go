@@ -117,13 +117,13 @@ func init() {
 // survives as one token: ["-p", "'<prompt>'"]. When the
 // script is a known planner agent (agy/claude), "--add-dir <cwd>" is
 // prepended so the agent has the workspace on its allow-list by default.
-// The process name is derived as `<deriveName(script)>-<cwdBasename>`
+// The process name is `<Script> <Cwd Basename> Planner - On Demand`
 // so multiple installs of the same script in different folders don't
 // collide.
 func buildInstallApp(script, renderedPrompt, namespace, cwdBasename, cwd string) process.AppConfig {
-	name := corewizard.DeriveName(script)
+	purpose := corewizard.DeriveName(script) + " Planner"
 	if cwdBasename != "" {
-		name = name + "-" + cwdBasename
+		purpose = corewizard.DeriveName(script) + " " + cwdBasename + " Planner"
 	}
 
 	var args []string
@@ -134,7 +134,6 @@ func buildInstallApp(script, renderedPrompt, namespace, cwdBasename, cwd string)
 
 	a := process.AppConfig{
 		Script:    script,
-		Name:      name,
 		Args:      args,
 		Instances: process.DefaultInstances,
 		Namespace: namespace,
@@ -146,6 +145,7 @@ func buildInstallApp(script, renderedPrompt, namespace, cwdBasename, cwd string)
 		// prints the resume command instead.
 		Optional: true,
 	}
+	a.Name = process.FormatTaskName(purpose, a)
 	a.Normalize("")
 	return a
 }

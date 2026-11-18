@@ -29,7 +29,7 @@ func TestRenderEcosystemJSEmpty(t *testing.T) {
 
 func TestRenderEcosystemJSSingle(t *testing.T) {
 	app := process.AppConfig{
-		Name:      "api",
+		Name:      "Api - Always",
 		Script:    "./bin/server",
 		Args:      []string{"--port", "8080"},
 		Namespace: "default",
@@ -44,7 +44,7 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 	mustContain := []string{
 		"module.exports = {",
 		"apps: [",
-		`name: "api"`,
+		`name: "Api - Always"`,
 		`script: "./bin/server"`,
 		`args: ["--port", "8080"]`,
 		`namespace: "default"`,
@@ -62,7 +62,7 @@ func TestRenderEcosystemJSSingle(t *testing.T) {
 
 func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 	app := process.AppConfig{
-		Name:        "worker",
+		Name:        "Worker - Always",
 		Namespace:   "Service",
 		Script:      "./worker.js",
 		Args:        []string{"--queue", "high"},
@@ -79,7 +79,7 @@ func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 	got := renderEcosystemJS(Ecosystem{Apps: []process.AppConfig{app}})
 
 	for _, want := range []string{
-		`name: "worker"`,
+		`name: "Worker - Always"`,
 		`namespace: "Service"`,
 		`script: "./worker.js"`,
 		`args: ["--queue", "high"]`,
@@ -100,7 +100,7 @@ func TestRenderEcosystemJSAllUserFacingOptions(t *testing.T) {
 
 func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
 	app := process.AppConfig{
-		Name:   "minimal",
+		Name:   "Minimal - Always",
 		Script: "app.js",
 	}
 	app.Normalize("")
@@ -125,7 +125,7 @@ func TestRenderEcosystemJSSkipsEmpty(t *testing.T) {
 
 func TestRenderEcosystemJSON(t *testing.T) {
 	app := process.AppConfig{
-		Name:      "worker",
+		Name:      "Worker - Always",
 		Script:    "worker.js",
 		Args:      []string{"--q"},
 		Namespace: "jobs",
@@ -147,7 +147,7 @@ func TestRenderEcosystemJSON(t *testing.T) {
 		t.Fatalf("Expected 1 app, got %d", len(cfg.Apps))
 	}
 	got := cfg.Apps[0]
-	if got.Name != "worker" || got.Script != "worker.js" || got.Instances != 3 ||
+	if got.Name != "Worker - Always" || got.Script != "worker.js" || got.Instances != 3 ||
 		!got.Watch || got.Env["FOO"] != "bar" || got.Namespace != "jobs" {
 		t.Errorf("Round-trip mismatch: got %+v", got)
 	}
@@ -155,7 +155,7 @@ func TestRenderEcosystemJSON(t *testing.T) {
 
 func TestRenderEcosystemJSONOmitsRuntimeManagedFields(t *testing.T) {
 	app := process.AppConfig{
-		Name:       "worker",
+		Name:       "Worker - Always",
 		Script:     "worker.js",
 		Version:    "1.2.3",
 		ConfigFile: "/tmp/ecosystem.config.js",
@@ -191,28 +191,28 @@ func TestRenderRoundTrip(t *testing.T) {
 		{
 			name: "single",
 			apps: []process.AppConfig{
-				{Name: "api", Script: "./server.js", Instances: 1, Namespace: "default"},
+				{Name: "Api - Always", Script: "./server.js", Instances: 1, Namespace: "default"},
 			},
 		},
 		{
 			name: "multi",
 			apps: []process.AppConfig{
-				{Name: "api", Script: "./a.js", Instances: 2, Namespace: "default", Watch: true},
-				{Name: "worker", Script: "./b.js", Instances: 1, Namespace: "jobs",
+				{Name: "Api - Always", Script: "./a.js", Instances: 2, Namespace: "default", Watch: true},
+				{Name: "Worker - Always", Script: "./b.js", Instances: 1, Namespace: "jobs",
 					Env: map[string]string{"K": "V"}},
 			},
 		},
 		{
 			name: "cron",
 			apps: []process.AppConfig{
-				{Name: "sched", Script: "./c.js", Cron: "0 * * * *", CronRestart: "0 3 * * *"},
+				{Name: "Sched - Hourly", Script: "./c.js", Cron: "0 * * * *", CronRestart: "0 3 * * *"},
 			},
 		},
 		{
 			name: "all-options",
 			apps: []process.AppConfig{
 				{
-					Name:        "worker",
+					Name:        "Worker - Always",
 					Namespace:   "Service",
 					Script:      "./worker.js",
 					Args:        []string{"--queue", "high"},
@@ -281,7 +281,7 @@ func TestRenderRoundTrip(t *testing.T) {
 func TestRenderEscapes(t *testing.T) {
 	weird := "weird\"name\\path"
 	app := process.AppConfig{
-		Name:   "escape-test",
+		Name:   "Escape Test - Always",
 		Script: weird,
 	}
 	app.Normalize("")
@@ -354,8 +354,8 @@ func TestCollectAnswersSingle(t *testing.T) {
 	if got.Script != "name-only-one" {
 		t.Errorf("Expected script 'name-only-one', got %q", got.Script)
 	}
-	if got.Name != "AGENT NAME-ONLY-ONE - APP" {
-		t.Errorf("Name = %q, want %q", got.Name, "AGENT NAME-ONLY-ONE - APP")
+	if got.Name != "App - On Demand" {
+		t.Errorf("Name = %q, want %q", got.Name, "App - On Demand")
 	}
 	if got.Namespace != "Agent" {
 		t.Errorf("Expected namespace 'Agent', got %q", got.Namespace)
@@ -412,8 +412,8 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 	if got.Namespace != "AutoP" {
 		t.Errorf("Namespace = %q, want AutoP", got.Namespace)
 	}
-	if got.Name != "AUTOP WORKER - DAILY SYNC" {
-		t.Errorf("Name = %q, want %q", got.Name, "AUTOP WORKER - DAILY SYNC")
+	if got.Name != "Daily Sync - Daily" {
+		t.Errorf("Name = %q, want %q", got.Name, "Daily Sync - Daily")
 	}
 	if got.Script != "./worker.js" {
 		t.Errorf("Script = %q, want ./worker.js", got.Script)
@@ -448,7 +448,7 @@ func TestCollectAnswersUsesRequestedPromptFlow(t *testing.T) {
 
 	promptOrder := []string{
 		"Namespace:",
-		"Name [app]:",
+		"Purpose [app]:",
 		"Script [app.js]:",
 		"Args (space-separated):",
 		"Instances [1]:",
@@ -599,11 +599,11 @@ func TestCollectAnswersMulti(t *testing.T) {
 	if apps[1].Script != "second.js" {
 		t.Errorf("apps[1].Script = %q, want %q", apps[1].Script, "second.js")
 	}
-	if apps[0].Name != "AGENT FIRST - APP" {
-		t.Errorf("apps[0].Name = %q, want %q", apps[0].Name, "AGENT FIRST - APP")
+	if apps[0].Name != "App - On Demand" {
+		t.Errorf("apps[0].Name = %q, want %q", apps[0].Name, "App - On Demand")
 	}
-	if apps[1].Name != "AUTOP SECOND - SECOND" {
-		t.Errorf("apps[1].Name = %q, want %q", apps[1].Name, "AUTOP SECOND - SECOND")
+	if apps[1].Name != "Second - Always" {
+		t.Errorf("apps[1].Name = %q, want %q", apps[1].Name, "Second - Always")
 	}
 	if apps[0].Namespace != "Agent" || apps[1].Namespace != "AutoP" {
 		t.Errorf("namespaces = [%q %q], want [Agent AutoP]", apps[0].Namespace, apps[1].Namespace)
@@ -697,7 +697,7 @@ func TestLoadExistingNotFound(t *testing.T) {
 func TestLoadExistingJS(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.js")
-	src := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
+	src := `module.exports = { apps: [ { name: "Api - Always", script: "./a.js" } ] };`
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestLoadExistingJS(t *testing.T) {
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
-	if apps[0].Name != "api" {
+	if apps[0].Name != "Api - Always" {
 		t.Errorf("expected name=api, got %q", apps[0].Name)
 	}
 }
@@ -717,7 +717,7 @@ func TestLoadExistingJS(t *testing.T) {
 func TestLoadExistingJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "eco.json")
-	src := `{ "apps": [ { "name": "worker", "script": "./w.js" } ] }`
+	src := `{ "apps": [ { "name": "Worker - Always", "script": "./w.js" } ] }`
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -726,7 +726,7 @@ func TestLoadExistingJSON(t *testing.T) {
 		t.Fatalf("loadExisting: %v", err)
 	}
 	apps := existing.Apps
-	if len(apps) != 1 || apps[0].Name != "worker" {
+	if len(apps) != 1 || apps[0].Name != "Worker - Always" {
 		t.Errorf("unexpected apps: %+v", apps)
 	}
 }
@@ -881,7 +881,7 @@ func TestRunInteractiveYesAllSynthesizesDefaultApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(data), `name: "AGENT APP - APP"`) {
+	if !strings.Contains(string(data), `name: "App - On Demand"`) {
 		t.Errorf("expected default app in output, got:\n%s", data)
 	}
 	if !strings.Contains(string(data), `namespace: "Agent"`) {
@@ -962,7 +962,7 @@ func TestRunInstallForcesNonInteractive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(data), `name: "AGENT APP - APP"`) {
+	if !strings.Contains(string(data), `name: "App - On Demand"`) {
 		t.Errorf("expected default app in output, got:\n%s", data)
 	}
 }
@@ -1024,7 +1024,7 @@ func TestWriteEcosystemFilePreviewGoesToErrOut(t *testing.T) {
 func TestWriteEcosystemFileNoMergeAborts(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "ecosystem.config.js")
-	seed := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
+	seed := `module.exports = { apps: [ { name: "Api - Always", script: "./a.js" } ] };`
 	if err := os.WriteFile(out, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

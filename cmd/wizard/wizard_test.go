@@ -36,7 +36,7 @@ func TestBuildInstallApp(t *testing.T) {
 	if app.Script != "/abs/agy" {
 		t.Errorf("Script = %q, want /abs/agy", app.Script)
 	}
-	if app.Name != "agy-pm2" {
+	if app.Name != "Agy Pm2 Planner - On Demand" {
 		t.Errorf("Name = %q, want agy-pm2", app.Name)
 	}
 	if app.Namespace != EcoPlannerNS {
@@ -86,7 +86,7 @@ func TestBuildInstallAppEmptyUserPrompt(t *testing.T) {
 			t.Errorf("Args[%d] = %q, want %q", i, app.Args[i], a)
 		}
 	}
-	if app.Name != "agy-myproj" {
+	if app.Name != "Agy Myproj Planner - On Demand" {
 		t.Errorf("Name = %q, want agy-myproj", app.Name)
 	}
 	if app.Namespace != EcoPlannerNS {
@@ -104,8 +104,8 @@ func TestBuildInstallAppEmptyCwdBasename(t *testing.T) {
 		"",
 		"/abs/cwd",
 	)
-	if app.Name != "agy" {
-		t.Errorf("Name = %q, want agy (no suffix when cwdBasename empty)", app.Name)
+	if app.Name != "Agy Planner - On Demand" {
+		t.Errorf("Name = %q, want generic Planner purpose", app.Name)
 	}
 }
 

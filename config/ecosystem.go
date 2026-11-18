@@ -103,6 +103,9 @@ func (c *EcosystemConfig) postProcess(path string) error {
 	for i := range c.Apps {
 		c.Apps[i].Normalize(configDir)
 		c.Apps[i].ConfigFile = path
+		if err := process.ValidateTaskName(c.Apps[i].Name); err != nil {
+			return fmt.Errorf("invalid app in %s: %w", filepath.Base(path), err)
+		}
 	}
 
 	for i := range c.Workflows {

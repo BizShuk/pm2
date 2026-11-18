@@ -31,7 +31,7 @@ func DefaultApp() process.AppConfig {
 		Version:   DefaultVersion,
 		Optional:  true,
 	}
-	app.Name = formatWizardName(app.Namespace, app.Script, app.Name)
+	app.Name = formatWizardName(app.Name, app)
 	app.Normalize("")
 	return app
 }
@@ -45,7 +45,7 @@ func askOneApp(reader *bufio.Reader, output io.Writer) (process.AppConfig, error
 	}
 	app.Namespace = namespaceOptions[namespaceChoice-1]
 
-	app.Name, err = promptLine(reader, output, "Name", defaultName)
+	app.Name, err = promptLine(reader, output, "Purpose", defaultName)
 	if err != nil {
 		return app, err
 	}
@@ -62,7 +62,6 @@ func askOneApp(reader *bufio.Reader, output io.Writer) (process.AppConfig, error
 	if _, err := os.Stat(app.Script); err != nil {
 		fmt.Fprintf(output, "  (warning: %q not found locally — continuing anyway)\n", app.Script)
 	}
-	app.Name = formatWizardName(app.Namespace, app.Script, app.Name)
 
 	args, err := promptLine(reader, output, "Args (space-separated)", "")
 	if err != nil {
@@ -98,6 +97,7 @@ func askOneApp(reader *bufio.Reader, output io.Writer) (process.AppConfig, error
 		return app, err
 	}
 	app.Optional = optionalChoice == 1
+	app.Name = formatWizardName(app.Name, app)
 	app.Version = DefaultVersion
 	return app, nil
 }

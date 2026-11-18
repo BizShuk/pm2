@@ -145,7 +145,7 @@ func TestWizardFinalWritePrompt(t *testing.T) {
 func TestWizardEndToEndMerge(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
-	seed := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
+	seed := `module.exports = { apps: [ { name: "Api - Always", script: "./a.js" } ] };`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -175,10 +175,10 @@ func TestWizardEndToEndMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wizard: %v", err)
 	}
-	if !strings.Contains(got, `name: "api"`) {
+	if !strings.Contains(got, `name: "Api - Always"`) {
 		t.Errorf("merged output missing 'api':\n%s", got)
 	}
-	if !strings.Contains(got, `name: "LOCAL WORKER - WORKER"`) {
+	if !strings.Contains(got, `name: "Worker - Always"`) {
 		t.Errorf("merged output missing composed worker name:\n%s", got)
 	}
 	if !strings.Contains(got, `namespace: "Local"`) {
@@ -190,8 +190,8 @@ func TestWizardEndToEndForce(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
 	seed := `module.exports = { apps: [
-		{ name: "old-a", script: "./a.js" },
-		{ name: "old-b", script: "./b.js" },
+		{ name: "Old A - Always", script: "./a.js" },
+		{ name: "Old B - Always", script: "./b.js" },
 	] };`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -204,7 +204,7 @@ func TestWizardEndToEndForce(t *testing.T) {
 	if strings.Contains(got, "old-a") || strings.Contains(got, "old-b") {
 		t.Errorf("--force did not replace existing apps:\n%s", got)
 	}
-	if !strings.Contains(got, `name: "AGENT APP - APP"`) {
+	if !strings.Contains(got, `name: "App - On Demand"`) {
 		t.Errorf("expected default app name, got:\n%s", got)
 	}
 }
@@ -227,7 +227,7 @@ func TestWizardEndToEndMalformedAbort(t *testing.T) {
 func TestWizardEndToEndNoMerge(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
-	seed := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
+	seed := `module.exports = { apps: [ { name: "Api - Always", script: "./a.js" } ] };`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestWizardEndToEndNoMerge(t *testing.T) {
 func TestWizardEndToEndNoMergeWithForce(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
-	seed := `module.exports = { apps: [ { name: "old", script: "./o.js" } ] };`
+	seed := `module.exports = { apps: [ { name: "Old - Always", script: "./o.js" } ] };`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestWizardEndToEndNoMergeWithForce(t *testing.T) {
 	if strings.Contains(got, "old") {
 		t.Errorf("--no-merge --force did not overwrite:\n%s", got)
 	}
-	if !strings.Contains(got, `name: "AGENT APP - APP"`) {
+	if !strings.Contains(got, `name: "App - On Demand"`) {
 		t.Errorf("expected default app, got:\n%s", got)
 	}
 }
@@ -356,7 +356,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	wantName := `name: "agy-` + filepath.Base(dir) + `"`
+	wantName := `name: "Agy ` + filepath.Base(dir) + ` Planner - On Demand"`
 	if !strings.Contains(got, wantName) {
 		t.Errorf("missing %q:\n%s", wantName, got)
 	}
@@ -385,7 +385,7 @@ func TestInstallEndToEnd(t *testing.T) {
 		t.Fatalf("expected 1 app, got %d", len(cfg.Apps))
 	}
 	a := cfg.Apps[0]
-	if a.Name != "agy-"+filepath.Base(dir) {
+	if a.Name != "Agy "+filepath.Base(dir)+" Planner - On Demand" {
 		t.Errorf("loaded Name = %q", a.Name)
 	}
 	if a.Namespace != wizardcmd.EcoPlannerNS {
@@ -425,7 +425,7 @@ func TestInstallNoUserPrompt(t *testing.T) {
 		t.Fatalf("expected 1 app, got %d", len(cfg.Apps))
 	}
 	a := cfg.Apps[0]
-	if a.Name != "agy-"+filepath.Base(dir) {
+	if a.Name != "Agy "+filepath.Base(dir)+" Planner - On Demand" {
 		t.Errorf("loaded Name = %q", a.Name)
 	}
 	if a.Namespace != wizardcmd.EcoPlannerNS {
@@ -458,7 +458,7 @@ func TestInstallNoUserPrompt(t *testing.T) {
 func TestInstallMergesIntoExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ecosystem.config.js")
-	seed := `module.exports = { apps: [ { name: "api", script: "./a.js" } ] };`
+	seed := `module.exports = { apps: [ { name: "Api - Always", script: "./a.js" } ] };`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestWizardEndToEndWorkflow(t *testing.T) {
 	if len(wf.Stages) != 2 {
 		t.Fatalf("expected 2 stages, got %d\n%s", len(wf.Stages), got)
 	}
-	if want := "Local:LOCAL WORKER - WORKER"; wf.Stages[1].Task != want {
+	if want := "Local:Worker - Always"; wf.Stages[1].Task != want {
 		t.Errorf("task stage = %q, want %q", wf.Stages[1].Task, want)
 	}
 }
