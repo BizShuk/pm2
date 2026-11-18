@@ -25,7 +25,7 @@ func names(apps []process.AppConfig) []string {
 }
 
 func TestSelectAppsDefaultsToRegisterOptionalAsPaused(t *testing.T) {
-	selected, paused, err := selectApps(fixtureApps(), false, nil)
+	selected, paused, err := selectApps(fixtureApps(), false, nil, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSelectAppsDefaultsToRegisterOptionalAsPaused(t *testing.T) {
 }
 
 func TestSelectAppsAllIncludesOptional(t *testing.T) {
-	selected, paused, err := selectApps(fixtureApps(), true, nil)
+	selected, paused, err := selectApps(fixtureApps(), true, nil, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSelectAppsAllIncludesOptional(t *testing.T) {
 }
 
 func TestSelectAppsWithOptsInByName(t *testing.T) {
-	selected, paused, err := selectApps(fixtureApps(), false, []string{"planner"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"planner"}, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSelectAppsWithOptsInByName(t *testing.T) {
 }
 
 func TestSelectAppsWithAcceptsNamespacedKey(t *testing.T) {
-	selected, paused, err := selectApps(fixtureApps(), false, []string{"infra:auditor"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"infra:auditor"}, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSelectAppsWithAcceptsNamespacedKey(t *testing.T) {
 // Naming a required app is redundant but must not be an error — it is
 // already selected, so --with is simply a no-op for it.
 func TestSelectAppsWithRequiredAppIsNoOp(t *testing.T) {
-	selected, paused, err := selectApps(fixtureApps(), false, []string{"daily-report"})
+	selected, paused, err := selectApps(fixtureApps(), false, []string{"daily-report"}, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestSelectAppsWithRequiredAppIsNoOp(t *testing.T) {
 }
 
 func TestSelectAppsWithUnknownNameErrors(t *testing.T) {
-	_, _, err := selectApps(fixtureApps(), false, []string{"plannr"})
+	_, _, err := selectApps(fixtureApps(), false, []string{"plannr"}, registeredTasks{})
 	if err == nil {
 		t.Fatal("expected an error for an unknown --with name")
 	}
@@ -128,7 +128,7 @@ func TestSelectAppsNoOptionalIsUnchanged(t *testing.T) {
 		{Name: "api", Script: "./api.sh"},
 		{Name: "worker", Script: "./worker.sh"},
 	}
-	selected, paused, err := selectApps(apps, false, nil)
+	selected, paused, err := selectApps(apps, false, nil, registeredTasks{})
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
@@ -209,5 +209,116 @@ func TestChooseSingleAppRejectsEmptyEcosystem(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no apps") {
 		t.Errorf("error = %q, want no apps explanation", err)
+	}
+}
+
+func registeredFixture(entries map[string]process.Status) registeredTasks {
+	infos := make([]process.ProcessInfo, 0, len(entries))
+	for key, status := range entries {
+		namespace, name, _ := strings.Cut(key, ":")
+		infos = append(infos, process.ProcessInfo{
+			AppConfig: process.AppConfig{Namespace: namespace, Name: name},
+			Status:    status,
+		})
+	}
+	return newRegisteredTasks(infos)
+}
+
+// Re-applying a file must not undo `pm2 task pause` / `resume`: an existing
+// task keeps its paused state whatever its `optional` field says.
+func TestSelectAppsKeepsExistingPausedState(t *testing.T) {
+	registered := registeredFixture(map[string]process.Status{
+		"default:daily-report": process.StatusPaused, // required, user paused it
+		"default:planner":      process.StatusOnline, // optional, user resumed it
+	})
+	selected, paused, err := selectApps(fixtureApps(), false, nil, registered)
+	if err != nil {
+		t.Fatalf("selectApps: %v", err)
+	}
+	if !selected[0].Paused {
+		t.Error("existing paused required app should stay paused")
+	}
+	if selected[1].Paused {
+		t.Error("existing active optional app should stay active")
+	}
+	if !selected[2].Paused {
+		t.Error("new optional app should register paused")
+	}
+	if got := strings.Join(names(paused), ","); got != "daily-report,auditor" {
+		t.Errorf("paused = %q, want daily-report,auditor", got)
+	}
+}
+
+// An app whose namespace changed in the file is still the task it
+// replaces when the same file declares the same name.
+func TestSelectAppsMatchesExistingByConfigFile(t *testing.T) {
+	registered := newRegisteredTasks([]process.ProcessInfo{{
+		AppConfig: process.AppConfig{Namespace: "old", Name: "daily-report", ConfigFile: "/eco.js"},
+		Status:    process.StatusPaused,
+	}})
+	apps := []process.AppConfig{{Namespace: "new", Name: "daily-report", ConfigFile: "/eco.js"}}
+	selected, _, err := selectApps(apps, false, nil, registered)
+	if err != nil {
+		t.Fatalf("selectApps: %v", err)
+	}
+	if !selected[0].Paused {
+		t.Error("moved app should keep its paused state")
+	}
+}
+
+// Naming an app is an explicit request to run it, so it overrides the
+// state the daemon holds.
+func TestSelectAppsExplicitActivationOverridesExistingState(t *testing.T) {
+	registered := registeredFixture(map[string]process.Status{
+		"default:daily-report": process.StatusPaused,
+		"default:planner":      process.StatusPaused,
+		"infra:auditor":        process.StatusPaused,
+	})
+	selected, _, err := selectApps(fixtureApps(), false, []string{"daily-report", "planner"}, registered)
+	if err != nil {
+		t.Fatalf("selectApps: %v", err)
+	}
+	if selected[0].Paused || selected[1].Paused {
+		t.Error("--with should activate the named apps")
+	}
+	if !selected[2].Paused {
+		t.Error("unnamed existing paused app should stay paused")
+	}
+
+	selected, _, err = selectApps(fixtureApps(), true, nil, registered)
+	if err != nil {
+		t.Fatalf("selectApps --all: %v", err)
+	}
+	if !selected[0].Paused {
+		t.Error("--all affects optional apps only; paused required app should stay paused")
+	}
+	if selected[1].Paused || selected[2].Paused {
+		t.Error("--all should activate every optional app")
+	}
+}
+
+func TestRegisteredPausedStateAcrossInstances(t *testing.T) {
+	app := process.AppConfig{Namespace: "default", Name: "api", Instances: 2}
+	tests := []struct {
+		name       string
+		entries    map[string]process.Status
+		wantPaused bool
+		wantFound  bool
+	}{
+		{name: "none registered", entries: nil},
+		{name: "all paused", entries: map[string]process.Status{
+			"default:api-0": process.StatusPaused, "default:api-1": process.StatusPaused,
+		}, wantPaused: true, wantFound: true},
+		{name: "one running", entries: map[string]process.Status{
+			"default:api-0": process.StatusPaused, "default:api-1": process.StatusOnline,
+		}, wantFound: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paused, found := registeredFixture(tt.entries).pausedState(app)
+			if paused != tt.wantPaused || found != tt.wantFound {
+				t.Errorf("pausedState = (%v, %v), want (%v, %v)", paused, found, tt.wantPaused, tt.wantFound)
+			}
+		})
 	}
 }

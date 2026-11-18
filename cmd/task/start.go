@@ -101,6 +101,7 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 	if err := validateSelectionFlags(runSingle, runAll, runWith); err != nil {
 		return err
 	}
+	client := cliruntime.NewCLIClient(cliruntime.SocketPath())
 	var selected, paused []process.AppConfig
 	if runSingle {
 		app, chooseErr := chooseSingleApp(cfg.Apps, cmd.InOrStdin(), cmd.OutOrStdout())
@@ -109,18 +110,18 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 		}
 		selected = []process.AppConfig{app}
 	} else {
-		selected, paused, err = selectApps(cfg.Apps, runAll, runWith)
+		registered, listErr := listRegistered(client)
+		if listErr != nil {
+			return listErr
+		}
+		selected, paused, err = selectApps(cfg.Apps, runAll, runWith, registered)
 		if err != nil {
 			return err
 		}
 	}
 	for _, app := range paused {
-		processKey := app.Name
-		if app.Namespace != "" {
-			processKey = app.Namespace + ":" + app.Name
-		}
-		fmt.Fprintf(os.Stderr, "pm2: optional app %q will be registered paused — resume it with: pm2 task resume %s\n",
-			app.Name, processKey)
+		fmt.Fprintf(os.Stderr, "pm2: %q will be registered paused — resume it with: pm2 task resume %s\n",
+			app.Name, appSelectionKey(app))
 	}
 
 	for _, app := range selected {
@@ -133,17 +134,6 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 		// CLI environment snapshot travels in the embedded AppConfig.
 		req.App.AppConfig.BaseEnv = os.Environ()
 
-		client := cliruntime.NewCLIClient(cliruntime.SocketPath())
-		if err := client.SendOK(req); err != nil {
-			return err
-		}
-		// Re-fetch the post-start response so we can render the
-		// status block — the resp captured inside SendOK was
-		// discarded by the !OK fold. We re-issue the same StartApp
-		// request: the daemon is idempotent on same-name+same-script
-		// (stop-and-replace), and the request embeds the original
-		// AppConfig so a fresh send yields a fresh ProcessInfo
-		// snapshot in the response payload.
 		resp, err := client.Send(req)
 		if err != nil {
 			return err
@@ -184,6 +174,25 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// listRegistered reads the daemon's current task list so apply can keep
+// each existing task's paused state. It goes through the auto-starting
+// client: apply is about to start the daemon anyway, and an answer from
+// "no daemon" would treat every task as new.
+func listRegistered(client *cliruntime.CLIClient) (registeredTasks, error) {
+	resp, err := client.Send(model.Request{Command: model.CmdList})
+	if err != nil {
+		return registeredTasks{}, err
+	}
+	if !resp.OK {
+		return registeredTasks{}, fmt.Errorf("daemon error: %s", resp.Error)
+	}
+	var infos []process.ProcessInfo
+	if err := json.Unmarshal(resp.Payload, &infos); err != nil {
+		return registeredTasks{}, fmt.Errorf("decode process list: %w", err)
+	}
+	return newRegisteredTasks(infos), nil
 }
 
 // registerWorkflows sends the file's workflow definitions to the daemon

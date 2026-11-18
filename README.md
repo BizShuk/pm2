@@ -116,6 +116,12 @@ pm2 task start ./ecosystem.config.js --with planner # start one optional app now
 pm2 task start ./ecosystem.config.js --all           # start every optional app now
 ```
 
+Re-applying a file keeps each already-registered task's paused or active state
+and updates everything else (script, args, env, cron, ...) from the file. A
+task you paused stays paused, an optional task you resumed stays running.
+Naming a task with `--with` (or choosing it with `--single`, or `--all` for
+optional apps) activates it regardless of its current state.
+
 ---
 
 ### `pm2 task` / `pm2 t`

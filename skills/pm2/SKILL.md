@@ -591,6 +591,11 @@ pm2 apply                   # explicit root alias; same default
 pm2 apply --single          # choose and apply exactly one app
 ```
 
+Re-applying keeps every already-registered task's paused or active state and
+updates all other fields from the file, so a `pm2 task pause` survives the
+next `pm2 apply`. `--with <name>` / `--all` (optional apps) explicitly
+activate regardless of current state.
+
 `--single` cannot be combined with `--all` or `--with`. It sends only the
 chosen app, starts it even when `optional: true`, and leaves every other
 registered app untouched.

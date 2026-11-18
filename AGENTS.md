@@ -108,8 +108,10 @@ pm2/
 │   ├── task/                 task subcommands + start helpers
 │   │   ├── start.go          StartCmd + AppStartReq RPC flow
 │   │   ├── apply_delete.go   --delete sweep: one CmdDelete per declared app
-│   │   ├── select.go         maps AppConfig.Optional to Paused;
-│   │   │                     selects one app by index/name for --single
+│   │   ├── select.go         maps AppConfig.Optional + existing state to
+│   │   │                     Paused; selects one app by index/name for --single
+│   │   ├── registered.go     daemon task list indexed by launch identity, so
+│   │   │                     re-apply keeps each existing task's paused state
 │   │   ├── single.go         renders and reads the interactive single-app choice
 │   │   ├── restart.go        RestartCmd
 │   │   ├── stop.go           StopCmd
@@ -458,8 +460,12 @@ child or registering a cron schedule.
 `pm2 task start` applies the policy through `task.selectApps()`
 (`cmd/task/select.go`), a pure function over the loaded app list:
 
+First match wins:
+
 | Input                             | Result                                                        |
 | --------------------------------- | ------------------------------------------------------------- |
+| `--with <name>`, or `--all` on an optional app | starts active, whatever state the daemon holds   |
+| already registered in the daemon  | keeps its current paused / active state; every other field updates |
 | `optional: false` (default)       | always started                                                |
 | `optional: true`, no flag         | registered with `StatusPaused`, PID 0, no scheduler entry     |
 | `optional: true`, `--all`         | registered and started                                        |
@@ -467,8 +473,14 @@ child or registering a cron schedule.
 | `--with` naming no app at all     | error — a typo must not silently leave an app paused          |
 | `--single`                        | only the interactively selected app is sent; it starts active |
 
-Two boundaries worth keeping:
+Three boundaries worth keeping:
 
+- Re-applying never undoes `pm2 task pause` / `resume`. The CLI reads the
+  daemon's list first (`listRegistered`, through the auto-starting client so
+  a cold start resurrects before it answers) and `registeredTasks` matches
+  each app with the daemon's own launch identity: `namespace:name`, then the
+  same name from the same config file, so an app whose namespace moved keeps
+  its state too. A multi-instance app is paused only if every instance is.
 - Policy mapping lives in the CLI: every app produces one `AppStartReq`, and
   unselected optional apps carry `Paused = true`. The daemon only implements
   the existing pause lifecycle; it preserves `Optional` as metadata but does

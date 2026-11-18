@@ -8,21 +8,23 @@ import (
 	"github.com/bizshuk/pm2/process"
 )
 
-// selectApps prepares every app in an ecosystem file for registration,
-// applying the install policy carried by process.AppConfig.Optional.
+// selectApps prepares every app in an ecosystem file for registration and
+// decides, per app, whether it registers paused.
 //
-// Policy:
-//   - Optional == false (the zero value) — always selected.
-//   - Optional == true — always selected, but registered paused unless all is
-//     set or the app is named in with (matched on "name" or
-//     "namespace:name").
+// Policy, first match wins:
+//   - Explicitly activated — an optional app with all set, or any app named
+//     in with (matched on "name" or "namespace:name") — starts active.
+//   - Already registered — keeps the paused state it has in the daemon, so
+//     re-applying a file never undoes a `pm2 task pause` or `resume`. Every
+//     other field is updated from the file.
+//   - New — required apps start, optional apps register paused.
 //
 // The policy is applied uniformly to local and remote ecosystem files:
 // `optional` is a property of the app, not of how the config was fetched.
 //
 // An entry in with that matches no app is an error rather than a silent
 // no-op, so a typo does not quietly leave the app paused.
-func selectApps(apps []process.AppConfig, all bool, with []string) (selected, paused []process.AppConfig, err error) {
+func selectApps(apps []process.AppConfig, all bool, with []string, registered registeredTasks) (selected, paused []process.AppConfig, err error) {
 	wanted := make(map[string]bool, len(with))
 	for _, w := range with {
 		w = strings.TrimSpace(w)
@@ -42,11 +44,17 @@ func selectApps(apps []process.AppConfig, all bool, with []string) (selected, pa
 			}
 		}
 
-		if app.Optional {
-			app.Paused = !all && !named
-			if app.Paused {
-				paused = append(paused, app)
-			}
+		existingPaused, existing := registered.pausedState(app)
+		switch {
+		case named || (all && app.Optional):
+			app.Paused = false
+		case existing:
+			app.Paused = existingPaused
+		default:
+			app.Paused = app.Optional
+		}
+		if app.Paused {
+			paused = append(paused, app)
 		}
 		selected = append(selected, app)
 	}

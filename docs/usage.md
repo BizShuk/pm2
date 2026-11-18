@@ -255,6 +255,10 @@ pm2 task start owner/repo
 Task scripts, arguments, instances, environment variables, and cron schedules
 are defined inside the ecosystem file.
 
+Re-applying keeps each already-registered task's paused or active state and
+updates every other field from the file. `--with <name>` (and `--all` for
+optional apps) activates the named apps regardless of their current state.
+
 `--single` can also be used with `pm2 task start`. It activates the chosen app
 even if the app is marked `optional: true`, and cannot be combined with
 `--all` or `--with`.
