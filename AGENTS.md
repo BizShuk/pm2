@@ -464,8 +464,8 @@ First match wins:
 
 | Input                             | Result                                                        |
 | --------------------------------- | ------------------------------------------------------------- |
-| `--with <name>`, or `--all` on an optional app | starts active, whatever state the daemon holds   |
 | already registered in the daemon  | keeps its current paused / active state; every other field updates |
+| `--follow-optional`               | skips the row above: every app is treated as new              |
 | `optional: false` (default)       | always started                                                |
 | `optional: true`, no flag         | registered with `StatusPaused`, PID 0, no scheduler entry     |
 | `optional: true`, `--all`         | registered and started                                        |
@@ -481,6 +481,8 @@ Three boundaries worth keeping:
   each app with the daemon's own launch identity: `namespace:name`, then the
   same name from the same config file, so an app whose namespace moved keeps
   its state too. A multi-instance app is paused only if every instance is.
+  `--all` / `--with` never override that state; `--follow-optional` skips
+  the list RPC entirely, so the optional policy decides every app.
 - Policy mapping lives in the CLI: every app produces one `AppStartReq`, and
   unselected optional apps carry `Paused = true`. The daemon only implements
   the existing pause lifecycle; it preserves `Optional` as metadata but does

@@ -8,19 +8,21 @@ import (
 
 func TestValidateDeleteFlagsRejectsSelectionModes(t *testing.T) {
 	tests := []struct {
-		name   string
-		single bool
-		all    bool
-		with   []string
+		name           string
+		single         bool
+		all            bool
+		followOptional bool
+		with           []string
 	}{
 		{name: "all", all: true},
 		{name: "with", with: []string{"worker"}},
+		{name: "follow-optional", followOptional: true},
 		{name: "single", single: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateDeleteFlags(true, tt.single, tt.all, tt.with)
+			err := validateDeleteFlags(true, tt.single, tt.all, tt.followOptional, tt.with)
 			if err == nil {
 				t.Fatalf("expected --delete with --%s to fail", tt.name)
 			}
@@ -30,10 +32,10 @@ func TestValidateDeleteFlagsRejectsSelectionModes(t *testing.T) {
 		})
 	}
 
-	if err := validateDeleteFlags(true, false, false, nil); err != nil {
+	if err := validateDeleteFlags(true, false, false, false, nil); err != nil {
 		t.Errorf("--delete alone = %v, want nil", err)
 	}
-	if err := validateDeleteFlags(false, true, false, nil); err != nil {
+	if err := validateDeleteFlags(false, true, false, false, nil); err != nil {
 		t.Errorf("--single without --delete = %v, want nil", err)
 	}
 }
@@ -47,17 +49,19 @@ func TestDeleteEcosystemAppsRejectsEmptyEcosystem(t *testing.T) {
 
 func TestValidateSelectionFlagsRejectsSingleWithOtherModes(t *testing.T) {
 	tests := []struct {
-		name string
-		all  bool
-		with []string
+		name           string
+		all            bool
+		followOptional bool
+		with           []string
 	}{
 		{name: "all", all: true},
 		{name: "with", with: []string{"worker"}},
+		{name: "follow-optional", followOptional: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSelectionFlags(true, tt.all, tt.with)
+			err := validateSelectionFlags(true, tt.all, tt.followOptional, tt.with)
 			if err == nil {
 				t.Fatalf("expected --single with --%s to fail", tt.name)
 			}

@@ -63,7 +63,7 @@ Task lifecycle verbs have no other root aliases. Use `pm2 task restart`, not
 | Command                                          | Purpose                                          | Usage / Key Flags                                                                |
 | ------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------------- |
 | `pm2 start` / `pm2 daemon start`                 | Spawn the daemon process                         | `--foreground` to run blocking in foreground                                     |
-| `pm2 task start [target]` / `pm2 apply [target]` | Apply apps from an ecosystem file or GitHub repo | Defaults to `./ecosystem.config.js`; accepts `--all`, `--with`, `--single`       |
+| `pm2 task start [target]` / `pm2 apply [target]` | Apply apps from an ecosystem file or GitHub repo | Defaults to `./ecosystem.config.js`; accepts `--all`, `--with`, `--follow-optional`, `--single`       |
 | `pm2 task restart <name\|id\|all>`               | Restart a task                                   | Closes, re-spawns, and re-registers scheduler                                    |
 | `pm2 task stop <target>`                         | Stop a task gracefully                           | `SIGTERM` escalated to `SIGKILL` after 5 seconds                                 |
 | `pm2 task pause <target>`                        | Suspend a task and its cron schedule             | Removes scheduler entries; status becomes `paused`                               |
@@ -593,8 +593,9 @@ pm2 apply --single          # choose and apply exactly one app
 
 Re-applying keeps every already-registered task's paused or active state and
 updates all other fields from the file, so a `pm2 task pause` survives the
-next `pm2 apply`. `--with <name>` / `--all` (optional apps) explicitly
-activate regardless of current state.
+next `pm2 apply`. `--with <name>` / `--all` only affect new optional apps;
+`pm2 apply --follow-optional` discards current states and re-applies every
+app's `optional` setting.
 
 `--single` cannot be combined with `--all` or `--with`. It sends only the
 chosen app, starts it even when `optional: true`, and leaves every other

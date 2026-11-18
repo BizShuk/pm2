@@ -74,6 +74,7 @@ Flags:
       --delete         delete every task declared by the ecosystem file
       --single         choose and apply exactly one app
       --with strings   run named optional apps instead of registering them paused
+      --follow-optional  ignore registered tasks' paused state and apply each app's optional setting
 ```
 
 ```bash
@@ -119,8 +120,13 @@ pm2 task start ./ecosystem.config.js --all           # start every optional app 
 Re-applying a file keeps each already-registered task's paused or active state
 and updates everything else (script, args, env, cron, ...) from the file. A
 task you paused stays paused, an optional task you resumed stays running.
-Naming a task with `--with` (or choosing it with `--single`, or `--all` for
-optional apps) activates it regardless of its current state.
+`--all` and `--with` only decide how *new* optional apps register. Pass
+`--follow-optional` to discard the current states and apply every app's
+`optional` setting again (combinable with `--all` / `--with`):
+
+```bash
+pm2 apply --follow-optional   # required apps start, optional apps go back to paused
+```
 
 ---
 

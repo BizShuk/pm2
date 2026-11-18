@@ -266,34 +266,36 @@ func TestSelectAppsMatchesExistingByConfigFile(t *testing.T) {
 	}
 }
 
-// Naming an app is an explicit request to run it, so it overrides the
-// state the daemon holds.
-func TestSelectAppsExplicitActivationOverridesExistingState(t *testing.T) {
+// --with and --all describe how a *new* optional app registers; they never
+// override the state a task already holds in the daemon. Resetting that
+// state is --follow-optional's job, which passes no registered tasks.
+func TestSelectAppsExistingStateWinsOverActivationFlags(t *testing.T) {
 	registered := registeredFixture(map[string]process.Status{
 		"default:daily-report": process.StatusPaused,
 		"default:planner":      process.StatusPaused,
-		"infra:auditor":        process.StatusPaused,
 	})
-	selected, _, err := selectApps(fixtureApps(), false, []string{"daily-report", "planner"}, registered)
+	selected, _, err := selectApps(fixtureApps(), true, []string{"planner"}, registered)
 	if err != nil {
 		t.Fatalf("selectApps: %v", err)
 	}
-	if selected[0].Paused || selected[1].Paused {
-		t.Error("--with should activate the named apps")
+	if !selected[0].Paused || !selected[1].Paused {
+		t.Error("existing paused apps should stay paused despite --all / --with")
 	}
-	if !selected[2].Paused {
-		t.Error("unnamed existing paused app should stay paused")
+	if selected[2].Paused {
+		t.Error("--all should start the new optional app")
 	}
+}
 
-	selected, _, err = selectApps(fixtureApps(), true, nil, registered)
+// With no registered tasks (--follow-optional) every app gets the
+// optional policy, so a paused required task starts and a running
+// optional one registers paused.
+func TestSelectAppsWithoutRegisteredFollowsOptional(t *testing.T) {
+	selected, _, err := selectApps(fixtureApps(), false, nil, registeredTasks{})
 	if err != nil {
-		t.Fatalf("selectApps --all: %v", err)
+		t.Fatalf("selectApps: %v", err)
 	}
-	if !selected[0].Paused {
-		t.Error("--all affects optional apps only; paused required app should stay paused")
-	}
-	if selected[1].Paused || selected[2].Paused {
-		t.Error("--all should activate every optional app")
+	if selected[0].Paused || !selected[1].Paused || !selected[2].Paused {
+		t.Errorf("want required active and optional paused, got %+v", selected)
 	}
 }
 

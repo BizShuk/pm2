@@ -12,12 +12,14 @@ import (
 // decides, per app, whether it registers paused.
 //
 // Policy, first match wins:
-//   - Explicitly activated — an optional app with all set, or any app named
-//     in with (matched on "name" or "namespace:name") — starts active.
 //   - Already registered — keeps the paused state it has in the daemon, so
 //     re-applying a file never undoes a `pm2 task pause` or `resume`. Every
-//     other field is updated from the file.
-//   - New — required apps start, optional apps register paused.
+//     other field is updated from the file. Callers that want the optional
+//     policy applied to every app (--follow-optional) pass an empty
+//     registeredTasks.
+//   - Required — starts active.
+//   - Optional — registers paused unless all is set or the app is named in
+//     with (matched on "name" or "namespace:name").
 //
 // The policy is applied uniformly to local and remote ecosystem files:
 // `optional` is a property of the app, not of how the config was fetched.
@@ -45,13 +47,10 @@ func selectApps(apps []process.AppConfig, all bool, with []string, registered re
 		}
 
 		existingPaused, existing := registered.pausedState(app)
-		switch {
-		case named || (all && app.Optional):
-			app.Paused = false
-		case existing:
+		if existing {
 			app.Paused = existingPaused
-		default:
-			app.Paused = app.Optional
+		} else {
+			app.Paused = app.Optional && !all && !named
 		}
 		if app.Paused {
 			paused = append(paused, app)

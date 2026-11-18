@@ -230,6 +230,7 @@ Flags:
       --all            run optional apps instead of registering them paused
       --single         choose and apply exactly one app
       --with strings   run named optional apps instead of registering them paused
+      --follow-optional  ignore registered tasks' paused state and apply each app's optional setting
 ```
 
 Examples:
@@ -256,8 +257,9 @@ Task scripts, arguments, instances, environment variables, and cron schedules
 are defined inside the ecosystem file.
 
 Re-applying keeps each already-registered task's paused or active state and
-updates every other field from the file. `--with <name>` (and `--all` for
-optional apps) activates the named apps regardless of their current state.
+updates every other field from the file; `--all` / `--with` only affect new
+optional apps. `--follow-optional` discards the current states and applies
+every app's `optional` setting again.
 
 `--single` can also be used with `pm2 task start`. It activates the chosen app
 even if the app is marked `optional: true`, and cannot be combined with

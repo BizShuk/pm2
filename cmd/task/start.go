@@ -35,6 +35,7 @@ func init() {
 func BindStartFlags(command *cobra.Command) {
 	command.Flags().Bool("all", false, "Run optional apps instead of registering them paused")
 	command.Flags().StringSlice("with", nil, "Run these optional apps instead of registering them paused (repeatable or comma-separated)")
+	command.Flags().Bool("follow-optional", false, "Ignore registered tasks' paused state and apply each app's optional setting")
 	command.Flags().Bool("single", false, "Choose and apply exactly one app from the ecosystem file")
 	command.Flags().BoolP("delete", "d", false, "Delete every task declared by the ecosystem file instead of starting it")
 }
@@ -91,14 +92,18 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read --single: %w", err)
 	}
-	if err := validateDeleteFlags(runDeleteAll, runSingle, runAll, runWith); err != nil {
+	followOptional, err := cmd.Flags().GetBool("follow-optional")
+	if err != nil {
+		return fmt.Errorf("read --follow-optional: %w", err)
+	}
+	if err := validateDeleteFlags(runDeleteAll, runSingle, runAll, followOptional, runWith); err != nil {
 		return err
 	}
 	if runDeleteAll {
 		deleteEcosystemWorkflows(cfg.Workflows, cmd.OutOrStdout())
 		return deleteEcosystemApps(cfg.Apps, cmd.OutOrStdout())
 	}
-	if err := validateSelectionFlags(runSingle, runAll, runWith); err != nil {
+	if err := validateSelectionFlags(runSingle, runAll, followOptional, runWith); err != nil {
 		return err
 	}
 	client := cliruntime.NewCLIClient(cliruntime.SocketPath())
@@ -110,9 +115,15 @@ func RunTasks(cmd *cobra.Command, args []string) error {
 		}
 		selected = []process.AppConfig{app}
 	} else {
-		registered, listErr := listRegistered(client)
-		if listErr != nil {
-			return listErr
+		// --follow-optional leaves registered empty, so every app is
+		// treated as new and gets the optional policy.
+		var registered registeredTasks
+		if !followOptional {
+			var listErr error
+			registered, listErr = listRegistered(client)
+			if listErr != nil {
+				return listErr
+			}
 		}
 		selected, paused, err = selectApps(cfg.Apps, runAll, runWith, registered)
 		if err != nil {
@@ -238,16 +249,16 @@ func registerWorkflows(workflows []workflow.Config, out io.Writer) error {
 // validateDeleteFlags keeps --delete a pure teardown verb: the selection
 // flags only describe which apps to *start*, so combining them would ask
 // the command to do two opposite things at once.
-func validateDeleteFlags(deleteAll, single, all bool, with []string) error {
-	if deleteAll && (single || all || len(with) > 0) {
-		return fmt.Errorf("--delete cannot be used with --all, --with, or --single")
+func validateDeleteFlags(deleteAll, single, all, followOptional bool, with []string) error {
+	if deleteAll && (single || all || followOptional || len(with) > 0) {
+		return fmt.Errorf("--delete cannot be used with --all, --with, --follow-optional, or --single")
 	}
 	return nil
 }
 
-func validateSelectionFlags(single, all bool, with []string) error {
-	if single && (all || len(with) > 0) {
-		return fmt.Errorf("--single cannot be used with --all or --with")
+func validateSelectionFlags(single, all, followOptional bool, with []string) error {
+	if single && (all || followOptional || len(with) > 0) {
+		return fmt.Errorf("--single cannot be used with --all, --with, or --follow-optional")
 	}
 	return nil
 }
