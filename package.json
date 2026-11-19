@@ -9,7 +9,6 @@
     "dev:taskmanager": "go run . taskmanager",
     "test": "go test ./...",
     "build": "go build -o bin/pm2 .",
-    "deploy": "go install .",
     "install": "go install .",
     "lint": "gofmt -l . && go vet ./...",
     "clean": "rm -rf bin"
