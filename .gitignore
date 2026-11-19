@@ -11,3 +11,4 @@ plans/task.md
 
 bin/
 node_modules/
+pnpm-lock.yaml
