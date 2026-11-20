@@ -10,5 +10,4 @@ pm2-test
 plans/task.md
 
 bin/
-node_modules/
-pnpm-lock.yaml
+**/node_modules/
